@@ -13,6 +13,7 @@ router = APIRouter()
 
 class ChatRequest(BaseModel):
     mensaje: str
+    historial: list = None # Opcional: [{"role": "user", "content": "..."}, ...]
 
 @router.post("/consultar")
 async def consultar_asistente(
@@ -206,39 +207,46 @@ async def consultar_asistente(
     if perfil.nutritionist:
         nombre_nutri = f"tu nutricionista {perfil.nutritionist.first_name}"
         
-    # 8. 🚀 Construcción del Prompt con Lógica Difusa Adaptativa
+    # 8. 🚀 Construcción del Prompt con Personalización Total
+    es_provisional = getattr(plan_maestro, 'estado', 'provisional_ia') == 'provisional_ia' or not getattr(plan_maestro, 'validado_nutri', False)
+    
+    # Calcular edad de forma precisa
+    edad = (datetime.now().year - perfil.birth_date.year) if perfil.birth_date else 25
+
+    # Datos de consumo real
+    consumo_real = progreso_hoy.calorias_consumidas if (progreso_hoy and progreso_hoy.calorias_consumidas) else 0.0
+    quemadas_real = progreso_hoy.calorias_quemadas if (progreso_hoy and progreso_hoy.calorias_quemadas) else 0.0
+    calorias_meta = plan_hoy_data['calorias_dia']
+    restantes = max(0, calorias_meta - consumo_real + quemadas_real)
+
     contexto_asistente = (
-        f"Eres CaloFit IA, asistente del Gimnasio World Light. "
-        f"Usuario: {perfil.first_name}. Objetivo: {plan_maestro.objetivo}. "
-        f"Tu meta calórica hoy: {plan_hoy_data['calorias_dia']} kcal (Proteínas: {plan_hoy_data['proteinas_g']}g). "
-        f"\n📊 Tu adherencia: {adherencia_pct:.0f}%, Progreso: {progreso_pct:.0f}%. "
+        f"Eres el coach experto personal de {perfil.first_name}. CONÓCELO A FONDO: "
+        f"- Perfil: {perfil.weight}kg, {perfil.height}cm, {edad} años. "
+        f"- Nivel de Actividad: {perfil.activity_level}. "
+        f"- Objetivo Principal: {perfil.goal}. "
+        f"\nSTATUS DEL DÍA DE HOY: "
+        f"- Calorías Meta: {calorias_meta} kcal. "
+        f"- Calorías Consumidas: {consumo_real} kcal. "
+        f"- Calorías Quemadas (ejercicio): {quemadas_real} kcal. "
+        f"- Por consumir: {restantes} kcal. "
+        f"\n📊 Adherencia actual: {adherencia_pct:.0f}%, Progreso histórico: {progreso_pct:.0f}%. "
         f"{mensaje_fuzzy}. "
-        f"\n🎯 Tono: {tono_instruccion} "
-        f"\n\n⚡ REGLAS IMPORTANTES: "
-        f"1. Responde en MÁXIMO 3-4 oraciones cortas. "
-        f"2. Sé directo, claro y amigable. NO uses jerga técnica excesiva. "
-        f"3. Ve al punto rápidamente. "
-        f"4. Usa emojis solo cuando sea necesario (máximo 2). "
-        f"5. Si el usuario saluda, responde brevemente y pregunta en qué puedes ayudar. "
+        f"\n⚡ REGLAS DE ORO: "
+        f"1. Dirígete a él sabiendo que pesa {perfil.weight}kg y busca {perfil.goal}. "
+        f"2. Adapta tus sugerencias de comida a su nivel de actividad: {perfil.activity_level}. "
+        f"3. Si ha consumido {consumo_real} kcal de {calorias_meta}, sé específico con lo que le falta. "
     )
     
-    if analisis_salud.get("tiene_alerta"):
-        contexto_asistente += f" ¡ALERTA DE SALUD DETECTADA!: {analisis_salud.get('tipo')}. "
-        contexto_asistente += f"Instrucción: Sé empático y sugiere: {analisis_salud.get('recomendacion_contingencia')}. "
-    
-    # Instrucciones específicas según el tipo de plan
-    if usa_fallback:
+    if es_provisional or usa_fallback:
         contexto_asistente += (
-            f"PLAN CALCULADO POR IA (no validado por nutricionista aún). "
-            f"Menciona brevemente que es temporal y sugiere consultar nutricionista. "
+            f"\n⚠️ NOTA MÉDICA: Su plan de {calorias_meta} kcal es PROVISIONAL (IA). "
+            f"Recuérdale que el nutricionista lo validará pronto."
         )
     else:
-        contexto_asistente += (
-            f"Plan validado por {nombre_nutri}. Menciónalo solo si es relevante. "
-        )
+        contexto_asistente += f"\n✅ Plan profesional ya validado por {nombre_nutri}."
     
-    # 9. Respuesta de la IA usando Groq con contexto adaptativo
-    respuesta_ia = ia_engine.asistir_cliente(contexto_asistente, request.mensaje)
+    # 9. Respuesta de la IA usando Groq con contexto adaptativo y memoria
+    respuesta_ia = ia_engine.asistir_cliente(contexto_asistente, request.mensaje, request.historial)
 
     return {
         "asistente": "CaloFit IA",
@@ -259,7 +267,7 @@ async def consultar_asistente(
                 "C": plan_hoy_data["carbohidratos_g"], 
                 "G": plan_hoy_data["grasas_g"]
             },
-            "fuente_calorica": "Modelo Regresión Gradient Boosting" if usa_fallback else "Plan Nutricional Validado"
+            "fuente_calorica": "Modelo Regresión Gradient Boosting" if usa_fallback else ("Plan Provisional IA" if es_provisional else "Plan Nutricional Validado")
         },
         "respuesta_ia": respuesta_ia
     }

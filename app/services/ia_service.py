@@ -32,6 +32,28 @@ FIT_SCALER_PATH = os.path.join(MODELS_DIR, "scaler_fitness.pkl")
 # Nota: Usamos el archivo .keras según tu carpeta local
 ANN_MODEL_PATH = os.path.join(MODELS_DIR, "ann_calories_burned_pro.keras")
 
+# ==========================================================
+# CONSTANTES DE ESTADOS DE PLANES NUTRICIONALES
+# ==========================================================
+ESTADOS_PLAN = {
+    "provisional_ia": "Plan generado automáticamente - Pendiente de validación",
+    "en_revision": "Nutricionista revisando tu plan",
+    "validado": "Plan aprobado por nutricionista",
+    "modificado": "Nutricionista realizó ajustes personalizados"
+}
+
+# Condiciones médicas que requieren validación obligatoria
+CONDICIONES_CRITICAS = [
+    "diabetes tipo 1", 
+    "insuficiencia renal", 
+    "enfermedad cardiovascular",
+    "hipertensión severa",
+    "embarazo",
+    "lactancia",
+    "trastorno alimentario",
+    "cirugía reciente"
+]
+
 class IAService:
     def __init__(self):
         print(f"🔍 Buscando modelo en: {MODEL_PATH}")
@@ -193,16 +215,108 @@ class IAService:
         except:
             return "Alerta moderada: Mantén el ritmo."
 
+    # ==========================================================
+    # FUNCIONES CENTRALIZADAS - EVITAR DUPLICACIÓN
+    # ==========================================================
+    
+    def _calcular_tmb_harris_benedict(self, genero, edad, peso, talla):
+        """
+        Fallback: Fórmula Harris-Benedict para TMB cuando el modelo ML falla.
+        genero: 1 = Masculino, 2 = Femenino
+        """
+        if genero == 1:
+            tmb = 88.362 + (13.397 * peso) + (4.799 * talla) - (5.677 * edad)
+        else:
+            tmb = 447.593 + (9.247 * peso) + (3.098 * talla) - (4.330 * edad)
+        return round(tmb, 2)
+    
+    def calcular_macros_optimizados(self, peso, objetivo_key, calorias_diarias, condiciones_medicas=""):
+        """
+        📐 FUNCIÓN CENTRALIZADA: Calcula macros por g/kg de forma unificada.
+        
+        Esta función asegura que todos los módulos usen la misma lógica:
+        - generar_plan_inicial_automatico
+        - recomendar_alimentos_con_groq
+        - Dashboard endpoints
+        
+        Args:
+            peso: Peso del cliente en kg
+            objetivo_key: Clave del objetivo (perder_agresivo, mantener, ganar_bulk, etc.)
+            calorias_diarias: Calorías totales calculadas por el modelo
+            condiciones_medicas: String con condiciones médicas del cliente
+        
+        Returns:
+            dict: {"proteinas_g": float, "carbohidratos_g": float, "grasas_g": float, "alerta_medica": str}
+        """
+        print(f"📐 Calculando macros: Peso={peso}kg, Objetivo={objetivo_key}, Calorías={calorias_diarias}")
+        
+        # 1. Determinar g/kg según objetivo
+        if "perder" in objetivo_key.lower():
+            g_proteina_kg = 2.2  # Máxima protección muscular en déficit
+            g_grasa_kg = 0.8     # Grasas base
+        elif "ganar" in objetivo_key.lower():
+            g_proteina_kg = 2.0  # Construcción muscular
+            g_grasa_kg = 1.0     # Balance hormonal para anabolismo
+        else:
+            g_proteina_kg = 1.8  # Mantenimiento
+            g_grasa_kg = 0.9
+        
+        # 2. Calcular gramos de proteína y grasa
+        proteinas_g = round(peso * g_proteina_kg, 1)
+        grasas_g = round(peso * g_grasa_kg, 1)
+        
+        # 3. Carbohidratos por diferencia (método profesional)
+        calorias_p_g = (proteinas_g * 4) + (grasas_g * 9)
+        calorias_restantes = max(0, calorias_diarias - calorias_p_g)
+        carbohidratos_g = round(calorias_restantes / 4, 1)
+        
+        # 4. Ajustes por Condiciones Médicas
+        alerta_medica = ""
+        condiciones = condiciones_medicas.lower()
+        
+        if "diabetes" in condiciones or "resistencia a la insulina" in condiciones:
+            # Límite de seguridad: máximo 3g/kg de carbohidratos
+            limite_carbos = peso * 3
+            if carbohidratos_g > limite_carbos:
+                carbohidratos_g = round(limite_carbos, 1)
+                # Recalcular calorías totales
+                calorias_ajustadas = (proteinas_g * 4) + (grasas_g * 9) + (carbohidratos_g * 4)
+                alerta_medica = f"⚠️ Ajuste por Diabetes: Carbohidratos limitados a {carbohidratos_g}g (Calorías ajustadas a {calorias_ajustadas:.0f}kcal)"
+        
+        if "hipertensión" in condiciones or "presión alta" in condiciones:
+            alerta_medica += " 🧂 REDUCIR SODIO: Evitar procesados y sal de mesa."
+        
+        print(f"✅ Macros calculados: P={proteinas_g}g, C={carbohidratos_g}g, G={grasas_g}g")
+        
+        return {
+            "proteinas_g": proteinas_g,
+            "carbohidratos_g": carbohidratos_g,
+            "grasas_g": grasas_g,
+            "alerta_medica": alerta_medica
+        }
+
     def calcular_requerimiento(self, genero, edad, peso, talla, nivel_actividad=1.2, objetivo="mantener"):
+        """
+        Calcula requerimiento calórico usando Gradient Boosting con fallback a Harris-Benedict.
+        """
+        print(f"🔬 Calculando requerimiento: Género={genero}, Edad={edad}, Peso={peso}, Talla={talla}, Nivel={nivel_actividad}, Objetivo={objetivo}")
+        
         if not self.model:
-            return None
+            print("⚠️ Modelo ML no disponible, usando Harris-Benedict como fallback")
+            basal = self._calcular_tmb_harris_benedict(genero, edad, peso, talla)
+        else:
+            try:
+                # 1. Predicción con Gradient Boosting (Basado en NHANES)
+                df = pd.DataFrame([[genero, edad, peso, talla]], 
+                                  columns=['RIAGENDR', 'RIDAGEYR', 'BMXWT', 'BMXHT'])
+                
+                pred = self.model.predict(df)
+                basal = pred.item()
+                print(f"✅ TMB calculado por ML: {basal:.2f} kcal")
+            except Exception as e:
+                print(f"❌ Error en predicción ML: {e}, usando Harris-Benedict")
+                basal = self._calcular_tmb_harris_benedict(genero, edad, peso, talla)
         
-        # 1. Predicción con Gradient Boosting (Basado en NHANES)
-        df = pd.DataFrame([[genero, edad, peso, talla]], 
-                          columns=['RIAGENDR', 'RIDAGEYR', 'BMXWT', 'BMXHT'])
-        
-        pred = self.model.predict(df)
-        basal = pred.item()
         mantenimiento = basal * nivel_actividad
         
         # 2. Ajuste por 5 Estados Metabólicos (Granularidad para Tesis)
@@ -219,6 +333,8 @@ class IAService:
         
         offset = ajuste_calorico.get(objetivo.lower(), 0)
         resultado_final = mantenimiento + offset
+        
+        print(f"📊 Resultado final: TMB={basal:.0f} * {nivel_actividad} + {offset} = {resultado_final:.0f} kcal")
             
         return round(resultado_final, 2)
 
@@ -300,57 +416,57 @@ class IAService:
 
         # Generar alerta personalizada con fuzzy logic
         alerta_personalizada = self.generar_alerta_fuzzy(adherencia_pct, progreso_pct)
-        # Usar CBF real
-        alimentos_base = []
-        if self.cbf_matrix is not None and self.cbf_scaler is not None:
-            try:
-                # Crear vector de usuario basado en perfil (mapear a features de alimentos)
-                # Features: ['calorias', 'proteina', 'carbo', 'grasa']
-                # Mapear objetivo a valores aproximados
-                objetivo = perfil_usuario.get('objetivo', 'mantener')
-                if objetivo == 'perder':
-                    user_values = [500, 50, 100, 20]  # calorias, proteina, carbo, grasa
-                elif objetivo == 'ganar':
-                    user_values = [800, 70, 150, 30]
-                else:
-                    user_values = [600, 60, 120, 25]
-                user_vector = pd.DataFrame([user_values], columns=['calorias', 'proteina', 'carbo', 'grasa'])
-                user_scaled = self.cbf_scaler.transform(user_vector)
-                # Calcular similitud coseno con matrix de alimentos
-                similarities = cosine_similarity(user_scaled, self.cbf_matrix)[0]
-                # Obtener top 5 alimentos más similares
-                top_indices = similarities.argsort()[-5:][::-1]
-                #Usar nombres genéricos ya que no tenemos dataset
-                alimentos_base = [f"Alimento saludable #{i+1}" for i in top_indices]
-                print(f"✅ CBF recomendó: {alimentos_base}")
-            except Exception as e:
-                print(f"❌ Error en CBF: {e}")
-                alimentos_base = ["pollo", "arroz", "espinacas"]  # Fallback
-        else:
-            alimentos_base = ["pollo", "arroz", "espinacas", "manzana", "yogurt"]  # Fallback
-
-        if preferencias:
-            alimentos_base = [a for a in alimentos_base if a in preferencias]
-
-        # Prompt mejorado para recomendaciones detalladas y de calidad
-        prompt = f"""
-        Eres un nutricionista experto en IA. Basado en el perfil del usuario: {perfil_usuario}.
-        Preferencias alimentarias: {preferencias or 'ninguna especificada'}.
-        Alimentos sugeridos por el sistema de recomendación (basado en similitud): {alimentos_base}.
-
-        Genera una recomendación de menú diario personalizada, saludable y motivadora, enfocada en el objetivo '{perfil_usuario.get('objetivo', 'mantener')}'.
         
-        Instrucciones:
-        - Usa platos tradicionales peruanos como base: ceviche, lomo saltado, aji de gallina, rocoto relleno, causa limeña, pollo con papas, quinoa con verduras, ensalada de frutas peruanas (lúcuma, aguaymanto, plátano), etc.
-        - Prioriza alimentos disponibles en Perú: quinoa, kiwicha, aji, lúcuma, aguaymanto, papa, maíz, frutas como plátano, mango; proteínas como pollo, pescado, huevos; vegetales frescos.
-        - Incluye desayuno, almuerzo, cena y 2 snacks/meriendas.
-        - Para cada comida: especifica platos peruanos reales o adaptados, porciones aproximadas, calorías estimadas, y distribución de macronutrientes (proteínas g, carbohidratos g, grasas g).
-        - Total diario: ~{sum([500,50,100,20] if perfil_usuario.get('objetivo')=='perder' else [600,60,120,25])} calorías, con balance: 25% proteínas, 50% carbohidratos, 25% grasas.
-        - Al final, incluye un resumen de macronutrientes totales diarios (proteínas, carbohidratos, grasas en gramos y porcentajes aproximados).
-        - Si no hay platos específicos disponibles, enfócate en recomendar distribución de macronutrientes por comida (ej. desayuno: 20% proteínas, etc.).
-        - Asegura variedad, frescura y facilidad de preparación. Evita combinaciones ilógicas; usa recetas tradicionales o simples.
-        - Sé motivador: incluye frases de aliento y consejos prácticos.
-        - Responde en español, de forma amigable y profesional.
+        # 1. Calcular calorías exactas usando el ML
+        genero_map = {"M": 1, "F": 2}
+        genero = genero_map.get(perfil_usuario.get('gender', 'M'), 1)
+        
+        # Obtener factor de actividad real
+        nivel_map = {"Sedentario": 1.20, "Ligero": 1.375, "Moderado": 1.55, "Activo": 1.725, "Muy activo": 1.90}
+        nivel = nivel_map.get(perfil_usuario.get('activity_level', 'Sedentario'), 1.20)
+        
+        calorias_reales = self.calcular_requerimiento(
+            genero, 
+            perfil_usuario.get('age', 25), 
+            perfil_usuario.get('weight', 70), 
+            perfil_usuario.get('height', 170), 
+            nivel, 
+            perfil_usuario.get('objetivo', 'mantener')
+        )
+
+        # 2. Usar función centralizada para calcular macros
+        peso = perfil_usuario.get('weight', 70)
+        objetivo = perfil_usuario.get('objetivo', 'mantener')
+        condiciones = perfil_usuario.get('medical_conditions', '')
+        
+        macros_data = self.calcular_macros_optimizados(peso, objetivo, calorias_reales, condiciones)
+        prot_g = macros_data['proteinas_g']
+        carb_g = macros_data['carbohidratos_g']
+        gras_g = macros_data['grasas_g']
+        alerta_medica_macros = macros_data['alerta_medica']
+        
+        # Combinar alertas
+        alerta_final = f"{alerta_personalizada}. {alerta_medica_macros}" if alerta_medica_macros else alerta_personalizada
+
+        # Prompt profesional para Tesis - Lógica de Equivalentes Peruanos
+        prompt = f"""
+        Eres un Nutricionista Colegiado en Perú experto en IA. 
+        REQUERIMIENTO: {calorias_reales} kcal | P: {prot_g}g, C: {carb_g}g, G: {gras_g}g.
+        
+        REGLA DE ORO: 
+        Cualquier sugerencia de alimentos debe ser adaptada a la biodiversidad y mercado peruano. 
+        Si el sistema sugiere un ingrediente genérico, sustitúyelo por su equivalente peruano:
+        - Ej: Arándanos -> Aguaymanto/Fresa nacional.
+        - Ej: Salmón -> Trucha andina/Bonito/Jurel.
+        - Ej: Kale/Greens -> Espinaca/Acelerga/Hojas de quinua.
+        - Ej: Aceite de Canola -> Aceite de Oliva/Sacha Inchi.
+        
+        MENÚ PERUANO (5 COMIDAS):
+        - Desayuno, Media Mañana, Almuerzo (principal), Media Tarde, Cena.
+        - Usa términos locales: palta, camote, papa, choclo, menestras.
+        - Indica porciones claras y el aporte calórico por comida.
+        
+        Responde en Markdown y agrega: "{alerta_final}".
         """
 
         try:
@@ -415,16 +531,20 @@ class IAService:
             calorias = self.calcular_calorias_quemadas(ej_id, 30, 5, perfil_usuario)  # 30 min, intensidad media, perfil
             ejercicios_con_calorias.append(f"{ej} (~{calorias} calorías)" if calorias else f"{ej}")
 
-        # Prompt para Groq
+        # Prompt para Groq Fitness - Adaptación al contexto nacional
         prompt = f"""
-        Eres un entrenador personal experto. Basado en el perfil: {perfil_usuario}.
-        Ejercicios sugeridos por CBF con estimación de calorías: {ejercicios_con_calorias}.
-
-        Genera una rutina de ejercicios diaria personalizada, enfocada en '{objetivo}'.
-        Incluye calentamiento, ejercicios principales (con series/reps), enfriamiento.
-        Traduce los nombres de ejercicios a términos comunes y comprensibles en español (ej. 'burpee' en vez de 'salto tuck', 'sentadilla' en vez de 'gorila squat'), y responde completamente en español.
-        Incluye las estimaciones de calorías quemadas para motivar al usuario.
-        Sé motivador, seguro y detallado.
+        Eres un Entrenador Personal experto. Perfil: {perfil_usuario}.
+        Genera una rutina diaria para el objetivo: '{objetivo}'.
+        
+        REGLA DE CONTEXTO:
+        Adapta los ejercicios a lo que un usuario en Perú suele hacer. 
+        Usa nombres estándar pero considera el entorno:
+        - Gimnasio (pesas, máquinas).
+        - Espacios públicos (trote en parque, calistenia).
+        - Deportes comunes (Fútbol, Vóley, Natación, Baile).
+        
+        Estructura la rutina con Calentamiento, Parte Principal y Estiramiento. 
+        Usa lenguaje profesional en español.
         """
         try:
             response = self.groq_client.chat.completions.create(
@@ -599,31 +719,45 @@ class IAService:
             print(f"Error en identificar_intencion_salud: {e}")
             return {"tiene_alerta": False}
 
-    def asistir_cliente(self, contexto: str, mensaje_usuario: str):
+    def asistir_cliente(self, contexto: str, mensaje_usuario: str, historial: list = None):
         """
-        Maneja la conversación general con el cliente usando Groq.
+        Maneja la conversación con memoria. 
+        historial: lista de dicts [{"role": "user/assistant", "content": "..."}]
         """
-        prompt = f"""
-        CONTEXTO DEL SISTEMA: {contexto}
-        
-        MENSAJE DEL USUARIO: {mensaje_usuario}
-        
-        INSTRUCCIÓN: Responde como CaloFit IA. Sé profesional pero motivador. 
-        Si hay una alerta de salud en el contexto, prioriza la seguridad.
-        Si el plan está validado por un nutricionista, menciónalo como autoridad.
-        Responde siempre en español.
-        """
+        # 1. Preparar el Sistema de Mensajes (System Prompt)
+        mensajes_ia = [
+            {
+                "role": "system", 
+                "content": f"""Eres CaloFit IA, el asistente experto de una plataforma de nutrición peruana.
+                CONTEXTO ACTUAL DEL USUARIO: {contexto}
+                
+                REGLAS:
+                - Recomendaciones: Solo platos peruanos reales (ej: Pollo a la plancha, Lomo Saltado, Ají de Gallina, etc).
+                - NO inventes nombres de platos extraños ni procesos inexistentes.
+                - Sé breve (máximo 40 palabras).
+                - Estructura: Mensaje corto + 1 a 3 viñetas claras.
+                - Precisión: No inventes números. Usa los del CONTEXTO. """
+            }
+        ]
+
+        # 2. Agregar historial previo si existe (Memoria)
+        if historial:
+            mensajes_ia.extend(historial[-6:]) # Enviamos los últimos 6 mensajes para no saturar tokens
+
+        # 3. Agregar el mensaje actual del usuario
+        mensajes_ia.append({"role": "user", "content": mensaje_usuario})
+
         try:
             response = self.groq_client.chat.completions.create(
                 model="llama-3.1-8b-instant",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=400,
+                messages=mensajes_ia,
+                max_tokens=500,
                 temperature=0.7
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
-            print(f"Error en chat de Groq: {e}")
-            return "Lo siento, tuve un problema al procesar tu consulta. ¿Puedes repetirla?"
+            print(f"❌ Error en chat de Groq: {e}")
+            return "Lo siento, perdí el hilo de la conversación por un momento. ¿En qué nos quedamos?"
 
     def generar_plan_inicial_automatico(self, cliente_data: dict):
         """
@@ -667,55 +801,60 @@ class IAService:
         
         calorias_diarias = self.calcular_requerimiento(genero, edad, peso, talla, nivel, objetivo_key)
         
-        # 4. Lógica de Macros por Peso (g/kg) - Los "Ladrillos" y "Hormonas"
-        # Proteína: 1.8 a 2.2 g/kg
-        if "perder" in objetivo_key:
-            g_proteina_kg = 2.2  # Máxima protección muscular en déficit
-            g_grasa_kg = 0.8     # Grasas base
-        elif "ganar" in objetivo_key:
-            g_proteina_kg = 2.0  # Construcción
-            g_grasa_kg = 1.0     # Balance hormonal para anabolismo
-        else:
-            g_proteina_kg = 1.8  # Mantenimiento
-            g_grasa_kg = 0.9
-            
-        # 5. Filtro de Seguridad: Condiciones Médicas
-        condiciones = cliente_data.get("condiciones_medicas", "").lower()
-        alerta_medica = ""
+        # 4. Usar función centralizada para calcular macros
+        condiciones_medicas = cliente_data.get("condiciones_medicas", "")
+        macros_data = self.calcular_macros_optimizados(peso, objetivo_key, calorias_diarias, condiciones_medicas)
+        
+        proteinas_g = macros_data['proteinas_g']
+        carbohidratos_g = macros_data['carbohidratos_g']
+        grasas_g = macros_data['grasas_g']
+        alerta_medica = macros_data['alerta_medica']
+        
+        # 5. Sistema de Validación Médica Mejorado
         validacion_requerida = False
+        es_condicion_critica = False
+        estado_plan = "provisional_ia"
         
-        # Ajuste dinámico por Diabetes o Hipertensión
-        if "diabetes" in condiciones or "resistencia a la insulina" in condiciones:
-            g_carbo_limit = 2.0 # Límite de seguridad
-            alerta_medica = "⚠️ Ajuste por Diabetes: Carbohidratos controlados."
-            # Si el usuario pesa mucho, esto bajará mucho sus calorías, por lo que recalculamos carbos al final
+        # Detectar condiciones críticas que requieren validación obligatoria
+        for condicion in CONDICIONES_CRITICAS:
+            if condicion in condiciones_medicas.lower():
+                es_condicion_critica = True
+                validacion_requerida = True
+                alerta_medica += f" ⚠️ IMPORTANTE: Detectada '{condicion}'. Este plan es PROVISIONAL y requiere aprobación del nutricionista antes de su uso completo."
+                estado_plan = "en_revision"
+                break
         
-        proteinas_g = round(peso * g_proteina_kg, 1)
-        grasas_g = round(peso * g_grasa_kg, 1)
-        
-        # Carbohidratos: "La Gasolina" (Balanceante)
-        calorias_p_g = (proteinas_g * 4) + (grasas_g * 9)
-        calorias_restantes = max(0, calorias_diarias - calorias_p_g)
-        carbohidratos_g = round(calorias_restantes / 4, 1)
-        
-        # Ajuste extra por seguridad médica
-        if ("diabetes" in condiciones) and (carbohidratos_g > (peso * 3)):
-            carbohidratos_g = round(peso * 3, 1)
-            calorias_diarias = (proteinas_g * 4) + (grasas_g * 9) + (carbohidratos_g * 4)
-            alerta_medica += " Plan ajustado para estabilidad glucémica."
-
-        if "hipertensión" in condiciones or "presión alta" in condiciones:
-            alerta_medica += " 🧂 REDUCIR SODIO: Evitar procesados y sal de mesa."
-
-        if any(c in condiciones for c in ["lesion", "dolor", "hernia"]):
+        # Detectar otras condiciones que ameritan revisión
+        if any(c in condiciones_medicas.lower() for c in ["lesion", "dolor", "hernia"]):
             validacion_requerida = True
             alerta_medica += " 🏥 REVISIÓN MÉDICA REQUERIDA antes de iniciar rutina fuerte."
+        
+        # Si hay condición crítica, aplicar plan ultra-conservador
+        if es_condicion_critica:
+            print(f"⚠️ Condición crítica detectada. Aplicando plan conservador.")
+            # Forzar nivel sedentario y mantenimiento
+            calorias_diarias = self._calcular_tmb_harris_benedict(genero, edad, peso, talla) * 1.2
+            # Recalcular macros con las calorías conservadoras
+            macros_data = self.calcular_macros_optimizados(peso, "mantener", calorias_diarias, condiciones_medicas)
+            proteinas_g = macros_data['proteinas_g']
+            carbohidratos_g = macros_data['carbohidratos_g']
+            grasas_g = macros_data['grasas_g']
 
         macros = {"P": proteinas_g, "C": carbohidratos_g, "G": grasas_g}
         
-        # 6. Generar Plan de 7 días
+        # 6. Generar Plan de 7 días con metadata completa
         dias_plan = []
+        mensaje_estado = ESTADOS_PLAN.get(estado_plan, "Plan en proceso")
+        
         for dia in range(1, 8):
+            # Nota para cada día según el estado
+            if es_condicion_critica:
+                nota_dia = f"🤖 Plan provisional conservador. {alerta_medica}"
+            elif alerta_medica:
+                nota_dia = f"🤖 IA: {alerta_medica}"
+            else:
+                nota_dia = f"🤖 Plan {objetivo_key.replace('_', ' ')} calculado exitosamente."
+            
             dias_plan.append({
                 "dia_numero": dia,
                 "calorias_dia": round(calorias_diarias, 2),
@@ -723,17 +862,33 @@ class IAService:
                 "carbohidratos_g": carbohidratos_g,
                 "grasas_g": grasas_g,
                 "sugerencia_entrenamiento_ia": self.generar_sugerencia_entrenamiento(objetivo_key.split('_')[0], dia),
-                "nota_asistente_ia": f"🤖 IA: {alerta_medica}" if alerta_medica else f"🤖 Plan {objetivo_key.replace('_', ' ')} calculado exitosamente.",
+                "nota_asistente_ia": nota_dia,
                 "validado_nutri": False,
-                "estado": "pendiente_validacion" if validacion_requerida else "sugerencia_ia"
+                "estado": estado_plan,
+                "requiere_validacion": validacion_requerida
             })
+        
+        # 7. Mensaje personalizado para el cliente
+        if es_condicion_critica:
+            mensaje_cliente = "🏥 Hemos detectado una condición médica importante. Este plan es ultra-conservador y PROVISIONAL. Tu nutricionista debe revisarlo antes de que lo sigas completamente. Mientras tanto, puedes usarlo como guía general."
+        elif validacion_requerida:
+            mensaje_cliente = "🤖 Este es un plan provisional diseñado para que empieces de inmediato. Tu nutricionista lo revisará y ajustará según tus necesidades específicas."
+        else:
+            mensaje_cliente = "🤖 Este plan fue generado automáticamente basándose en tus datos. Tu nutricionista lo revisará pronto para optimizarlo aún más."
         
         return {
             "calorias_diarias": round(calorias_diarias, 2),
             "macros": macros,
             "dias": dias_plan,
-            "alerta_seguridad": validacion_requerida,
-            "generado_automaticamente": True
+            "estado_plan": estado_plan,
+            "requiere_validacion": validacion_requerida,
+            "es_condicion_critica": es_condicion_critica,
+            "alerta_seguridad": alerta_medica,
+            "generado_automaticamente": True,
+            "fecha_generacion": datetime.now().isoformat(),
+            "valido_hasta_validacion": True,
+            "mensaje_cliente": mensaje_cliente,
+            "descripcion_estado": mensaje_estado
         }
 
 
