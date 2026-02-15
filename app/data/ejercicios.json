@@ -1,0 +1,1924 @@
+[
+  {
+    "id": "sentadilla_barra",
+    "nombre": "Sentadilla con Barra Trasera",
+    "alias": [
+      "Squat",
+      "Sentadilla Clásica"
+    ],
+    "grupo_muscular": [
+      "Cuádriceps",
+      "Glúteos",
+      "Core"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra",
+      "Rack",
+      "Gym"
+    ],
+    "nivel": "Intermedio",
+    "met": 6.0,
+    "tecnica": "Pies al ancho de hombros. Barra apoyada en trapecios (no cuello). Baja controlando cadera y rodillas al mismo tiempo. Espalda neutra.",
+    "errores_comunes": [
+      "Valgo de rodilla (rodillas hacia adentro)",
+      "Levantar talones",
+      "Curvar espalda baja",
+      "Mirar al techo"
+    ]
+  },
+  {
+    "id": "peso_muerto_convencional",
+    "nombre": "Peso Muerto Convencional",
+    "alias": [
+      "Deadlift"
+    ],
+    "grupo_muscular": [
+      "Isquiosurales",
+      "Glúteos",
+      "Espalda Baja",
+      "Dorsales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra",
+      "Discos",
+      "Gym"
+    ],
+    "nivel": "Avanzado",
+    "met": 6.0,
+    "tecnica": "Pies bajo la barra. Agarre prono o mixto. Cadera alta pero no paralela. Empuja el suelo con los pies. Barra pegada a las tibias.",
+    "errores_comunes": [
+      "Curvar espalda (gato)",
+      "Hipersextender al final",
+      "Separar barra del cuerpo",
+      "Usar brazos para levantar"
+    ]
+  },
+  {
+    "id": "press_banca_plano",
+    "nombre": "Press de Banca Plano",
+    "alias": [
+      "Bench Press"
+    ],
+    "grupo_muscular": [
+      "Pectoral Mayor",
+      "Tríceps",
+      "Deltoides Anterior"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Banco Plano",
+      "Barra",
+      "Gym"
+    ],
+    "nivel": "Intermedio",
+    "met": 5.0,
+    "tecnica": "Cinco puntos de apoyo (cabeza, hombros, glúteos, pie izquierdo, pie derecho). Retracción escapular. Barra baja al esternón.",
+    "errores_comunes": [
+      "Despegar glúteos del banco",
+      "Rebotar barra en pecho",
+      "Codos abiertos 90 grados (lesivo)",
+      "Muñecas dobladas"
+    ]
+  },
+  {
+    "id": "dominada_prona",
+    "nombre": "Dominadas (Pull-ups)",
+    "alias": [
+      "Dominada",
+      "Pull up"
+    ],
+    "grupo_muscular": [
+      "Dorsal Ancho",
+      "Bíceps",
+      "Antebrazo"
+    ],
+    "tipo": "Fuerza/Autocarga",
+    "equipo": [
+      "Barra de Dominadas",
+      "Parque",
+      "Casa"
+    ],
+    "nivel": "Avanzado",
+    "met": 8.0,
+    "tecnica": "Agarre ligeramente más ancho que hombros. Cuelga totalmente. Tracciona llevando el pecho a la barra. Codos hacia abajo.",
+    "errores_comunes": [
+      "Impulso con piernas (kipping)",
+      "Rango incompleto",
+      "Hombros encogidos",
+      "Cuello estirado"
+    ]
+  },
+  {
+    "id": "remo_barra",
+    "nombre": "Remo con Barra",
+    "alias": [
+      "Bent Over Row"
+    ],
+    "grupo_muscular": [
+      "Dorsales",
+      "Trapecios",
+      "Bíceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra",
+      "Gym"
+    ],
+    "nivel": "Intermedio",
+    "met": 6.0,
+    "tecnica": "Torso inclinado 45-90 grados. Espalda recta. Tracciona la barra hacia el ombligo o cadera. Codos pegados.",
+    "errores_comunes": [
+      "Eguir demasiado (poca inclinación)",
+      "Usar inercia de piernas",
+      "Muñecas dobladas"
+    ]
+  },
+  {
+    "id": "press_militar_parado",
+    "nombre": "Press Militar con Barra",
+    "alias": [
+      "Overhead Press"
+    ],
+    "grupo_muscular": [
+      "Deltoides",
+      "Tríceps",
+      "Core"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra",
+      "Gym"
+    ],
+    "nivel": "Intermedio",
+    "met": 5.5,
+    "tecnica": "De pie. Glúteos y abdomen contraídos. Empuja la barra verticalmente hasta bloquear codos. Cabeza pasa adelante al final.",
+    "errores_comunes": [
+      "Arquear espalda baja (lumbar)",
+      "Usar impulsos de pierna (Push Press)",
+      "Agarre muy ancho"
+    ]
+  },
+  {
+    "id": "estocadas",
+    "nombre": "Estocadas / Zancadas",
+    "alias": [
+      "Lunges",
+      "Tijeras"
+    ],
+    "grupo_muscular": [
+      "Cuádriceps",
+      "Glúteos"
+    ],
+    "tipo": "Fuerza/Autocarga",
+    "equipo": [
+      "Mancuernas",
+      "Casa",
+      "Gym"
+    ],
+    "nivel": "Principiante",
+    "met": 5.0,
+    "tecnica": "Paso largo adelante. Baja rodilla trasera casi al suelo. Torso vertical. Rodilla delantera no pasa excesivamente la punta.",
+    "errores_comunes": [
+      "Golpear rodilla trasera",
+      "Torso inclinado adelante",
+      "Paso muy corto",
+      "Pies en línea de cuerda floja (inestable)"
+    ]
+  },
+  {
+    "id": "flexiones",
+    "nombre": "Flexiones de Brazos",
+    "alias": [
+      "Planchas",
+      "Push ups",
+      "Lagartijas"
+    ],
+    "grupo_muscular": [
+      "Pectoral",
+      "Tríceps",
+      "Deltoides"
+    ],
+    "tipo": "Fuerza/Autocarga",
+    "equipo": [
+      "Suelo",
+      "Casa"
+    ],
+    "nivel": "Principiante",
+    "met": 3.8,
+    "tecnica": "Manos bajo hombros. Cuerpo en tabla desde cabeza a talones. Baja hasta que pecho roce suelo. Codos a 45 grados.",
+    "errores_comunes": [
+      "Cadera caída",
+      "Culo levantado",
+      "Codos abiertos (forma de T)",
+      "Cabeza colgando"
+    ]
+  },
+  {
+    "id": "plancha_abdominal",
+    "nombre": "Plancha Abdominal (Plank)",
+    "alias": [
+      "Plank",
+      "Puente"
+    ],
+    "grupo_muscular": [
+      "Core",
+      "Abdominales",
+      "Transverso"
+    ],
+    "tipo": "Resistencia/Isométrico",
+    "equipo": [
+      "Suelo",
+      "Casa"
+    ],
+    "nivel": "Principiante",
+    "met": 3.5,
+    "tecnica": "Apoyo en antebrazos y puntas de pie. Cuerpo recto como tabla. Contrae glúteos y abdomen fuerte. No aguantes la respiración.",
+    "errores_comunes": [
+      "Cadera caída (hiperlordosis)",
+      "Cadera muy alta",
+      "Mirar al frente (tensión cervical)"
+    ]
+  },
+  {
+    "id": "hip_thrust",
+    "nombre": "Empuje de Cadera",
+    "alias": [
+      "Hip Thrust",
+      "Puente de Glúteo"
+    ],
+    "grupo_muscular": [
+      "Glúteos Mayor",
+      "Isquios"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Banco",
+      "Barra/Mancuerna",
+      "Gym",
+      "Casa"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.5,
+    "tecnica": "Espalda alta apoyada en banco. Barra en cadera. Empuja con talones hasta extender cadera completamente. Mentón pegado al pecho.",
+    "errores_comunes": [
+      "Hiperxtender lumbares",
+      "No llegar al bloqueo completo",
+      "Impulso con cuello",
+      "Pies muy lejos"
+    ]
+  },
+  {
+    "id": "curl_biceps_barra",
+    "nombre": "Curl de Bíceps con Barra",
+    "alias": [
+      "Curl de pie"
+    ],
+    "grupo_muscular": [
+      "Bíceps Braquial"
+    ],
+    "tipo": "Hipertrofia",
+    "equipo": [
+      "Barra",
+      "Mancuernas",
+      "Gym",
+      "Casa"
+    ],
+    "nivel": "Principiante",
+    "met": 3.5,
+    "tecnica": "Codos pegados al cuerpo. Sube la barra contrayendo bíceps. Baja controlado. No muevas los codos.",
+    "errores_comunes": [
+      "Balancear el cuerpo (Cheat curl)",
+      "Despegar codos del torso",
+      "Rango incompleto"
+    ]
+  },
+  {
+    "id": "extension_triceps_polea",
+    "nombre": "Extensión de Tríceps en Polea",
+    "alias": [
+      "Triceps Pushdown"
+    ],
+    "grupo_muscular": [
+      "Tríceps"
+    ],
+    "tipo": "Hipertrofia",
+    "equipo": [
+      "Polea",
+      "Gym"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Codos fijos a los costados. Empuja hacia abajo hasta extender brazo. Controla la subida.",
+    "errores_comunes": [
+      "Mover los codos adelante/atrás",
+      "Usar peso corporal para empujar",
+      "Muñecas dobladas"
+    ]
+  },
+  {
+    "id": "elevaciones_laterales",
+    "nombre": "Elevaciones Laterales",
+    "alias": [
+      "Vuelos laterales"
+    ],
+    "grupo_muscular": [
+      "Deltoides Medio"
+    ],
+    "tipo": "Hipertrofia",
+    "equipo": [
+      "Mancuernas",
+      "Casa",
+      "Gym"
+    ],
+    "nivel": "Intermedio",
+    "met": 3.0,
+    "tecnica": "Brazos semi-flexionados. Sube codos hasta altura de hombros. Como si sirvieras agua con jarras.",
+    "errores_comunes": [
+      "Subir por encima de hombros",
+      "Usar inercia",
+      "Pulgares hacia arriba (quita tensión al deltoides medio)"
+    ]
+  },
+  {
+    "id": "sentadilla_bulgara",
+    "nombre": "Sentadilla Búlgara",
+    "alias": [
+      "Bulgarian Split Squat"
+    ],
+    "grupo_muscular": [
+      "Cuádriceps",
+      "Glúteos"
+    ],
+    "tipo": "Fuerza/Unilateral",
+    "equipo": [
+      "Mancuernas",
+      "Banco/Silla",
+      "Casa"
+    ],
+    "nivel": "Intermedio",
+    "met": 5.5,
+    "tecnica": "Un pie apoyado atrás en banco. Baja la rodilla trasera hacia el suelo. Mantén el peso en la pierna delantera.",
+    "errores_comunes": [
+      "Pie trasero hace la fuerza",
+      "Falta de equilibrio",
+      "Rodilla delantera inestable"
+    ]
+  },
+  {
+    "id": "burpees",
+    "nombre": "Burpees",
+    "alias": [
+      "Burpee"
+    ],
+    "grupo_muscular": [
+      "Cuerpo Completo",
+      "Cardio"
+    ],
+    "tipo": "Metabólico/HIIT",
+    "equipo": [
+      "Suelo",
+      "Casa"
+    ],
+    "nivel": "Intermedio",
+    "met": 8.0,
+    "tecnica": "Sentadilla -> Plancha -> Flexión -> Salto Vertical. Todo fluido.",
+    "errores_comunes": [
+      "Arquear espalda en la flexión",
+      "No amortiguar caída del salto",
+      "Rango incompleto"
+    ]
+  },
+  {
+    "id": "abdominales_clásicos",
+    "nombre": "Abdominales Clásicos",
+    "alias": [
+      "Banded crunch isometric hold"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Bandas Elásticas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Túmbate boca arriba con las rodillas flexionadas y pies apoyados. Manos tras la nuca sin tirar del cuello. Eleva el torso usando el abdomen hasta despegar escápulas. Baja controlado.",
+    "errores_comunes": [
+      "Tirar del cuello con las manos",
+      "Impulso brusco",
+      "No controlar la bajada"
+    ],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "limpiaparabrisas_abdomen",
+    "nombre": "Limpiaparabrisas (Abdomen)",
+    "alias": [
+      "30 Barbell Floor Wiper"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Tumbado boca arriba, sujeta una barra sobre el pecho con los brazos extendidos. Eleva las piernas juntas 90 grados. Baja las piernas hacia un lado sin tocar el suelo y luego hacia el otro.",
+    "errores_comunes": [
+      "Despegar la espalda baja del suelo",
+      "Bajar demasiado rápido",
+      "No mantener las piernas rectas"
+    ],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "empuje_de_cadera",
+    "nombre": "Empuje de Cadera",
+    "alias": [
+      "KV Barbell Hip Thrust"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Empuje de Cadera con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "extensión_de_cuádriceps",
+    "nombre": "Extensión de Cuádriceps",
+    "alias": [
+      "Kettlebell 3-point leg extension"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Pesas Rusas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Extensión de Cuádriceps con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "balanceo_con_pesa_rusa",
+    "nombre": "Balanceo con Pesa Rusa",
+    "alias": [
+      "Double Kettlebell Swing"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Pesas Rusas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Balanceo con Pesa Rusa con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "sentadilla_libre",
+    "nombre": "Sentadilla Libre",
+    "alias": [
+      "FYR2 Squat-Clean-Alternating-Press Complex"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Pesas Rusas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Sentadilla Libre con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "escaladores",
+    "nombre": "Escaladores",
+    "alias": [
+      "Dumbbell Fix Dumbbell Mountain Climber"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Escaladores con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "giros_rusos",
+    "nombre": "Giros Rusos",
+    "alias": [
+      "Dumbbell Fix Dumbbell Russian Twist"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Giros Rusos con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "press_de_suelo_floor_press",
+    "nombre": "Press de Suelo (Floor Press)",
+    "alias": [
+      "Dumbbell hollow-body floor press"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Press de Suelo (Floor Press) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "elevación_de_piernas_colgado",
+    "nombre": "Elevación de Piernas Colgado",
+    "alias": [
+      "30 Hanging Leg Raise With Dumbbell"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Elevación de Piernas Colgado con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "press_militar",
+    "nombre": "Press Militar",
+    "alias": [
+      "Holman Boat with Feet Push-Out and Overhead Press"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Press Militar con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "press_pallof_anti-rotación",
+    "nombre": "Press Pallof (Anti-Rotación)",
+    "alias": [
+      "Pallof press"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Press Pallof (Anti-Rotación) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "elevación_de_piernas_suelo",
+    "nombre": "Elevación de Piernas (Suelo)",
+    "alias": [
+      "Captain's chair leg raise"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Elevación de Piernas (Suelo) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "abdominales_en_v",
+    "nombre": "Abdominales en V",
+    "alias": [
+      "Smith machine V-up"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Máquina"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Abdominales en V con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "skin_the_cat",
+    "nombre": "Skin the Cat",
+    "alias": [],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Skin the Cat con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "zancadas___tijeras",
+    "nombre": "Zancadas / Tijeras",
+    "alias": [
+      "Jump Lunge"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Zancadas / Tijeras con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "fondos_en_paralelas",
+    "nombre": "Fondos en Paralelas",
+    "alias": [
+      "Side plank hip dip"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Fondos en Paralelas con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "polichinelas_saltos",
+    "nombre": "Polichinelas (Saltos)",
+    "alias": [
+      "Banded jumping jack"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Polichinelas (Saltos) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "puente_de_glúteos",
+    "nombre": "Puente de Glúteos",
+    "alias": [
+      "Glute bridge step-out"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Puente de Glúteos con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "vuelos_laterales",
+    "nombre": "Vuelos Laterales",
+    "alias": [
+      "Side plank lateral raise"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Vuelos Laterales con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "curl_femoral",
+    "nombre": "Curl Femoral",
+    "alias": [
+      "Single-leg curl up"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Curl Femoral con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "remo_invertido_australiano",
+    "nombre": "Remo Invertido (Australiano)",
+    "alias": [
+      "UNS Inverted row"
+    ],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Remo Invertido (Australiano) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "superman_lumbares",
+    "nombre": "Superman (Lumbares)",
+    "alias": [],
+    "grupo_muscular": [
+      "Abdominales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Pelota de Ejercicio"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Superman (Lumbares) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "salto_al_cajón",
+    "nombre": "Salto al Cajón",
+    "alias": [
+      "Lateral box jump"
+    ],
+    "grupo_muscular": [
+      "Aductores"
+    ],
+    "tipo": "Pliométricos",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Salto al Cajón con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "curl_concentrado",
+    "nombre": "Curl Concentrado",
+    "alias": [
+      "Band standing concentration curl"
+    ],
+    "grupo_muscular": [
+      "Bíceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Bandas Elásticas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Curl Concentrado con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "curl_araña",
+    "nombre": "Curl Araña",
+    "alias": [
+      "EZ-bar spider curl"
+    ],
+    "grupo_muscular": [
+      "Bíceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Curl Araña con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "curl_predicador",
+    "nombre": "Curl Predicador",
+    "alias": [
+      "Preacher Curl"
+    ],
+    "grupo_muscular": [
+      "Bíceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Curl Predicador con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "curl_de_arrastre",
+    "nombre": "Curl de Arrastre",
+    "alias": [
+      "Drag curl"
+    ],
+    "grupo_muscular": [
+      "Bíceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Curl de Arrastre con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "curl_de_bíceps",
+    "nombre": "Curl de Bíceps",
+    "alias": [],
+    "grupo_muscular": [
+      "Bíceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Curl de Bíceps con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "curl_martillo",
+    "nombre": "Curl Martillo",
+    "alias": [
+      "Incline Hammer Curls"
+    ],
+    "grupo_muscular": [
+      "Bíceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Curl Martillo con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "curl_inverso_antebrazo",
+    "nombre": "Curl Inverso (Antebrazo)",
+    "alias": [
+      "Standing Dumbbell Reverse Curl"
+    ],
+    "grupo_muscular": [
+      "Bíceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Curl Inverso (Antebrazo) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "arranque_halterofilia",
+    "nombre": "Arranque (Halterofilia)",
+    "alias": [
+      "Alternating dumbbell snatch"
+    ],
+    "grupo_muscular": [
+      "Bíceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Arranque (Halterofilia) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "elevación_de_pantorrillas",
+    "nombre": "Elevación de Pantorrillas",
+    "alias": [
+      "Calf Raises - With Bands"
+    ],
+    "grupo_muscular": [
+      "Pantorrillas"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Bandas Elásticas"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Elevación de Pantorrillas con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "prensa_de_piernas",
+    "nombre": "Prensa de Piernas",
+    "alias": [
+      "Calf Press On The Leg Press Machine"
+    ],
+    "grupo_muscular": [
+      "Pantorrillas"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Máquina"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Prensa de Piernas con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "press_de_banca",
+    "nombre": "Press de Banca",
+    "alias": [
+      "Bench Press - With Bands"
+    ],
+    "grupo_muscular": [
+      "Pecho"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Bandas Elásticas"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Press de Banca con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "elevaciones_frontales",
+    "nombre": "Elevaciones Frontales",
+    "alias": [
+      "Front Raise And Pullover"
+    ],
+    "grupo_muscular": [
+      "Pecho"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Elevaciones Frontales con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "planchas_flexiones",
+    "nombre": "Planchas (Flexiones)",
+    "alias": [
+      "Push Up to Side Plank"
+    ],
+    "grupo_muscular": [
+      "Pecho"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Planchas (Flexiones) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "natación",
+    "nombre": "Natación",
+    "alias": [],
+    "grupo_muscular": [
+      "Pecho"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 9.0,
+    "tecnica": "Realizar Natación con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "cruce_de_poleas",
+    "nombre": "Cruce de Poleas",
+    "alias": [
+      "Cable Crossover"
+    ],
+    "grupo_muscular": [
+      "Pecho"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Polea"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Cruce de Poleas con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "encogimientos_de_hombros",
+    "nombre": "Encogimientos de Hombros",
+    "alias": [
+      "Paul Carter Dumbbell Shrug"
+    ],
+    "grupo_muscular": [
+      "Pecho"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Encogimientos de Hombros con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "curl_de_muñeca",
+    "nombre": "Curl de Muñeca",
+    "alias": [
+      "Palms-down wrist curl over bench"
+    ],
+    "grupo_muscular": [
+      "Antebrazos"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Curl de Muñeca con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "paseo_de_maleta",
+    "nombre": "Paseo de Maleta",
+    "alias": [
+      "Dumbbell suitcase carry"
+    ],
+    "grupo_muscular": [
+      "Antebrazos"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Paseo de Maleta con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "press_landmine",
+    "nombre": "Press Landmine",
+    "alias": [],
+    "grupo_muscular": [
+      "Antebrazos"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Press Landmine con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "sentadilla_con_salto",
+    "nombre": "Sentadilla con Salto",
+    "alias": [
+      "Kneeling Jump Squat"
+    ],
+    "grupo_muscular": [
+      "Glúteos"
+    ],
+    "tipo": "Halterofilia",
+    "equipo": [
+      "Barra"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Sentadilla con Salto con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "thruster_sentadilla_+_press",
+    "nombre": "Thruster (Sentadilla + Press)",
+    "alias": [
+      "Kettlebell thruster"
+    ],
+    "grupo_muscular": [
+      "Glúteos"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Pesas Rusas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Thruster (Sentadilla + Press) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "peso_muerto",
+    "nombre": "Peso Muerto",
+    "alias": [
+      "Cable rope pull-through deadlift"
+    ],
+    "grupo_muscular": [
+      "Glúteos"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Polea"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Peso Muerto con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "buenos_días",
+    "nombre": "Buenos Días",
+    "alias": [
+      "Band Good Morning (Pull Through)"
+    ],
+    "grupo_muscular": [
+      "Isquiosurales"
+    ],
+    "tipo": "Powerlifting",
+    "equipo": [
+      "Bandas Elásticas"
+    ],
+    "nivel": "Principiante",
+    "met": 4.0,
+    "tecnica": "Realizar Buenos Días con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "empuje_de_trineo",
+    "nombre": "Empuje de Trineo",
+    "alias": [],
+    "grupo_muscular": [
+      "Isquiosurales"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Principiante",
+    "met": 8.0,
+    "tecnica": "Realizar Empuje de Trineo con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "hiperextensiones",
+    "nombre": "Hiperextensiones",
+    "alias": [
+      "Reverse Hyperextension"
+    ],
+    "grupo_muscular": [
+      "Isquiosurales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Máquina"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Hiperextensiones con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "vuelos_posteriores",
+    "nombre": "Vuelos Posteriores",
+    "alias": [
+      "FYR2 Bent-Over Reverse Fly"
+    ],
+    "grupo_muscular": [
+      "Dorsales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Vuelos Posteriores con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "subida_de_cuerda",
+    "nombre": "Subida de Cuerda",
+    "alias": [],
+    "grupo_muscular": [
+      "Dorsales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Subida de Cuerda con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "l-sit_escuadra",
+    "nombre": "L-Sit (Escuadra)",
+    "alias": [],
+    "grupo_muscular": [
+      "Dorsales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar L-Sit (Escuadra) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "jalón_al_pecho",
+    "nombre": "Jalón al Pecho",
+    "alias": [
+      "Close-Grip Front Lat Pulldown"
+    ],
+    "grupo_muscular": [
+      "Dorsales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Polea"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Jalón al Pecho con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "remo_sentado",
+    "nombre": "Remo Sentado",
+    "alias": [
+      "Machine seated row"
+    ],
+    "grupo_muscular": [
+      "Dorsales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Máquina"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Remo Sentado con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "muscle_up_barra_anillas",
+    "nombre": "Muscle Up (Barra/Anillas)",
+    "alias": [],
+    "grupo_muscular": [
+      "Dorsales"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Muscle Up (Barra/Anillas) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "levantamiento_de_piedra_atlas",
+    "nombre": "Levantamiento de Piedra Atlas",
+    "alias": [],
+    "grupo_muscular": [
+      "Espalda Baja"
+    ],
+    "tipo": "Strongman",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Intermedio",
+    "met": 7.0,
+    "tecnica": "Realizar Levantamiento de Piedra Atlas con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "extensiones_de_espalda",
+    "nombre": "Extensiones de Espalda",
+    "alias": [
+      "Partner Flat-Bench Back Extension"
+    ],
+    "grupo_muscular": [
+      "Espalda Baja"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Extensiones de Espalda con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "yoga_flexibilidad",
+    "nombre": "Yoga (Flexibilidad)",
+    "alias": [],
+    "grupo_muscular": [
+      "Espalda Baja"
+    ],
+    "tipo": "Estiramiento",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Yoga (Flexibilidad) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "remo_landmine",
+    "nombre": "Remo Landmine",
+    "alias": [
+      "Single-Arm Landmine Row"
+    ],
+    "grupo_muscular": [
+      "Espalda Media"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Remo Landmine con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "volteo_de_neumático",
+    "nombre": "Volteo de Neumático",
+    "alias": [],
+    "grupo_muscular": [
+      "Cuádriceps"
+    ],
+    "tipo": "Strongman",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Intermedio",
+    "met": 7.0,
+    "tecnica": "Realizar Volteo de Neumático con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "bicicleta_estática",
+    "nombre": "Bicicleta Estática",
+    "alias": [],
+    "grupo_muscular": [
+      "Cuádriceps"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Intermedio",
+    "met": 9.0,
+    "tecnica": "Realizar Bicicleta Estática con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "paseo_con_yugo",
+    "nombre": "Paseo con Yugo",
+    "alias": [],
+    "grupo_muscular": [
+      "Cuádriceps"
+    ],
+    "tipo": "Strongman",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Principiante",
+    "met": 6.0,
+    "tecnica": "Realizar Paseo con Yugo con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "escaladora",
+    "nombre": "Escaladora",
+    "alias": [],
+    "grupo_muscular": [
+      "Cuádriceps"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Máquina"
+    ],
+    "nivel": "Intermedio",
+    "met": 9.0,
+    "tecnica": "Realizar Escaladora con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "elíptica",
+    "nombre": "Elíptica",
+    "alias": [],
+    "grupo_muscular": [
+      "Cuádriceps"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Máquina"
+    ],
+    "nivel": "Intermedio",
+    "met": 9.0,
+    "tecnica": "Realizar Elíptica con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "correr_cardio",
+    "nombre": "Correr (Cardio)",
+    "alias": [
+      "Treadmill running"
+    ],
+    "grupo_muscular": [
+      "Cuádriceps"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Máquina"
+    ],
+    "nivel": "Intermedio",
+    "met": 9.0,
+    "tecnica": "Realizar Correr (Cardio) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "sentadilla_isométrica_en_pared",
+    "nombre": "Sentadilla Isométrica en Pared",
+    "alias": [],
+    "grupo_muscular": [
+      "Cuádriceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Sentadilla Isométrica en Pared con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "pilates",
+    "nombre": "Pilates",
+    "alias": [
+      "Holman Pilates Single-Leg Stretch"
+    ],
+    "grupo_muscular": [
+      "Cuádriceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Pilates con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "saltar_soga",
+    "nombre": "Saltar Soga",
+    "alias": [
+      "Holman Imaginary Jump Rope"
+    ],
+    "grupo_muscular": [
+      "Cuádriceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Peso Corporal"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Saltar Soga con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "lanzamiento_de_balón",
+    "nombre": "Lanzamiento de Balón",
+    "alias": [],
+    "grupo_muscular": [
+      "Cuádriceps"
+    ],
+    "tipo": "Pliométricos",
+    "equipo": [
+      "Pelota de Ejercicio"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Lanzamiento de Balón con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "jalón_a_la_cara",
+    "nombre": "Jalón a la Cara",
+    "alias": [
+      "Rusin Banded Face Pull"
+    ],
+    "grupo_muscular": [
+      "Hombros"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Bandas Elásticas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Jalón a la Cara con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "envión_halterofilia",
+    "nombre": "Envión (Halterofilia)",
+    "alias": [
+      "Clean and jerk"
+    ],
+    "grupo_muscular": [
+      "Hombros"
+    ],
+    "tipo": "Halterofilia",
+    "equipo": [
+      "Barra"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Envión (Halterofilia) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "boxeo_saco",
+    "nombre": "Boxeo (Saco)",
+    "alias": [
+      "Dumbbell shadow boxing"
+    ],
+    "grupo_muscular": [
+      "Hombros"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Boxeo (Saco) con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "cuerdas_de_batalla",
+    "nombre": "Cuerdas de Batalla",
+    "alias": [],
+    "grupo_muscular": [
+      "Hombros"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Otro"
+    ],
+    "nivel": "Intermedio",
+    "met": 4.0,
+    "tecnica": "Realizar Cuerdas de Batalla con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "rompecráneos",
+    "nombre": "Rompecráneos",
+    "alias": [
+      "Decline Close-Grip Bench To Skull Crusher"
+    ],
+    "grupo_muscular": [
+      "Tríceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Barra"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Rompecráneos con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "extensión_de_tríceps",
+    "nombre": "Extensión de Tríceps",
+    "alias": [
+      "Dumbbell Tricep Extension -Pronated Grip"
+    ],
+    "grupo_muscular": [
+      "Tríceps"
+    ],
+    "tipo": "Fuerza",
+    "equipo": [
+      "Mancuernas"
+    ],
+    "nivel": "Principiante",
+    "met": 3.0,
+    "tecnica": "Realizar Extensión de Tríceps con técnica controlada. Consultar instructor para corrección postural.",
+    "errores_comunes": [],
+    "origen": "dataset_importado"
+  },
+  {
+    "id": "pichanga_futbol",
+    "nombre": "Pichanga (Fútbol Sala / Fulbito)",
+    "grupo_muscular": [
+      "Piernas",
+      "Cardio"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Balón",
+      "Amigos"
+    ],
+    "nivel": "Variable",
+    "met": 8.0,
+    "tecnica": "Jugar un partido amistoso intenso. Correr, frenar y patear. Excelente cardio intervalico (HIIT).",
+    "origen": "peru_lifestyle"
+  },
+  {
+    "id": "voley_calle",
+    "nombre": "Vóley (Callejero / Playa)",
+    "grupo_muscular": [
+      "Piernas",
+      "Hombros",
+      "Cardio"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Balón",
+      "Net"
+    ],
+    "nivel": "Variable",
+    "met": 6.0,
+    "tecnica": "Partido de vóley recreativo o competitivo. Saltos y desplazamientos laterales.",
+    "origen": "peru_lifestyle"
+  },
+  {
+    "id": "baile_salsa_cumbia",
+    "nombre": "Baile (Salsa / Cumbia / Merengue)",
+    "grupo_muscular": [
+      "Piernas",
+      "Core",
+      "Cardio"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Música"
+    ],
+    "nivel": "Principiante",
+    "met": 5.5,
+    "tecnica": "Bailar ritmos latinos de forma continua. Mantiene el ritmo cardiaco elevado y quema calorías divirtiéndose.",
+    "origen": "peru_lifestyle"
+  },
+  {
+    "id": "marinera_nortena",
+    "nombre": "Marinera Norteña (Baile)",
+    "grupo_muscular": [
+      "Piernas",
+      "Core",
+      "Cardio"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Pañuelo"
+    ],
+    "nivel": "Avanzado",
+    "met": 7.5,
+    "tecnica": "Danza tradicional de alta exigencia física. Requiere postura, fuerza en piernas y resistencia.",
+    "origen": "peru_lifestyle"
+  },
+  {
+    "id": "huayno_zapateo",
+    "nombre": "Huayno (Zapateo Intenso)",
+    "grupo_muscular": [
+      "Piernas",
+      "Cardio"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Música"
+    ],
+    "nivel": "Intermedio",
+    "met": 7.0,
+    "tecnica": "Zapateo rítmico andino. Alto impacto cardiovascular y trabajo de pantorrillas.",
+    "origen": "peru_lifestyle"
+  },
+  {
+    "id": "surf",
+    "nombre": "Surf (Tabla Hawaiana)",
+    "grupo_muscular": [
+      "Espalda",
+      "Hombros",
+      "Core"
+    ],
+    "tipo": "Fuerza / Cardio",
+    "equipo": [
+      "Tabla",
+      "Mares Peruanos"
+    ],
+    "nivel": "Intermedio",
+    "met": 5.0,
+    "tecnica": "Remar contra las olas y pararse en la tabla. Gran trabajo de espalda y equilibrio.",
+    "origen": "peru_lifestyle"
+  },
+  {
+    "id": "subir_escaleras_cerro",
+    "nombre": "Subir Escaleras / Cerros",
+    "grupo_muscular": [
+      "Piernas",
+      "Glúteos",
+      "Cardio"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Escaleras"
+    ],
+    "nivel": "Intermedio",
+    "met": 8.5,
+    "tecnica": "Subir pendientes o escaleras a buen ritmo. Excelente para glúteos y corazón.",
+    "origen": "peru_lifestyle"
+  },
+  {
+    "id": "limpieza_hogar_fondo",
+    "nombre": "Limpieza Profunda del Hogar",
+    "grupo_muscular": [
+      "Cuerpo Completo"
+    ],
+    "tipo": "Cardio Ligero",
+    "equipo": [
+      "Escoba",
+      "Trapeador"
+    ],
+    "nivel": "Principiante",
+    "met": 3.5,
+    "tecnica": "Limpiar pisos, ventanas y mover muebles. Actividad física no estructurada (NEAT).",
+    "origen": "peru_lifestyle"
+  }
+]

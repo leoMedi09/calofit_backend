@@ -14,6 +14,8 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     mensaje: str
     historial: list = None # Opcional: [{"role": "user", "content": "..."}, ...]
+    contexto_manual: str = None # 🛠️ Para pruebas en Postman (Sobrescribe datos de BD)
+    override_ia: str = None # 🛠️ DEBUG: Envía una respuesta de IA manual para probar el parser
 
 @router.post("/consultar")
 async def consultar_asistente(
@@ -212,6 +214,29 @@ async def consultar_asistente(
     
     # Calcular edad de forma precisa
     edad = (datetime.now().year - perfil.birth_date.year) if perfil.birth_date else 25
+    
+    # Formatear condiciones médicas separando alergias, dieta y condiciones
+    alergias = []
+    preferencias_dieta = []
+    condiciones_medicas = []
+    
+    if perfil.medical_conditions:
+        for cond in perfil.medical_conditions:
+            cond_lower = cond.lower()
+            # Detectar alergias
+            if any(palabra in cond_lower for palabra in ["alérgico", "alergia", "intolerancia"]):
+                alergias.append(cond)
+            # Detectar preferencias dietéticas
+            elif any(palabra in cond_lower for palabra in ["vegano", "vegetariano", "pescetariano", "halal", "kosher"]):
+                preferencias_dieta.append(cond)
+            # El resto son condiciones médicas
+            else:
+                condiciones_medicas.append(cond)
+    
+    # Formatear para el prompt
+    texto_alergias = ", ".join(alergias) if alergias else "Ninguna"
+    texto_dieta = ", ".join(preferencias_dieta) if preferencias_dieta else "Omnívoro"
+    texto_condiciones = ", ".join(condiciones_medicas) if condiciones_medicas else "Ninguna"
 
     # Datos de consumo real
     consumo_real = progreso_hoy.calorias_consumidas if (progreso_hoy and progreso_hoy.calorias_consumidas) else 0.0
@@ -219,22 +244,36 @@ async def consultar_asistente(
     calorias_meta = plan_hoy_data['calorias_dia']
     restantes = max(0, calorias_meta - consumo_real + quemadas_real)
 
+    # Inferir la meta REAL basándose en los macros (más confiable que el label 'goal')
+    proteinas_g = plan_hoy_data['proteinas_g']
+    if calorias_meta >= 2800 and proteinas_g >= 140:
+        objetivo_real = "GANAR MASA MUSCULAR (Bulking)"
+    elif calorias_meta <= 1800:
+        objetivo_real = "PERDER PESO / DEFINIR (Cutting)"
+    else:
+        objetivo_real = "MANTENER PESO (Mantenimiento)"
+
     contexto_asistente = (
         f"Eres el coach experto personal de {perfil.first_name}. CONÓCELO A FONDO: "
         f"- Perfil: {perfil.weight}kg, {perfil.height}cm, {edad} años. "
         f"- Nivel de Actividad: {perfil.activity_level}. "
-        f"- Objetivo Principal: {perfil.goal}. "
+        f"- Objetivo REAL (inferido de macros): {objetivo_real}. "
+        f"\n🚨 RESTRICCIONES ABSOLUTAS (CRÍTICO - FALLO = PENALIZACIÓN): "
+        f"- PREFERENCIA DIETÉTICA: {texto_dieta} (SI ES VEGANO: PROHIBIDO sugerir carne, pollo, pescado, huevos, lácteos, miel). "
+        f"- ALERGIAS: {texto_alergias} (PROHIBIDO usar estos ingredientes o derivados). "
+        f"- CONDICIONES MÉDICAS: {texto_condiciones}. "
         f"\nSTATUS DEL DÍA DE HOY: "
-        f"- Calorías Meta: {calorias_meta} kcal. "
-        f"- Calorías Consumidas: {consumo_real} kcal. "
-        f"- Calorías Quemadas (ejercicio): {quemadas_real} kcal. "
-        f"- Por consumir: {restantes} kcal. "
+        f"- Meta: {calorias_meta} kcal (P: {plan_hoy_data['proteinas_g']}g, C: {plan_hoy_data['carbohidratos_g']}g, G: {plan_hoy_data['grasas_g']}g). "
+        f"- Consumidas: {consumo_real} kcal. "
+        f"- Restantes: {restantes} kcal. "
         f"\n📊 Adherencia actual: {adherencia_pct:.0f}%, Progreso histórico: {progreso_pct:.0f}%. "
         f"{mensaje_fuzzy}. "
-        f"\n⚡ REGLAS DE ORO: "
-        f"1. Dirígete a él sabiendo que pesa {perfil.weight}kg y busca {perfil.goal}. "
-        f"2. Adapta tus sugerencias de comida a su nivel de actividad: {perfil.activity_level}. "
-        f"3. Si ha consumido {consumo_real} kcal de {calorias_meta}, sé específico con lo que le falta. "
+        f"\n⚡ REGLAS SEGURIDAD/PERSONALIZACIÓN: "
+        f"1. NUNCA violar PREFERENCIAS DIETÉTICAS ({texto_dieta}) ni ALERGIAS ({texto_alergias}). "
+        f"2. Si tiene CONDICIONES MÉDICAS ({texto_condiciones}), evita alimentos/ejercicios prohibidos. "
+        f"3. PROACTIVIDAD LOCAL: Sugiere alimentos PERUANOS (Pollo a la Brasa, Lomo, Ceviche, Quinua, Camote) y ejercicios conocidos (Pichanga, Vóley). "
+        f"4. Adapta porciones a su peso de {perfil.weight}kg y nivel {perfil.activity_level}. "
+        f"5. Sé empático con su historial de {progreso_pct:.0f}% de progreso. "
     )
     
     if es_provisional or usa_fallback:
@@ -245,8 +284,26 @@ async def consultar_asistente(
     else:
         contexto_asistente += f"\n✅ Plan profesional ya validado por {nombre_nutri}."
     
+    # 🛠️ DEBUG/TESTING: Sobrescribir contexto si viene manual (para Postman)
+    if request.contexto_manual:
+        print(f"🛠️ [DEBUG] Usando contexto manual desde Postman: {request.contexto_manual[:50]}...")
+        contexto_asistente = request.contexto_manual
+
     # 9. Respuesta de la IA usando Groq con contexto adaptativo y memoria
-    respuesta_ia = ia_engine.asistir_cliente(contexto_asistente, request.mensaje, request.historial)
+    if request.override_ia:
+        print(f"🛠️ [DEBUG] Modo OVERRIDE activado. Usando respuesta manual para probar el parser.")
+        respuesta_ia = request.override_ia
+    else:
+        respuesta_ia = ia_engine.asistir_cliente(
+            contexto=contexto_asistente, 
+            mensaje_usuario=request.mensaje, 
+            historial=request.historial,
+            tono_aplicado=tono_instruccion
+        )
+
+    # 10. Parsear respuesta para Flutter (estructurada en secciones)
+    from app.services.response_parser import parsear_respuesta_para_frontend
+    respuesta_estructurada = parsear_respuesta_para_frontend(respuesta_ia)
 
     return {
         "asistente": "CaloFit IA",
@@ -269,7 +326,8 @@ async def consultar_asistente(
             },
             "fuente_calorica": "Modelo Regresión Gradient Boosting" if usa_fallback else ("Plan Provisional IA" if es_provisional else "Plan Nutricional Validado")
         },
-        "respuesta_ia": respuesta_ia
+        "respuesta_ia": respuesta_ia,  # Texto completo (legacy)
+        "respuesta_estructurada": respuesta_estructurada  # 🆕 JSON estructurado para Flutter
     }
 
 @router.post("/log-inteligente")
