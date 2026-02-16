@@ -1,5 +1,45 @@
 [
   {
+    "alimento": "tofu",
+    "alias": [
+      "queso de soya"
+    ],
+    "unidades_comunes": [
+      {
+        "nombre": "tajo",
+        "gramos": 100
+      },
+      {
+        "nombre": "unidad",
+        "gramos": 100
+      }
+    ],
+    "proteina_100g": 8.1,
+    "carbohindratos_100g": 1.9,
+    "grasas_100g": 4.8,
+    "calorias_100g": 76.0,
+    "fuente": "USDA (Agregado Manualmente)",
+    "categoria": "Vegano"
+  },
+  {
+    "alimento": "seitán",
+    "proteina_100g": 24.0,
+    "carbohindratos_100g": 5.0,
+    "grasas_100g": 2.0,
+    "calorias_100g": 140.0,
+    "fuente": "USDA (Agregado Manualmente)",
+    "categoria": "Vegano"
+  },
+  {
+    "alimento": "arroz integral cocido",
+    "proteina_100g": 2.6,
+    "carbohindratos_100g": 23.0,
+    "grasas_100g": 0.9,
+    "calorias_100g": 111.0,
+    "fuente": "USDA (Agregado Manualmente)",
+    "categoria": "Cereales"
+  },
+  {
     "alimento": "achita, kiwicha o achis",
     "proteina_100g": 12.8,
     "carbohindratos_100g": 69.1,
@@ -10,6 +50,21 @@
   },
   {
     "alimento": "arroz pilado o pulido cocido",
+    "alias": [
+      "taza de arroz",
+      "arroz cocido",
+      "arroz"
+    ],
+    "unidades_comunes": [
+      {
+        "nombre": "taza",
+        "gramos": 160
+      },
+      {
+        "nombre": "porcion",
+        "gramos": 160
+      }
+    ],
     "proteina_100g": 2.4,
     "carbohindratos_100g": 25.2,
     "grasas_100g": 0.1,
@@ -19,6 +74,11 @@
   },
   {
     "alimento": "arroz blanco corriente",
+    "alias": [
+      "arroz blanco",
+      "arroz cocido",
+      "arroz"
+    ],
     "proteina_100g": 7.8,
     "carbohindratos_100g": 77.6,
     "grasas_100g": 0.7,
@@ -937,6 +997,19 @@
   },
   {
     "alimento": "pan árabe",
+    "alias": [
+      "pan pita"
+    ],
+    "unidades_comunes": [
+      {
+        "nombre": "unidad",
+        "gramos": 40
+      },
+      {
+        "nombre": "pieza",
+        "gramos": 40
+      }
+    ],
     "proteina_100g": 10.3,
     "carbohindratos_100g": 56.7,
     "grasas_100g": 3.5,
@@ -964,6 +1037,16 @@
   },
   {
     "alimento": "pan ciabatta",
+    "alias": [
+      "pan de agua",
+      "ciabatta"
+    ],
+    "unidades_comunes": [
+      {
+        "nombre": "unidad",
+        "gramos": 60
+      }
+    ],
     "proteina_100g": 9.2,
     "carbohindratos_100g": 55.0,
     "grasas_100g": 2.0,
@@ -3232,6 +3315,22 @@
   },
   {
     "alimento": "plátano maduro",
+    "alias": [
+      "platano",
+      "banano",
+      "seda",
+      "fruta"
+    ],
+    "unidades_comunes": [
+      {
+        "nombre": "unidad",
+        "gramos": 120
+      },
+      {
+        "nombre": "platano",
+        "gramos": 120
+      }
+    ],
     "proteina_100g": 1.2,
     "carbohindratos_100g": 29.6,
     "grasas_100g": 0.2,
@@ -5752,6 +5851,11 @@
   },
   {
     "alimento": "pollo, pechuga cocida de**",
+    "alias": [
+      "pechuga de pollo",
+      "pollo cocido",
+      "pechuga"
+    ],
     "proteina_100g": 18.9,
     "carbohindratos_100g": 8.8,
     "grasas_100g": 11.3,
@@ -6346,6 +6450,22 @@
   },
   {
     "alimento": "huevo de gallina entero, sancochado en agua",
+    "alias": [
+      "huevo sancochado",
+      "huevo duro",
+      "huevo cocido",
+      "huevo"
+    ],
+    "unidades_comunes": [
+      {
+        "nombre": "unidad",
+        "gramos": 50
+      },
+      {
+        "nombre": "huevo",
+        "gramos": 50
+      }
+    ],
     "proteina_100g": 12.8,
     "carbohindratos_100g": 0.0,
     "grasas_100g": 9.9,
@@ -8092,6 +8212,21 @@
   },
   {
     "alimento": "papa canchan",
+    "alias": [
+      "papa roja",
+      "papa rosada",
+      "papa"
+    ],
+    "unidades_comunes": [
+      {
+        "nombre": "unidad",
+        "gramos": 100
+      },
+      {
+        "nombre": "papa",
+        "gramos": 100
+      }
+    ],
     "proteina_100g": 2.4,
     "carbohindratos_100g": 19.1,
     "grasas_100g": 0.1,

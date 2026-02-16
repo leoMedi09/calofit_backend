@@ -1,5 +1,129 @@
 [
   {
+    "id": "planchas_pushups",
+    "nombre": "Planchas (Push-ups)",
+    "alias": [
+      "Push ups",
+      "Lagartijas",
+      "Planchas",
+      "Flexiones"
+    ],
+    "grupo_muscular": [
+      "Pectorales",
+      "Tríceps",
+      "Hombros"
+    ],
+    "musculo_principal": "Pectorales",
+    "es_cardio": false,
+    "tipo": "Fuerza/Autocarga",
+    "equipo": [
+      "Suelo"
+    ],
+    "ubicacion": [
+      "gym",
+      "casa",
+      "outdoor"
+    ],
+    "nivel": "Principiante",
+    "met": 3.8,
+    "tecnica": "Manos a la anchura de hombros. Cuerpo recto como una tabla. Baja hasta que el pecho roce el suelo y empuja hacia arriba.",
+    "errores_comunes": [
+      "Arquear la espalda",
+      "Codos muy abiertos",
+      "No bajar completo"
+    ]
+  },
+  {
+    "id": "abdominales_crunch",
+    "nombre": "Abdominales (Crunch)",
+    "alias": [
+      "Crunches",
+      "Abdominales",
+      "Sit-ups"
+    ],
+    "grupo_muscular": [
+      "Abdomen"
+    ],
+    "musculo_principal": "Abdomen",
+    "es_cardio": false,
+    "tipo": "Fuerza/Autocarga",
+    "equipo": [
+      "Suelo",
+      "Colchoneta"
+    ],
+    "ubicacion": [
+      "gym",
+      "casa",
+      "outdoor"
+    ],
+    "nivel": "Principiante",
+    "met": 2.8,
+    "tecnica": "Tumbado boca arriba, rodillas flexionadas. Eleva ligeramente el tronco concentrando la fuerza en el abdomen. No tires del cuello.",
+    "errores_comunes": [
+      "Jalar el cuello con las manos",
+      "Elevar demasiado la zona lumbar"
+    ]
+  },
+  {
+    "id": "pichanga_futbol",
+    "nombre": "Pichanga (Fútbol Sala / Fulbito)",
+    "alias": [
+      "Fútbol",
+      "Fulbito",
+      "Pichanga",
+      "Soccer"
+    ],
+    "grupo_muscular": [
+      "Piernas",
+      "Core",
+      "Cardio"
+    ],
+    "tipo": "Deporte Social",
+    "equipo": [
+      "Balón",
+      "Zapatillas"
+    ],
+    "ubicacion": [
+      "outdoor",
+      "social"
+    ],
+    "nivel": "Principiante",
+    "met": 8.0,
+    "tecnica": "Juego colectivo de intensidad intermitente. Mantener hidratación. Calentamiento previo de tobillos y rodillas.",
+    "errores_comunes": [
+      "No calentar",
+      "No hidratarse"
+    ]
+  },
+  {
+    "id": "trote_ligero",
+    "nombre": "Taller de Trote / Carrera",
+    "alias": [
+      "Correr",
+      "Trotar",
+      "Running",
+      "Jogging"
+    ],
+    "grupo_muscular": [
+      "Piernas",
+      "Cardio"
+    ],
+    "tipo": "Cardio",
+    "equipo": [
+      "Zapatillas"
+    ],
+    "ubicacion": [
+      "outdoor",
+      "gym"
+    ],
+    "nivel": "Principiante",
+    "met": 7.0,
+    "tecnica": "Mantener postura erguida. Aterrizaje con el mediopié.",
+    "errores_comunes": [
+      "Taloneo excesivo"
+    ]
+  },
+  {
     "id": "sentadilla_barra",
     "nombre": "Sentadilla con Barra Trasera",
     "alias": [
@@ -11,11 +135,16 @@
       "Glúteos",
       "Core"
     ],
+    "musculo_principal": "Cuádriceps",
+    "es_cardio": false,
     "tipo": "Fuerza",
     "equipo": [
       "Barra",
       "Rack",
       "Gym"
+    ],
+    "ubicacion": [
+      "gym"
     ],
     "nivel": "Intermedio",
     "met": 6.0,
@@ -39,11 +168,16 @@
       "Espalda Baja",
       "Dorsales"
     ],
+    "musculo_principal": "Isquiosurales",
+    "es_cardio": false,
     "tipo": "Fuerza",
     "equipo": [
       "Barra",
       "Discos",
       "Gym"
+    ],
+    "ubicacion": [
+      "gym"
     ],
     "nivel": "Avanzado",
     "met": 6.0,
@@ -66,11 +200,16 @@
       "Tríceps",
       "Deltoides Anterior"
     ],
+    "musculo_principal": "Pectoral Mayor",
+    "es_cardio": false,
     "tipo": "Fuerza",
     "equipo": [
       "Banco Plano",
       "Barra",
       "Gym"
+    ],
+    "ubicacion": [
+      "gym"
     ],
     "nivel": "Intermedio",
     "met": 5.0,
@@ -98,7 +237,13 @@
     "equipo": [
       "Barra de Dominadas",
       "Parque",
-      "Casa"
+      "Casa",
+      "Gym"
+    ],
+    "ubicacion": [
+      "gym",
+      "outdoor",
+      "casa"
     ],
     "nivel": "Avanzado",
     "met": 8.0,

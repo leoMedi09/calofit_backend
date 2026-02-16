@@ -80,17 +80,18 @@ async def consultar_asistente(
             objetivo=objetivo
         )
         
-        # Calcular macros dinámicos según objetivo
-        if objetivo == "perder":
-            pct_proteina, pct_carbohidratos, pct_grasas = 0.35, 0.30, 0.35
-        elif objetivo == "ganar":
-            pct_proteina, pct_carbohidratos, pct_grasas = 0.30, 0.45, 0.25
-        else:
-            pct_proteina, pct_carbohidratos, pct_grasas = 0.30, 0.40, 0.30
+        # Calcular macros usando la lógica centralizada de la IA
+        condiciones_medicas = ", ".join(perfil.medical_conditions) if perfil.medical_conditions else ""
+        macros_data = ia_engine.calcular_macros_optimizados(
+            peso=perfil.weight,
+            objetivo=objetivo,
+            calorias=calorias_fallback,
+            condiciones_medicas=condiciones_medicas
+        )
         
-        proteinas_g = round((calorias_fallback * pct_proteina) / 4, 1)
-        carbohidratos_g = round((calorias_fallback * pct_carbohidratos) / 4, 1)
-        grasas_g = round((calorias_fallback * pct_grasas) / 9, 1)
+        proteinas_g = macros_data['proteinas_g']
+        carbohidratos_g = macros_data['carbohidratos_g']
+        grasas_g = macros_data['grasas_g']
         
         # Crear objeto de datos simulado
         plan_hoy_data = {
@@ -303,7 +304,7 @@ async def consultar_asistente(
 
     # 10. Parsear respuesta para Flutter (estructurada en secciones)
     from app.services.response_parser import parsear_respuesta_para_frontend
-    respuesta_estructurada = parsear_respuesta_para_frontend(respuesta_ia)
+    respuesta_estructurada = parsear_respuesta_para_frontend(respuesta_ia, mensaje_usuario=request.mensaje)
 
     return {
         "asistente": "CaloFit IA",
@@ -323,6 +324,12 @@ async def consultar_asistente(
                 "P": plan_hoy_data["proteinas_g"], 
                 "C": plan_hoy_data["carbohidratos_g"], 
                 "G": plan_hoy_data["grasas_g"]
+            },
+            "progreso_diario": {
+                "consumido": round(consumo_real, 1),
+                "meta": round(calorias_meta, 1),
+                "restante": round(restantes, 1),
+                "quemado": round(quemadas_real, 1)
             },
             "fuente_calorica": "Modelo Regresión Gradient Boosting" if usa_fallback else ("Plan Provisional IA" if es_provisional else "Plan Nutricional Validado")
         },

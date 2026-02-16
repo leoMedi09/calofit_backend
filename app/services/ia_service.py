@@ -336,21 +336,34 @@ class IAService:
         """
         print(f"🔬 Calculando requerimiento: Género={genero}, Edad={edad}, Peso={peso}, Talla={talla}, Nivel={nivel_actividad}, Objetivo={objetivo}")
         
+        # 0. Cálculo Base Harris-Benedict (Baseline de Seguridad)
+        basal_hb = self._calcular_tmb_harris_benedict(genero, edad, peso, talla)
+        
         if not self.model:
-            print("⚠️ Modelo ML no disponible, usando Harris-Benedict como fallback")
-            basal = self._calcular_tmb_harris_benedict(genero, edad, peso, talla)
+            print("⚠️ Modelo ML no disponible, usando Harris-Benedict como baseline")
+            basal = basal_hb
         else:
             try:
-                # 1. Predicción con Gradient Boosting (Basado en NHANES)
+                # 1. Predicción con Machine Learning
                 df = pd.DataFrame([[genero, edad, peso, talla]], 
                                   columns=['RIAGENDR', 'RIDAGEYR', 'BMXWT', 'BMXHT'])
                 
                 pred = self.model.predict(df)
-                basal = pred.item()
-                print(f"✅ TMB calculado por ML: {basal:.2f} kcal")
+                basal_ml = pred.item()
+                
+                # 🛡️ SANITY CHECK (v1.6): Blindaje Clínico Agresivo
+                error_relativo = abs(basal_ml - basal_hb) / basal_hb
+                if error_relativo > 0.15: # Desviación mayor al 15%
+                    print(f"⚠️ [IA-SHIELD] ML {basal_ml:.0f} vs HB {basal_hb:.0f} ({error_relativo*100:.1f}%) - Desviación excesiva.")
+                    # Si el ML falla por mucho, confiamos 95% en Harris-Benedict (valor clínico seguro)
+                    basal = (basal_hb * 0.95) + (basal_ml * 0.05)
+                    print(f"⚖️ Ajuste clínico aplicado: {basal:.2f} kcal")
+                else:
+                    basal = basal_ml
+                    print(f"✅ TMB calculado por ML: {basal:.2f} kcal")
             except Exception as e:
                 print(f"❌ Error en predicción ML: {e}, usando Harris-Benedict")
-                basal = self._calcular_tmb_harris_benedict(genero, edad, peso, talla)
+                basal = basal_hb
         
         mantenimiento = basal * nivel_actividad
         
@@ -666,9 +679,13 @@ class IAService:
             "es_ejercicio": false
         }}
         
-        Si el texto describe un ejercicio, pon "es_comida": false y "es_ejercicio": true, 
-        y estima las calorías quemadas (en positivo).
-        Si no puedes identificar nada, devuelve ceros.
+        REGLAS CRÍTICAS (FALLO CERO):
+        1. COMIDA: Calcula calorias y macros sumarizados siempre.
+        2. EJERCICIO: Si detectas ejercicio, "es_comida": false, "es_ejercicio": true.
+           ⚠️ OBLIGATORIO: DEBES CALCULAR CALORÍAS QUEMADAS (aprox 10 cal/min para intenso, 5 cal/min moderado).
+           Ejemplo: "Corrí 30 min" -> 30 * 10 = 300 kcal.
+           NUNCA DEVUELVAS 0 si hay mención de tiempo o esfuerzo.
+        3. SI NO HAY INFORMACIÓN: Devuelve todo en 0.
         """
         try:
             response = self.groq_client.chat.completions.create(
@@ -774,6 +791,9 @@ class IAService:
 
             # --- BASE DE DATOS DE EJERCICIOS ---
             if hasattr(self, 'datos_ejercicios') and self.datos_ejercicios:
+                msg_low = mensaje_usuario.lower()
+                es_gym = any(k in msg_low for k in ["gym", "gimnasio", "pesas", "musculo", "fuerza", "hipertrofia"])
+                
                 # 1. Gold Standard (Estándar mundial)
                 gold_standard = [e for e in self.datos_ejercicios if e.get('origen') == 'gold_standard']
                 # 2. Peruanos (Lifestyle/Pichangas)
@@ -781,12 +801,15 @@ class IAService:
                 # 3. Importados (Gym)
                 otros = [e for e in self.datos_ejercicios if e.get('origen') == 'dataset_importado']
                 
-                # Muestra estratégica: Priorizar calidad sobre cantidad
-                muestra_ej = peruanos[:3] + gold_standard[:5]
+                # Muestra estratégica: Si pide GYM, EXCLUIR peruanos (Pichanga) para evitar confusiones
+                if es_gym:
+                    muestra_ej = gold_standard[:15] + otros[:10]
+                    texto_extra += "\n### CONTEXTO GIMNASIO ACTIVO: Sugiere máquinas, pesas o cardio indoor. PROHIBIDO: Fútbol/Pichanga."
+                else:
+                    muestra_ej = peruanos[:4] + gold_standard[:4]
                 
                 texto_extra += "\n### BASE DE DATOS DE EJERCICIOS (MUESTRA):\n"
                 texto_extra += json.dumps(muestra_ej, ensure_ascii=False)
-                texto_extra += "\n...(USA SIEMPRE NOMBRES EN ESPAÑOL PERUANO)."
                 # --- FILTRO VEGANO HARDCORE ---
                 es_vegano = "vegano" in contexto.lower() or "vegetariano" in contexto.lower()
                 if es_vegano:
@@ -832,6 +855,10 @@ class IAService:
                         if 'proteina_100g' in v: # Es un alimento/plato
                             texto_extra += f"- {v.get('nombre')} (P: {v.get('proteina_100g')}g, C: {v.get('carbohindratos_100g')}g, G: {v.get('grasas_100g')}g, Cal: {v.get('calorias_100g')}kcal por 100g)\n"
                         else: # Es un ejercicio
+                            # v18.8: Filtrar deportes si es una petición de RUTINA
+                            es_deporte_social = any(k in v.get('nombre', '').lower() for k in ["pichanga", "fútbol", "futbol", "vóley", "voley", "fulbito"])
+                            if "rutina" in mensaje_usuario.lower() and es_deporte_social:
+                                continue
                             texto_extra += f"- {v.get('nombre')} (MET: {v.get('met', 5.0)})\n"
                     texto_extra += "\n(IMPORTANTE: Prioriza Desayunos ligeros si es mañana. EVITA Platos de almuerzo pesados)."
 
@@ -842,43 +869,114 @@ class IAService:
         if "vegano" in contexto.lower() or "vegetariano" in contexto.lower():
              texto_extra += "\n\n⛔ ALERTA VEGANA CRÍTICA: El usuario es VEGANO/VEGETARIANO. PROHIBIDO: Carne, Pollo, Pescado, Huevos, Leche, Queso, Miel. ¡NI UNA SOLA TRAZA! Usa: Tofu, Soya, Quinua, Menestras, Seitán."
 
+        # (v11.5 - Prompt Dinámico de Intención)
+        es_consulta_info = False
+        keywords_info = ["cuantas calorias", "qué es", "que es", "beneficios", "propiedades", "engorda", "adelgaza", "información", "tengo", "puedo"]
+        keywords_accion = ["receta", "preparar", "cocinar", "plato", "menú", "menu", "desayuno", "almuerzo", "cena", "rutina", "entrenamiento", "ejercicios", "plan", "dieta", "sugerencia", "opcion", "dame"]
+
+        msg_low = mensaje_usuario.lower()
+        if any(ki in msg_low for ki in keywords_info) and not any(ka in msg_low for ka in keywords_accion):
+            es_consulta_info = True
+
+        if es_consulta_info:
+            system_content = f"""ERES UN ASISTENTE DE NUTRICIÓN EXPERTO.
+            
+            ### CONTEXTO DEL USUARIO Y STATUS DIARIO:
+            {contexto}
+            
+            {texto_extra}
+            
+            TU META: Responder la duda del usuario de forma EXTREMADAMENTE BREVE, DIRECTA Y CIENTÍFICA.
+            - Usa la sección 'STATUS DEL DÍA' del contexto para responder sobre sus números.
+            - NO inventes recetas, platos ni rutinas.
+            - NO uses etiquetas como 'Plato:', 'Rutina:', 'Ingredientes:', 'Preparación:' o 'Técnica:'.
+            - Si el usuario pregunta qué lleva consumido o qué le falta, dale los números exactos y un consejo corto.
+            - Respuestas en texto plano sin formatos complejos."""
+        else:
+            system_content = f"""OPERANDO BAJO EL PROTOCOLO 'CALOFIT UNIFIED V3.0' (FALLO CERO).
+
+            ### ESTATUS DEL USUARIO:
+            {contexto}
+            {texto_extra}
+
+            ### 🚨 REGLA MAESTRA DE CATEGORIZACIÓN (OBLIGATORIO):
+            Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRAS ETIQUETAS.
+            - [CALOFIT_INTENT: CHAT] -> Para saludos, dudas generales o consejos cortos.
+            - [CALOFIT_INTENT: ITEM_RECIPE] -> Para una receta detallada (usar etiquetas blindadas).
+            - [CALOFIT_INTENT: ITEM_WORKOUT] -> Para un ejercicio o rutina detallada (usar etiquetas blindadas).
+            - [CALOFIT_INTENT: PLAN_DIET] -> Para planes de alimentación (formato tabla).
+            - [CALOFIT_INTENT: PLAN_WORKOUT] -> Para planes de entrenamiento (formato tabla).
+
+            ### 🛡️ REALITY CHECK (SEGURIDAD Y ÉTICA):
+            SI EL USUARIO PIDE METAS IMPOSIBLES O PELIGROSAS (ej: "bajar 5kg en 2 días", "rutina de 4 horas", "no comer nada", "esteroides"):
+            1. RECHAZA LA SOLICITUD AMABLEMENTE. No generes la rutina ni dieta solicitada.
+            2. EDUCA AL USUARIO: Explica por qué es peligroso o imposible (pérdida de masa muscular, deshidratación, riesgo cardíaco).
+            3. PROPÓN UNA ALTERNATIVA SEGURA Y REALISTA (ej: "Lo saludable es 0.5kg/semana", "Rutina de 45-60 min").
+            4. USA EL TAG: [CALOFIT_INTENT: CHAT]
+
+            ### 🤫 CONOCIMIENTO CULTURAL PERUANO (FALLO CERO):
+            1. TACACHO: Se hace con Plátano Verde machacado y manteca/aceite. NO lleva pan. NO lleva yuca.
+            2. CECINA: Es carne de cerdo ahumada. Se sirve con el Tacacho.
+            3. RUTINAS: Si pides rutina, no inventes ejercicios de 'música' o 'baile' a menos que te lo pidan.
+
+            ### 🏷️ ESTRUCTURA DE ETIQUETAS BLINDADAS (ITEM_RECIPE / ITEM_WORKOUT):
+            Prohibido usar negritas. Prohibido usar paréntesis. Usa exactamente este formato:
+            [CALOFIT_HEADER] Nombre del Item [/CALOFIT_HEADER]
+            [CALOFIT_STATS] P: [X]g | C: [X]g | G: [X]g | Cal: [X]kcal [/CALOFIT_STATS]
+            [CALOFIT_LIST]
+            - Cantidad Elemento 1
+            - Cantidad Elemento 2
+            [/CALOFIT_LIST]
+            [CALOFIT_ACTION]
+            1. Paso...
+            [/CALOFIT_ACTION]
+            [CALOFIT_FOOTER] Nota del Coach [/CALOFIT_FOOTER]
+
+            ❌ PROHIBIDO: Usar '###' o '**' dentro o cerca de las etiquetas. No escribas '### [CALOFIT_STATS]'. Escribe solo '[CALOFIT_STATS]'.
+            ✅ FORMATO CORRECTO: [CALOFIT_HEADER] Nombre [/CALOFIT_HEADER]
+
+            ### 🗓️ ESTRUCTURA DE PLANES (PLAN_DIET / PLAN_WORKOUT):
+            Usa tablas simples:
+            | Día | Mañana | Tarde | Noche |
+            |---|---|---|---|
+            | Lunes | ... | ... | ... |
+
+            ### 🤫 REGLAS DE NEGOCIO Y CONOCIMIENTO CULTURAL:
+            1. Saluda cordialmente al inicio (¡Hola [Nombre]!).
+            2. CONOCIMIENTO PERUANO: El Tacacho SIEMPRE se hace con **Plátano Verde**, jamás con Yuca. Si sugieres Tacacho, usa Plátano.
+            3. Toda respuesta DEBE comenzar estrictamente con el tag de intención.
+            4. Jamás sugieras 'pichanga' o 'fútbol' en una rutina de entrenamiento estructurada.
+            5. Si preguntan por calorías quemadas, usa el peso del usuario: {contexto}.
+            """
+
+
+        # Buscamos en todo el contexto disponible (System Content + Mensaje Usuario)
+        contexto_total = (str(system_content) + " " + str(mensaje_usuario)).lower()
+        
+        # DEBUG MODE: Imprimir el mensaje del usuario y el contexto
+        print(f"\n💬 [USER MESSAGE]: {mensaje_usuario}")
+        print(f"🔍 [IA-DEBUG] Contexto Total Recibido (Primeros 500 chars): {contexto_total[:500]}...")
+
+        restricciones_activas = []
+        if "vegano" in contexto_total: restricciones_activas.append("DIETA VEGANA (CRÍTICA): Prohibido terminantemente: Carnes, lácteos, huevos y MIEL DE ABEJA. No permitas miel ni por sabor. Usa jarabe de agave o stevia si es necesario.")
+        if "vegetariano" in contexto_total: restricciones_activas.append("DIETA VEGETARIANA: No incluir carnes en RECETAS.")
+        if "hipertenso" in contexto_total or "presión alta" in contexto_total: restricciones_activas.append("HIPERTENSION: No usar sal añadida en RECETAS.")
+        if "diabético" in contexto_total or "diabetico" in contexto_total: restricciones_activas.append("DIABETES: Bajo indice glucemico en RECETAS.")
+
+        print(f"🛡️ [IA-SHIELD] Restricciones Activas Detectadas: {restricciones_activas}")
+
+        bloque_restricciones = ""
+        if restricciones_activas:
+            bloque_restricciones = "\n".join([f"- REGLA DE ORO ALIMENTARIA: {r}" for r in restricciones_activas])
+            system_content += f"\n\n### RESTRICCIONES ALIMENTARIAS OBLIGATORIAS:\n{bloque_restricciones}\n(IMPORTANTE: Estas reglas solo aplican a la comida. NUNCA cambies el equipo de ejercicio (pesas/mancuernas) por comida)."
+
         # 1. Preparar el Sistema de Mensajes (System Prompt)
+        # Limpiar cualquier negrita que haya quedado en system_content para que la IA no las use
+        system_content = system_content.replace("**", "")
         mensajes_ia = [
             {
                 "role": "system", 
-                "content": f"""ESTÁS OPERANDO BAJO EL PROTOCOLO 'COACH MAESTRO CALOFIT V2.0'.{texto_extra}
-
-                - **REGLA DE ORO DE DETALLE (MANDATORIO)**: Empieza SIEMPRE con una breve frase cordial.
-                - **ORDEN DE RESPUESTA (SUBRREGLA CRÍTICA)**: 
-                   1. Escribe el mensaje de voz cordial primero.
-                   2. Deja DOS saltos de línea.
-                   3. Escribe las etiquetas en TEXTO PLANO.
-
-                - **CONOCIMIENTO BASE (ESTRICTO)**: Usa 'alimentos_peru_ins.json' y 'ejercicios.json'.
-
-                - **FORMATO DE DATOS (MANDATORIO)**:
-                PARA COMIDA:
-                Plato: [Nombre]
-                Calorias y Macros: P: [X]g, C: [X]g, G: [X]g, Cal: [X]kcal (Cálculo basado en gramos)
-                Justificacion: [Párrafo informativo sobre por qué este plato es bueno para el usuario]
-                Ingredientes:
-                - [Número]g de [Ingrediente]
-                Recuerda: [Consejo o nota de salud importante]
-                Preparacion:
-                1. [Paso 1] ... 10. [Paso 10] (MÍNIMO 10 PASOS DETALLADOS)
-
-                PARA EJERCICIO:
-                Rutina: [Nombre]
-                Gasto Calórico: [X] kcal (Usa MET * Peso * Tiempo de 30 min)
-                Justificacion: [Párrafo sobre el beneficio técnico del ejercicio]
-                Ejercicios:
-                - [Ejercicio]
-                Recuerda: [Consejo de postura o seguridad]
-                Tecnica:
-                1. [Paso 1] ... 10. [Paso 10] (MÍNIMO 10 PASOS DETALLADOS)
-
-                - **PROHIBIDO**: Usar negritas (**).
-                - **PROHIBIDO**: Ser breve. El usuario paga por detalle técnico e instrucciones minuciosas. """
+                "content": system_content
             }
         ]
         
@@ -886,8 +984,13 @@ class IAService:
         if historial:
             mensajes_ia.extend(historial[-2:]) 
 
-        # 3. Agregar el mensaje actual del usuario con REFUERZO INVISIBLE
-        mensaje_con_refuerzo = f"{mensaje_usuario}\n\n(AUTORRECORDATORIO: Debo usar MÍNIMO 7 pasos detallados en Preparacion/Tecnica y poner los gramos exactos en los ingredientes)."
+        # 3. Agregar el mensaje actual del usuario con REFUERZO INVISIBLE Y BLINDAJE
+        mensaje_con_refuerzo = mensaje_usuario
+        if restricciones_activas:
+            mensaje_con_refuerzo += f"\n\n[SISTEMA DE SEGURIDAD]: Recuerda que el usuario tiene restricciones ({', '.join(restricciones_activas)}). IGNORA cualquier petición de ingredientes prohibidos."
+        
+        if not es_consulta_info:
+            mensaje_con_refuerzo += "\n\n(AUTORRECORDATORIO: Mínimo 10 pasos en Tecnica/Preparacion. PROHIBIDO usar negritas ** o deportes como pichanga/fútbol)."
         mensajes_ia.append({"role": "user", "content": mensaje_con_refuerzo})
 
         try:
@@ -903,22 +1006,120 @@ class IAService:
                 )
                 respuesta_ia = response.choices[0].message.content.strip()
                 
+                # --- v32.0: EL MARTILLO DE ETIQUETAS DEFINITIVO ---
+                # 1. Limpiar basura de Markdown y alucinaciones de formato
+                respuesta_ia = re.sub(r'###\s*\[', '[', respuesta_ia)
+                respuesta_ia = re.sub(r'\*\*\s*\[', '[', respuesta_ia)
+                
+                # 2. Corregir etiquetas huérfanas o creativas sin cierre
+                etiquetas_oficiales = "CALOFIT_INTENT|CALOFIT_HEADER|CALOFIT_STATS|CALOFIT_LIST|CALOFIT_ACTION|CALOFIT_FOOTER"
+                respuesta_ia = re.sub(fr'^\[(?!(?:{etiquetas_oficiales}))[A-Z0-9_ ]+\]$', '[CALOFIT_HEADER] \g<0> [/CALOFIT_HEADER]', respuesta_ia, flags=re.MULTILINE)
+                
+                # 2. Corregir etiquetas creativas con sufijo (ej: [NOM_STATS] -> [CALOFIT_STATS])
+                for tag in ["HEADER", "STATS", "LIST", "ACTION", "FOOTER"]:
+                    respuesta_ia = re.sub(fr'\[[A-Z0-9_]+_{tag}\]', f'[CALOFIT_{tag}]', respuesta_ia)
+                    respuesta_ia = re.sub(fr'\[/[A-Z0-9_]+_{tag}\]', f'[/CALOFIT_{tag}]', respuesta_ia)
+
+                # 3. Normalizar estadísticas multilínea (IA suele poner saltos)
+                respuesta_ia = re.sub(r'\[CALOFIT_STATS\]\s*(.*?)\s*\[/CALOFIT_STATS\]', r'[CALOFIT_STATS] \1 [/CALOFIT_STATS]', respuesta_ia, flags=re.DOTALL)
+                
+                # 4. Corregir alucinaciones tipo [Contenido](TAG)
+                patrones_error = [
+                    (r'\[(.*?)\]\(CALOFIT_(HEADER|STATS|LIST|ACTION|FOOTER)\)', r'[CALOFIT_\2] \1 [/CALOFIT_\2]'),
+                    (r'\[CALOFIT_(HEADER|STATS|LIST|ACTION|FOOTER):\s*(.*?)\]', r'[CALOFIT_\1] \2 [/CALOFIT_\1]'),
+                ]
+                for p_err, p_fix in patrones_error:
+                    respuesta_ia = re.sub(p_err, p_fix, respuesta_ia, flags=re.IGNORECASE)
+                
+                # v20.0: Limpieza de Markdown
+                respuesta_ia = respuesta_ia.replace("***", "").replace("**", "")
+                # Limpiar espacios antes de dos puntos en etiquetas de fallback
+                respuesta_ia = re.sub(r'\s+:', ':', respuesta_ia)
+                print(f"🤖 [IA RESPONSE]: {respuesta_ia[:200]}...")
+                
                 # --- NIVEL 2: AUDITORÍA DE CALIDAD (ML-CRITIC) ---
                 respuesta_auditada = self.auditar_calidad_respuesta(respuesta_ia, mensaje_usuario)
                 
-                # --- NIVEL 3: VALIDACIÓN MATEMÁTICA ---
-                respuesta_final = self.validar_y_corregir_nutricion(respuesta_auditada, mensaje_usuario)
+                # --- NIVEL 3: VALIDACIÓN MATEMÁTICA INTELIGENTE (v20.0) ---
+                es_rutina = False
+                # --- NIVEL 3: ORQUESTADOR MULTI-SECCIÓN (v33.0) ---
+                patron_split = r'(\[CALOFIT_INTENT:.*?\]|\[CALOFIT_HEADER\])'
+                bloques = re.split(patron_split, respuesta_auditada)
+                respuesta_procesada = ""
+                
+                peso_usuario = 70.0
+                match_peso = re.search(r'Perfil:\s*(\d+(?:\.\d+)?)\s*kg', contexto)
+                if match_peso:
+                    try: peso_usuario = float(match_peso.group(1))
+                    except: pass
 
+                i = 0
+                while i < len(bloques):
+                    fragmento = bloques[i].strip()
+                    if not fragmento: 
+                        i += 1
+                        continue
+                    
+                    if fragmento.startswith("[CALOFIT_INTENT:") or fragmento == "[CALOFIT_HEADER]":
+                        etiqueta = fragmento
+                        # El cuerpo es el siguiente fragmento
+                        cuerpo = bloques[i+1] if (i+1) < len(bloques) else ""
+                        
+                        # Si el cuerpo empieza con la misma etiqueta (alucinación IA), limpiarlo
+                        if cuerpo.strip().startswith(etiqueta):
+                             cuerpo = re.sub(re.escape(etiqueta), "", cuerpo, 1, flags=re.IGNORECASE)
+
+                        if etiqueta == "[CALOFIT_HEADER]":
+                           cuerpo = "[CALOFIT_HEADER]" + cuerpo
+                           int_deducida = "ITEM_WORKOUT" if "ejercicio" in cuerpo.lower() or "repeticiones" in cuerpo.lower() else "ITEM_RECIPE"
+                           intencion = f"[CALOFIT_INTENT: {int_deducida}]"
+                        else:
+                           intencion = etiqueta
+
+                        if any(k in intencion for k in ["WORKOUT", "EJERCICIO"]):
+                            cuerpo_validado = self.validar_y_corregir_ejercicio(cuerpo, peso_usuario)
+                        elif any(k in intencion for k in ["RECIPE", "DIET", "COMIDA"]):
+                            cuerpo_validado = self.validar_y_corregir_nutricion(cuerpo, mensaje_usuario)
+                        else:
+                            cuerpo_validado = cuerpo
+                            
+                        # Inyectar Intención si no está (v33.0)
+                        c_final = cuerpo_validado.strip()
+                        if not c_final.startswith("[CALOFIT_INTENT:"):
+                             respuesta_procesada += "\n\n" + intencion + "\n" + c_final
+                        else:
+                             respuesta_procesada += "\n\n" + c_final
+                        i += 2
+                    else:
+                        respuesta_procesada += fragmento
+                        i += 1
+                
+                # --- v34.0: POST-PROCESADOR DE LIMPIEZA TOTAL ---
+                # 1. Limpiar dobles etiquetas de intención (AI suele repetirlas)
+                regex_intent = r'(\[CALOFIT_INTENT:.*?\])\s*(\[CALOFIT_INTENT:.*?\])'
+                respuesta_procesada = re.sub(regex_intent, r'\1', respuesta_procesada)
+                
+                # 2. Limpiar corchetes accidentales en Header
+                respuesta_procesada = re.sub(r'\[CALOFIT_HEADER\]\s*\[(.*?)\]\s*\[/CALOFIT_HEADER\]', r'[CALOFIT_HEADER] \1 [/CALOFIT_HEADER]', respuesta_procesada)
+                
+                # 3. Eliminar bloques vacíos
+                respuesta_procesada = re.sub(r'\[CALOFIT_(HEADER|STATS|LIST|ACTION|FOOTER)\]\s*\[/CALOFIT_\1\]', '', respuesta_procesada)
+                
+                # 4. Eliminar etiquetas de intención duplicadas DENTRO de los bloques
+                # (Solo debe haber una intención por sección)
+                respuesta_procesada = re.sub(r'(\[CALOFIT_INTENT:.*?\][\s\S]*?)\[CALOFIT_INTENT:.*?\]', r'\1', respuesta_procesada)
+                respuesta_final = respuesta_procesada.strip()
+                
                 # --- AUTO-CORRECCIÓN POR LÍMITE CALÓRICO (EL "ESCUDO") ---
                 limite_match = re.search(r'(?:no pase de|máximo|menos de|limite|límite)\s*(\d+)\s*(?:calorías|cal|kcal)', mensaje_usuario.lower())
                 if limite_match:
                     limite = int(limite_match.group(1))
+                    # Sumar todas las calorías calculadas en esta respuesta
                     cals_ia = getattr(self, 'ultimas_calorias_calculadas', 0)
                     if cals_ia > limite + 30: # Margen de tolerancia
                         print(f"⚠️ [IA-SHIELD] Calorie Overflow detectado: {cals_ia} > {limite}. Reajustando porciones...")
-                        # Retroalimentación interna para el reintento
                         mensajes_ia.append({"role": "assistant", "content": respuesta_ia})
-                        mensajes_ia.append({"role": "user", "content": f"Esa receta tiene {cals_ia} kcal, pero te pedí máximo {limite} kcal. Por favor, AJUSTA LAS PORCIONES (reduce aceites, carbohidratos o el peso de la proteína) para que el total sea menor a {limite} kcal estrictamente."})
+                        mensajes_ia.append({"role": "user", "content": f"Esa opción tiene {cals_ia} kcal, pero te pedí máximo {limite} kcal. Por favor, AJUSTA LAS PORCIONES para que el total sea menor a {limite} kcal estrictamente."})
                         intentos += 1
                         continue
                 
@@ -977,211 +1178,254 @@ class IAService:
     # ✅ Función Matemática (Revertido nombre original para evitar crash)
     def validar_y_corregir_nutricion(self, respuesta_ia: str, mensaje_usuario: str = None) -> str:
         """
-        NIVEL 3: CALCULADORA MATEMÁTICA REAL (Totalizador de Macros).
-        Escanea la respuesta en busca de ingredientes, busca sus macros en la BD oficial del INS
-        y REEMPLAZA los valores inventados por la IA con datos reales.
+        NIVEL 3: CALCULADORA MATEMÁTICA REAL.
+        Escanea la respuesta en busca de ingredientes y los valida contra la BD oficial.
         """
-        import re 
         from app.services.nutricion_service import nutricion_service
+        import re
 
-        # (v8.2 - Filtro de Consultas Simples)
-        # Si el usuario NO pidió explicítamente una receta o rutina, no procesamos ni inyectamos macros.
-        # Esto evita que preguntas como "¿Cuántas calorías llevo?" se conviertan en fichas técnicas.
-        keywords_receta = ["recomieda", "recomienda", "diseña", "crea", "dame", "receta", "rutina", "plato", "preparar", "cocinar", "ejercicios", "entrenamiento", "sugerencia", "opcion"]
-        # Si no hay mensaje_usuario (llamada interna), asumimos que sí procesamos
-        if mensaje_usuario:
-            msg_low = mensaje_usuario.lower()
-            if not any(k in msg_low for k in keywords_receta):
-                 return respuesta_ia
-
-
-        # 1. NORMALIZACIÓN DE FRACCIONES Y UNIDADES (Antidoto total v8.5)
-        # Priorizar reemplazos completos para evitar "1/2" -> "1" + "0.5" = "10.5"
-        for frac, dec in [("1/2", "0.5"), ("1/4", "0.25"), ("3/4", "0.75"), ("1/3", "0.33"), ("/2", "0.5")]:
-            respuesta_ia = respuesta_ia.replace(frac, dec)
-            
-        respuesta_ia = re.sub(r'un cuarto', '0.25', respuesta_ia, flags=re.IGNORECASE)
-        respuesta_ia = re.sub(r'media\s+taza', '0.5 taza', respuesta_ia, flags=re.IGNORECASE)
-
-        # 2. ESCÁNER DE INGREDIENTES (v9.5 - Blindaje Quirúrgico)
-        # 2a. AISLAMIENTO DEL ÚLTIMO BLOQUE: Usamos .* para soportar cualquier prefijo
-        patron_bloque = r'(?i)ingredientes.*?(.*?)(?=\n\s*(?:preparacion|técnica|tecnica|pasos|recuerda|nota|calculo|cálculo).*?[:\s]|\n\s*\n\s*\w+:|$)'
+        # 1. ESCÁNER DE BLOQUE (LISTA)
+        patron_bloque = r'\[CALOFIT_LIST\](.*?)\[/CALOFIT_LIST\]'
         bloques = re.findall(patron_bloque, respuesta_ia, re.DOTALL)
         texto_busqueda = bloques[-1] if bloques else respuesta_ia
 
-        patron_ingrediente = r'(?:^|[-\*•])[ \t]*(\d+(?:\.\d+)?)[ \t]*(g|gr|gramos|taza|tazas|unidad|unidades|piezas|cucharada|cucharadas|cucharadita|cucharaditas|oz|ml)?[ \t]*(?:de\s+)?([a-záéíóúñA-ZÁÉÍÓÚÑ0-9 \t\(\)\+\-\/]+)(?:[,.]|$)'
-        ingredientes_encontrados = re.findall(patron_ingrediente, texto_busqueda, re.MULTILINE | re.IGNORECASE)
+        # v13.5: Traductores Regionales para Mapeo Directo (v29.0: Mapeos Lean)
+        # IMPORTANTE: Orden específico (más específico primero)
+        traductores = {
+            "plátano verde": "plátano de seda",
+            "plátano maduro": "plátano de seda",
+            "tacacho": "plátano, de seda",
+            "cecina": "cerdo, carne magra, cruda*",
+            "chancho": "cerdo, carne magra, cruda*",
+            "pechuga": "pollo, carne magra", # Pechuga antes que pollo general
+            "pollo": "pollo, carne",
+            "asado": "res, carne",
+            "bistec": "res, carne magra", 
+            "yucca": "yuca, raíz",
+            "yuca": "yuca, raíz",
+            "arroz": "arroz blanco corriente",
+            "aceite de oliva": "aceite vegetal de oliva",
+            "aceite de coco": "aceite vegetal de coco"
+        }
+        
+        palabras_ruido = [
+            "picado", "trozos", "cortada", "pelada", "fresca", "fresco", "al gusto", 
+            "opcional", "maduros", "verdes", "frescos", "limpio", "limpia",
+            "picados", "cortados", "en trozos", "grandes", "pequeños", "rebanadas"
+        ]
         
         cals_total, prot_total, carb_total, gras_total = 0.0, 0.0, 0.0, 0.0
         ingredientes_no_encontrados = []
-        palabras_ruido = [
-            "fresco", "fresca", "lavado", "lavada", "deshuesado", "deshuesada", "sin piel", "con piel",
-            "al gusto", "troceado", "picado", "picada", "a la parrilla", "parrilla", "cocido", 
-            "hervido", "salteado", "magro", "magra", "natural", "unidades", "unidad", "reducido",
-            "reducida", "cantidad", "finamente", "fina", "rodajas", "tiritas", "trozos", "hueso",
-            "huesos", "sin", "con", "para", "gran", "grande", "pequeño", "pequeña", "mediano",
-            "mediana", "frescos", "limpio", "limpia", "de", "del", "el", "la", "los", "las",
-            "un", "una", "unos", "unas", "blandito", "suave", "fuerte", "minutos", "minuto",
-            "segundos", "segundo", "horas", "hora", "durante", "aproximadamente", "aprox"
-        ]
+        encontrados_count = 0
         
-        if not ingredientes_encontrados:
-            return self.validar_y_corregir_ejercicio(respuesta_ia)
-
-        for cant_str, unidad_raw, nombre_raw in ingredientes_encontrados:
+        # Limpieza de pasos numerados en la lista (evita confusión con cantidades)
+        texto_busqueda = re.sub(r'^\d+\.\s+.*$', '', texto_busqueda, flags=re.MULTILINE)
+        
+        # Regex de Ingredientes robusto (v37.0: Fix Bullet + Qty)
+        # Estructura: (Inicio/Bullet) + (Cantidad y Unidad Opcionales) + (Resto/Nombre)
+        patron_ingrediente = r'(?:^|\r?\n)\s*(?:[-\*•]\s*)?(?:(\d+(?:[.,/]\d+)?)\s*(?:(g|gr|gramos|taza|tazas|unidad|unidades|piezas|pieza|cucharada|cucharadas|cucharadita|cucharaditas|oz|ml|l|kg)\b)?\s*(?:de\s+)?)?([^\n]+)'
+        matches = re.findall(patron_ingrediente, texto_busqueda, re.MULTILINE | re.IGNORECASE)
+        
+        for cant_raw, unidad_raw, nombre_raw in matches:
             try:
-                cantidad = float(cant_str)
-                unidad = (unidad_raw or "").strip().lower()
+                # v31.0: Heurística de Cantidad Inteligente (Filtro Anti-Grasa)
+                nombre_base = nombre_raw.lower().strip()
                 
-                # Limpieza agresiva del nombre:
-                # 1. Tomar solo lo que está antes de una coma o paréntesis (ej: "tofu firme, cortado..." -> "tofu firme")
-                nombre_base = re.split(r'[,;\(\)]', nombre_raw)[0].strip().lower()
+                # Parsing de cantidad (Soporte decimal y fracción)
+                cantidad = 0.0
+                if cant_raw:
+                    cant_clean = cant_raw.replace(',', '.')
+                    if '/' in cant_clean:
+                        try:
+                            num, den = cant_clean.split('/')
+                            cantidad = float(num) / float(den)
+                        except:
+                            cantidad = 1.0 # Fallback
+                    else:
+                        cantidad = float(cant_clean)
                 
-                # 2. Quitar palabras de ruido
+                # Si no hay cantidad (y no se pudo parsear), decidir fallback
+                if cantidad == 0.0:
+                    # Si es aceite, grasa, mantequilla, aliño -> 15g (1 cucharada)
+                    palabras_grasa = ["aceite", "mantequilla", "manteca", "aliño", "crema", "mayonesa", "margarina"]
+                    if any(pg in nombre_base for pg in palabras_grasa):
+                        cantidad = 15.0
+                    else:
+                        cantidad = 150.0 # Ingrediente base
+
+                unidad = (unidad_raw or ("g" if not cant_raw else "")).strip().lower()
+                
+                # 1. Limpieza de nombre
+                nombre_base = re.split(r'[,;\(\)]', nombre_base)[0].strip().rstrip('.')
                 for ruido in palabras_ruido:
                     nombre_base = nombre_base.replace(ruido, "").strip()
                 
                 if len(nombre_base) < 3: continue
-                
-                # Normalización de unidades (v7.1)
-                if unidad in ['g', 'gr', 'gramos']: pass
-                elif unidad in ['taza', 'tazas']: cantidad *= 200 # Una taza de verdura/cereal ~200g
-                elif unidad in ['unidad', 'unidades', 'pieza', 'piezas']: cantidad *= 150 # Peso promedio
+
+                # 2. Aplicar Traductores Regionales
+                for t_orig, t_dest in traductores.items():
+                    if t_orig in nombre_base:
+                        nombre_base = t_dest
+                        break
+
+                # 3. Heurística de Unidades Mejorada
+                if not unidad:
+                    if any(u in nombre_base for u in ["huevo", "manzana", "plátano", "pan", "tostada", "fruta"]):
+                        unidad = "unidad"
+                    elif any(u in nombre_base for u in ["rebanada", "tajada", "loncha"]):
+                        unidad = "rebanada"
+
+                # v3.1: Parsing secundario de cantidad en paréntesis (ej: "pechuga (120g)")
+                match_parens = re.search(r'\((\d+(?:[.,]\d+)?)\s*(g|gr|ml)\)', nombre_base)
+                if match_parens:
+                    cantidad = float(match_parens.group(1).replace(',', '.'))
+                    unidad = match_parens.group(2)
+                    # print(f"🎯 Parsing Exacto desde Paréntesis: {cantidad}{unidad}")
+
+                # 4. Normalización de peso
+                if unidad in ['g', 'gr', 'gramos', 'ml']: pass
+                elif unidad in ['taza', 'tazas']: cantidad *= 200 
+                elif unidad in ['unidad', 'unidades', 'pieza', 'piezas']: 
+                    # Pechuga promedio = 150g, Huevo = 60g
+                    cantidad *= 150 if any(x in nombre_base for x in ["pechuga", "carne", "bistec"]) else (60 if "huevo" in nombre_base else 100)
+                elif unidad in ['rebanada', 'rebanadas', 'tajada', 'tajadas']:
+                    cantidad *= 30 # Tajada estándar (bajado de 40 a 30)
                 elif unidad in ['cucharada', 'cucharadas']: cantidad *= 15
                 elif unidad in ['cucharadita', 'cucharaditas']: cantidad *= 5
-                info = nutricion_service.obtener_info_alimento(nombre_base)
-                
-                if info:
-                    f = cantidad / 100.0
-                    p_item = (info.get("proteina_100g") or 0) * f
-                    # VALIDACIÓN DE COHERENCIA (v10.0 - Rescate de Proteína Maestra)
-                    # Umbral subido: carnes deben dar aporte significativo. 
-                    # Si es carne (>50g) y da poca proteína (<12g/100g), es un match erróneo (caldo/grasa).
-                    if any(meat in nombre_base for meat in ["pollo", "res", "cerdo", "ternera", "lomo", "pechuga", "pavo", "filete"]):
-                        info_p_100 = (info.get("proteina_100g") or 0)
-                        if cantidad >= 50 and info_p_100 < 15: 
-                            # Prioridad: Cortes magros universales
-                            for meat_base in ["res, lomo", "pollo, pechuga", "cerdo, lomo", "ternera", "vacuno, pulpa", "pollo, carne"]:
-                                if meat_base.split(',')[0] in nombre_base or (", " in meat_base and meat_base.split(', ')[1] in nombre_base):
-                                    info_alt = nutricion_service.obtener_info_alimento(meat_base)
-                                    if info_alt and (info_alt.get("proteina_100g") or 0) > 18: 
-                                        info = info_alt
-                                        p_item = (info.get("proteina_100g") or 0) * f
-                                        break
+                elif unidad == 'kg': cantidad *= 1000
 
-                    cals_total += (info.get("calorias_100g") or 0) * f
-                    prot_total += p_item
-                    carb_total += (info.get("carbohindratos_100g") or 0) * f
-                    gras_total += (info.get("grasas_100g") or 0) * f
+                # 5. Búsqueda en BD
+                info = nutricion_service.obtener_info_alimento(nombre_base)
+                if info:
+                    nombre_encontrado = info.get("alimento", "").lower()
+                    
+                    # VALIDACIÓN DE CATEGORÍA: Evitar que 'Pechuga' mapee a 'Bazo'
+                    # Si buscamos pollo/pechuga y encontramos visceras (bazo, higado, riñon), forzar re-búsqueda o ignorar
+                    if "pechuga" in nombre_base and any(v in nombre_encontrado for v in ["bazo", "higado", "riñon", "sangrecita"]):
+                        # Fallback manual seguro
+                        info = {"alimento": "pollo, carne magra", "calorias_100g": 110, "proteina_100g": 23.0, "carbohindratos_100g": 0.0, "grasas_100g": 1.2}
+                        nombre_encontrado = "pollo, carne magra (fallback)"
+                        # print(f"⚠️ Corrección de Mapeo: '{nombre_base}' redirigido a Pollo Magro.")
+
+                    f = cantidad / 100.0
+                    
+                    cal_base = (info.get("calorias_100g") or 0)
+                    prot_base = (info.get("proteina_100g") or 0)
+                    carb_base = (info.get("carbohindratos_100g") or 0)
+                    gras_base = (info.get("grasas_100g") or 0)
+                    
+                    # v35.0: MODIFICADORES DE COCCIÓN (Lógica de Fritura)
+                    if any(x in nombre_raw.lower() for x in ["frito", "frita", "fritos", "fritas"]):
+                        if "frito" not in nombre_encontrado:
+                            gras_base += 8.0
+                            cal_base += 72.0
+                            print(f"🍳 Lógica de Cocción: Penalizando fritura para '{nombre_raw}'")
+
+                    cals_item = cal_base * f
+                    cals_total += cals_item
+                    prot_total += prot_base * f
+                    carb_total += carb_base * f
+                    gras_total += gras_base * f
+                    
+                    # print(f"📊 Nutri-Debug: '{nombre_raw}' ({cant_raw or '?'}) -> '{nombre_encontrado}' | Qty: {cantidad}{unidad} | F: {f:.2f} | Cals: {cals_item:.2f}")
+
+                    encontrados_count += 1
                 else:
-                    if nombre_base not in ["sal", "pimienta", "agua", "hielo"]:
+                    if nombre_base not in ["sal", "pimienta", "agua", "hielo", "vinagre", "limón", "jugo de limón"]:
                         ingredientes_no_encontrados.append(nombre_base)
-                processed = True
             except: continue
 
-        # 3. REESCRITURA OBLIGATORIA (v9.8 - Escáner Multi-Patrón Anti-Ruido)
-        macros_reales = f"Aporte Nutricional: P: {prot_total:.1f}g, C: {carb_total:.1f}g, G: {gras_total:.1f}g, Cal: {cals_total:.0f}kcal"
+        # Inyección de Stats Blindadas
+        if encontrados_count > 0:
+            regex_stats = r'\[CALOFIT_STATS\].*?\[/CALOFIT_STATS\]'
+            res_final = f"P: {prot_total:.1f}g | C: {carb_total:.1f}g | G: {gras_total:.1f}g | Cal: {cals_total:.0f}kcal"
+            if any(x in respuesta_ia.lower() for x in ["frito", "frita", "fritos", "fritas"]):
+                res_final += " (Aceite incluido) 🍳"
+            
+            macros_inyectados = f"[CALOFIT_STATS] {res_final} [/CALOFIT_STATS]"
+            
+            # Limpiar el Header de basura numérica (IA suele meter macros ahí)
+            # e.j. [CALOFIT_HEADER] Pollo P: 20g [/CALOFIT_HEADER] -> [CALOFIT_HEADER] Pollo [/CALOFIT_HEADER]
+            respuesta_ia = re.sub(r'(\[CALOFIT_HEADER\].*?) (?:P|C|G|Cal):.*?(?=\[/CALOFIT_HEADER\])', r'\1', respuesta_ia, flags=re.IGNORECASE)
+
+            # Reemplazar TODAS las etiquetas de stats (v26.1)
+            if re.search(regex_stats, respuesta_ia, re.DOTALL):
+                respuesta_ia = re.sub(regex_stats, macros_inyectados, respuesta_ia, flags=re.DOTALL)
+            else:
+                if "[/CALOFIT_HEADER]" in respuesta_ia:
+                    respuesta_ia = respuesta_ia.replace("[/CALOFIT_HEADER]", "[/CALOFIT_HEADER]\n" + macros_inyectados)
+            
+            self.ultimas_calorias_calculadas = cals_total
+            
+            if ingredientes_no_encontrados:
+                msg = f"\n⚠️ Info: {', '.join(list(set(ingredientes_no_encontrados))[:2])} no se mapearon del todo."
+                if "[/CALOFIT_FOOTER]" in respuesta_ia:
+                    respuesta_ia = respuesta_ia.replace("[/CALOFIT_FOOTER]", msg + "\n[/CALOFIT_FOOTER]")
+                else:
+                    respuesta_ia += msg
         
-        # Inyección de advertencia si hay ingredientes huérfanos
-        advertencia = ""
-        if ingredientes_no_encontrados:
-            lista_faltantes = ", ".join(list(set(ingredientes_no_encontrados))[:3])
-            advertencia = f"Advertencia Nutricional: Los siguientes ingredientes no están en la base de datos oficial y no se sumaron al cálculo: {lista_faltantes}"
-            macros_reales += f"\n{advertencia}"
+        return respuesta_ia
 
-        # Escáner de macros puro con soporte para ruido al final (Cálculo basado en...)
-        regex_macros_flexible = r'(?i)(?:\*\*|)?(?:calorias|calorías|macros|valor|aporte)[^:]*[:\s]+P:.*?(?:kcal|cal)(?:\s*\(.*?\))?(?:\*\*|)?'
-        
-        # Primero intentamos una limpieza quirúrgica con regex
-        if re.search(regex_macros_flexible, respuesta_ia):
-            respuesta_ia = re.sub(regex_macros_flexible, macros_reales, respuesta_ia, count=1)
-            # Limpiamos duplicados si los hay
-            respuesta_ia = re.sub(regex_macros_flexible, '', respuesta_ia)
-            encontrado = True
-        else:
-            # Si el regex falla, usamos el backup línea por línea
-            lineas = respuesta_ia.replace('\r', '').split('\n')
-            nuevas_lineas = []
-            encontrado = False
-            for linea in lineas:
-                l_low = linea.lower()
-                if any(et in l_low for et in ["calorias y macros", "valor nutricional", "aporte nutricional"]) or re.search(r'P:\s*\d+', linea):
-                    if not encontrado:
-                        nuevas_lineas.append(macros_reales)
-                        encontrado = True
-                    else: continue
-                else: nuevas_lineas.append(linea)
-            respuesta_ia = "\n".join(nuevas_lineas)
-        if not encontrado:
-            final_lineas = []
-            for l in nuevas_lineas:
-                final_lineas.append(l)
-                # Inyectar después del nombre del plato/rutina
-                if any(m in l.lower() for m in ["plato", "receta", "rutina", "sugerencia"]):
-                    if ":" in l or "**" in l or len(l) < 60:
-                        final_lineas.append(macros_reales)
-                        encontrado = True
-            respuesta_ia = "\n".join(final_lineas)
-            # Si aún no se inyectó, al principio de la ficha
-            if not encontrado:
-                respuesta_ia = macros_reales + "\n" + respuesta_ia
-
-        # 4. GUARDAR CALORÍAS REALES PARA EL ESCUDO (v7.8)
-        self.ultimas_calorias_calculadas = cals_total
-
-        # 4. AUDITORÍA DE PASOS (v7.4 - Silenciosa)
-        preparacion_txt = re.findall(r'\d+\.', respuesta_ia)
-        if len(preparacion_txt) < 5: # Solo alertamos si es críticamente corta
-             print(f"⚠️ Aviso: Respuesta posiblemente corta ({len(preparacion_txt)} pasos).")
-
-        return self.validar_y_corregir_ejercicio(respuesta_ia)
-
-    def validar_y_corregir_ejercicio(self, respuesta_ia: str) -> str:
+    def validar_y_corregir_ejercicio(self, respuesta_ia: str, peso_usuario: float = 70.0) -> str:
         """
         Calcula las calorías quemadas reales usando METs de ejercicios.json.
         """
         from app.services.ejercicios_service import ejercicios_service
         import re
 
-        # Buscar ejercicios listados (formatos comunes: "- Ejercicio", "1. Ejercicio")
-        lineas = respuesta_ia.split('\n')
+        # 1. Duración ESTIMADA
+        minutos_totales = 30.0
+        match_duracion = re.search(r'(\d+)\s*(?:min|minutos)', respuesta_ia.lower())
+        if match_duracion:
+            try: minutos_totales = float(match_duracion.group(1))
+            except: pass
+
+        # 2. Escáner de Ejercicios
         cals_quemadas = 0.0
+        ejercicios_detectados = []
         
+        # Primero buscar dentro de [CALOFIT_LIST]
+        patron_bloque = r'\[CALOFIT_LIST\](.*?)\[/CALOFIT_LIST\]'
+        bloque_ej = re.search(patron_bloque, respuesta_ia, re.DOTALL)
+        texto_busqueda = bloque_ej.group(1) if bloque_ej else respuesta_ia
+
+        lineas = texto_busqueda.split('\n')
         for linea in lineas:
             l = linea.strip().lower()
             if l.startswith('-') or l.startswith('•') or re.match(r'^\d+\.', l):
-                nombre_ej = re.sub(r'^[-\*•\d\.\s]+', '', l).split('+')[0].strip()
-                # Limpieza extra para el match
-                nombre_ej = nombre_ej.split('(')[0].strip()
+                nombre_ej = re.sub(r'^[-\*•\d\.\s]+', '', l).split('(')[0].split(':')[0].strip()
+                if len(nombre_ej) < 3: continue
                 
-                ej_info = ejercicios_service.obtener_info_ejercicio(nombre_ej)
-                if ej_info and ej_info.get("met"):
-                    # Asumimos 30 min de sesión y 70kg de peso por defecto para el estimado
-                    # Calorías = (MET * 3.5 * peso / 200) * minutos
-                    met = float(ej_info["met"])
-                    # Default 10 min por ejercicio si no se especifica
-                    cals_quemadas += (met * 3.5 * 70 / 200) * 10 
-        
-        if cals_quemadas > 0:
-            aporte_estimado = f"Aporte Estimado: {cals_quemadas:.0f} kcal (Cálculo basado en METs oficiales)"
-            patron_fit = r'Aporte Estimado:.*'
+                info_ej = ejercicios_service.obtener_info_ejercicio(nombre_ej)
+                if info_ej and info_ej.get("met"):
+                    ejercicios_detectados.append(info_ej)
+
+        if ejercicios_detectados:
+            for ej in ejercicios_detectados:
+                met = float(ej["met"])
+                # Dividir tiempo entre ejercicios encontrados
+                min_por_ej = minutos_totales / len(ejercicios_detectados)
+                cals_quemadas += (met * 3.5 * peso_usuario / 200.0) * min_por_ej
             
-            if re.search(patron_fit, respuesta_ia):
-                respuesta_ia = re.sub(patron_fit, aporte_estimado, respuesta_ia)
+            self.ultimas_calorias_calculadas = cals_quemadas
+            
+            # Inyección de Stats
+            macros_inyectados = f"[CALOFIT_STATS] P: 0g | C: 0g | G: 0g | Cal: {cals_quemadas:.0f}kcal [/CALOFIT_STATS]"
+            regex_stats = r'\[CALOFIT_STATS\].*?\[/CALOFIT_STATS\]'
+            
+            if re.search(regex_stats, respuesta_ia, re.DOTALL):
+                respuesta_ia = re.sub(regex_stats, macros_inyectados, respuesta_ia, flags=re.DOTALL)
             else:
-                # Inyectar al final de la descripción o antes de los pasos
-                if "**Instrucciones:**" in respuesta_ia:
-                    respuesta_ia = respuesta_ia.replace("**Instrucciones:**", f"{aporte_estimado}\n\n**Instrucciones:**")
+                if "[/CALOFIT_HEADER]" in respuesta_ia:
+                    respuesta_ia = respuesta_ia.replace("[/CALOFIT_HEADER]", "[/CALOFIT_HEADER]\n" + macros_inyectados)
                 else:
-                    respuesta_ia += f"\n\n{aporte_estimado}"
-
-        return respuesta_ia
-
+                    respuesta_ia = macros_inyectados + "\n" + respuesta_ia
+        
         return respuesta_ia
 
     def generar_plan_inicial_automatico(self, cliente_data: dict):
         """
-        🆕 Genera un plan nutricional inicial refinado con lógica de 5 estados y g/kg.
+        Genera un plan nutricional inicial refinado con lógica de 5 estados y g/kg.
         """
         print(f"🤖 Generando plan inicial refinado para: {cliente_data.get('email')}")
         
@@ -1310,55 +1554,6 @@ class IAService:
             "mensaje_cliente": mensaje_cliente,
             "descripcion_estado": mensaje_estado
         }
-
-
-    def auditar_calidad_respuesta(self, respuesta: str, input_usuario: str) -> str:
-        """
-        Nivel 2 de Robustez: Scanner de coherencia física y regional.
-        """
-        import re
-        
-        # ⚠️ DETECTOR DE ALUCINACIONES BIOMECÁNICAS
-        if "dominada" in respuesta.lower():
-            errores_comunes = [
-                "pies en la barra", "levanta la barra", "codos rectos", 
-                "muslos paralelos", "sentar", "pies en el suelo", "detrás de la nuca"
-            ]
-            if any(error in respuesta.lower() for error in errores_comunes):
-                print("🚨 ALERTA: Física imposible detectada en Dominadas. Corrigiendo...")
-                respuesta = re.sub(
-                    r"(\d+\.\s*|\*\s*)?\*\*Dominada[^*]*\*\*:?([\s\S]+?)(?=\n\d+\.|\n\n|\n\s*(\d+\.\s*|\*\s*)?\*\*|$)", 
-                    f"**Dominada con Autocarga**: 3 series de 8-12 reps. {self.CONOCIMIENTO_TECNICO.get('dominada', '')} El cuerpo sube a la barra fija.",
-                    respuesta, flags=re.IGNORECASE
-                )
-
-        if "remo" in respuesta.lower():
-            if any(x in respuesta.lower() for x in ["codos rectos", "pies en la barra", "sentadilla"]):
-                print("🚨 ALERTA: Alucinación en Remo detectada.")
-                respuesta = re.sub(
-                    r"(\d+\.\s*|\*\s*)?\*\*Re?mo[^*]*\*\*:?([\s\S]+?)(?=\n\d+\.|\n\n|\n\s*(\d+\.\s*|\*\s*)?\*\*|$)",
-                    f"**Remo con Barra/Mancuerna**: 3 series de 8-12 reps. {self.CONOCIMIENTO_TECNICO.get('remo', '')} Tracción fluida al abdomen.",
-                    respuesta, flags=re.IGNORECASE
-                )
-        
-        # 🌴 REFUERZO REGIONAL (Sabor Selvático)
-        if "selva" in input_usuario.lower() and not any(i in respuesta.lower() for i in ["paiche", "cecina", "cocona", "tacacho"]):
-             respuesta = respuesta.replace("**Ingredientes clave:**", "**Ingredientes clave (Toque Amazónico):**\n* Acompaña con Plátano asado o Cocona.")
-
-        # 🩺 AUDITOR DE SEGURIDAD PARA HIPERTENSOS (v9.9)
-        # Si el usuario es hipertenso, CENSURAMOS la sal si la IA la sugirió
-        if any(h in input_usuario.lower() or h in getattr(self, 'contexto_actual', '').lower() for h in ["hipertensión", "hipertenso", "presión alta", "presion alta"]):
-            if "sal " in respuesta.lower() or "sal al gusto" in respuesta.lower() or "sal y pimienta" in respuesta.lower():
-                print("🚨 [CENSOR CLÍNICO] Eliminando sal para paciente hipertenso...")
-                # Eliminación estricta de ingredientes (línea completa)
-                respuesta = re.sub(r'(?i)[-\*•]\s*\d*[g\s]*[de\s]*\bsal\b.*?\n', '', respuesta)
-                # Reemplazo en texto usando límites de palabra \b para evitar romper "Saltado" o "Saludable"
-                respuesta = re.sub(r'(?i)\bsal\b(?:\s*y\s*pimienta)?(?:\s*al\s*gusto)?', 'especias sin sodio (orégano, comino)', respuesta)
-                # Agregar nota de seguridad
-                if "Preparación:" in respuesta:
-                    respuesta = respuesta.replace("Preparación:", "Nota de Seguridad (Hipertenso): Se ha eliminado la sal para proteger su presión arterial.\n\nPreparación:")
-
-        return respuesta
 
 
 ia_engine = IAService()
