@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime
+import asyncio
 from app.core.database import get_db
 from app.api.routes.auth import get_current_user
 from app.models.nutricion import PlanNutricional, PlanDiario
@@ -35,7 +36,10 @@ async def consultar_asistente(
 
     print(f"✅ PERFIL CLIENTE: {perfil.first_name} {perfil.last_name_paternal} (ID: {perfil.id})")
 
-    # 2. Obtener el plan semanal vigente o calcular fallback
+    # 2. Calcular edad una sola vez al inicio
+    edad = (datetime.now().year - perfil.birth_date.year) if perfil.birth_date else 25
+
+    # 3. Obtener el plan semanal vigente o calcular fallback
     print(f"🔍 Buscando plan maestro para cliente ID: {perfil.id}...")
     plan_maestro = db.query(PlanNutricional).filter(
         PlanNutricional.client_id == perfil.id
@@ -52,7 +56,6 @@ async def consultar_asistente(
         # Mapear datos del cliente
         genero_map = {"M": 1, "F": 2}
         genero = genero_map.get(perfil.gender, 1)
-        edad = (datetime.now().year - perfil.birth_date.year) if perfil.birth_date else 25
         
         nivel_map = {
             "Sedentario": 1.2,
@@ -178,163 +181,117 @@ async def consultar_asistente(
     # 5. 🎯 APLICAR LÓGICA DIFUSA PARA PERSONALIZAR EL TONO
     mensaje_fuzzy = ia_engine.generar_alerta_fuzzy(adherencia_pct, progreso_pct)
     
-    # Determinar tono basado en la salida fuzzy
     if "Excelente" in mensaje_fuzzy:
-        tono_instruccion = "Usa un tono muy motivador y celebratorio. El cliente está haciendo un trabajo excelente."
+        tono_instruccion = "Usa un tono muy motivador y celebratorio."
     elif "mejorar" in mensaje_fuzzy:
-        tono_instruccion = "Usa un tono alentador pero firme. El cliente necesita un pequeño empujón."
+        tono_instruccion = "Usa un tono alentador pero firme."
     else:
-        tono_instruccion = "Usa un tono empático pero directo. El cliente necesita más compromiso, pero sé comprensivo."
+        tono_instruccion = "Usa un tono empático pero directo."
 
-    # 6. Detección Inteligente de Salud (Reactividad Dinámica)
-    analisis_salud = ia_engine.identificar_intencion_salud(request.mensaje)
+    # 6. Detección Inteligente de Salud (Fire-and-Forget, NO bloqueante)
+    # v44.0: Ya NO esperamos el análisis de salud para responder al usuario.
+    # Se ejecuta en background y registra alertas si aplica.
+    msg_limpio = request.mensaje.lower().strip()
+    es_saludo = len(msg_limpio) < 20 and any(sal in msg_limpio for sal in ["hola", "buen", "hey", "salu", "que tal", "qué tal", "gracias"])
     
-    # Validar que analisis_salud no sea None
-    if analisis_salud is None:
-        analisis_salud = {"tiene_alerta": False}
+    async def _analizar_salud_background():
+        """Analiza y guarda alertas en background sin bloquear la respuesta."""
+        try:
+            resultado = await ia_engine.identificar_intencion_salud(request.mensaje)
+            if resultado and resultado.get("tiene_alerta"):
+                nueva_alerta = AlertaSalud(
+                    client_id=perfil.id,
+                    tipo=resultado.get("tipo", "otro"),
+                    descripcion=resultado.get("descripcion_resumida", request.mensaje),
+                    severidad=resultado.get("severidad", "bajo"),
+                    estado="pendiente"
+                )
+                db.add(nueva_alerta)
+                db.commit()
+                print(f"🚨 Alerta de salud guardada en background: {resultado.get('tipo')}")
+        except Exception as e:
+            print(f"⚠️ Error en análisis de salud background: {e}")
     
-    if analisis_salud.get("tiene_alerta"):
-        # Registrar alerta en la base de datos
-        nueva_alerta = AlertaSalud(
-            client_id=perfil.id,
-            tipo=analisis_salud.get("tipo", "otro"),
-            descripcion=analisis_salud.get("descripcion_resumida", request.mensaje),
-            severidad=analisis_salud.get("severidad", "bajo"),
-            estado="pendiente"
-        )
-        db.add(nueva_alerta)
-        db.commit()
-    
-    # 7. Obtener nombres de especialistas asignados
+    if not es_saludo:
+        asyncio.create_task(_analizar_salud_background())
+
+    # 7. Obtener especialistas
     nombre_nutri = "tu nutricionista"
     if perfil.nutritionist:
         nombre_nutri = f"tu nutricionista {perfil.nutritionist.first_name}"
         
-    # 8. 🚀 Construcción del Prompt con Personalización Total
+    # 8. 🚀 Construcción del Prompt con Identidad Completa
     es_provisional = getattr(plan_maestro, 'estado', 'provisional_ia') == 'provisional_ia' or not getattr(plan_maestro, 'validado_nutri', False)
     
-    # Calcular edad de forma precisa
-    edad = (datetime.now().year - perfil.birth_date.year) if perfil.birth_date else 25
-    
-    # Formatear condiciones médicas separando alergias, dieta y condiciones
+    # Formatear condiciones médicas (Necesario para que ia_service las detecte)
     alergias = []
     preferencias_dieta = []
     condiciones_medicas = []
     
     if perfil.medical_conditions:
         for cond in perfil.medical_conditions:
-            cond_lower = cond.lower()
-            # Detectar alergias
-            if any(palabra in cond_lower for palabra in ["alérgico", "alergia", "intolerancia"]):
-                alergias.append(cond)
-            # Detectar preferencias dietéticas
-            elif any(palabra in cond_lower for palabra in ["vegano", "vegetariano", "pescetariano", "halal", "kosher"]):
-                preferencias_dieta.append(cond)
-            # El resto son condiciones médicas
-            else:
-                condiciones_medicas.append(cond)
+            cond_l = cond.lower()
+            if any(p in cond_l for p in ["alérgico", "alergia", "intolerancia"]): alergias.append(cond)
+            elif any(p in cond_l for p in ["vegano", "vegetariano", "pescetariano"]): preferencias_dieta.append(cond)
+            else: condiciones_medicas.append(cond)
     
-    # Formatear para el prompt
     texto_alergias = ", ".join(alergias) if alergias else "Ninguna"
     texto_dieta = ", ".join(preferencias_dieta) if preferencias_dieta else "Omnívoro"
     texto_condiciones = ", ".join(condiciones_medicas) if condiciones_medicas else "Ninguna"
 
-    # Datos de consumo real
     consumo_real = progreso_hoy.calorias_consumidas if (progreso_hoy and progreso_hoy.calorias_consumidas) else 0.0
     quemadas_real = progreso_hoy.calorias_quemadas if (progreso_hoy and progreso_hoy.calorias_quemadas) else 0.0
     calorias_meta = plan_hoy_data['calorias_dia']
     restantes = max(0, calorias_meta - consumo_real + quemadas_real)
 
-    # Inferir la meta REAL basándose en los macros (más confiable que el label 'goal')
-    proteinas_g = plan_hoy_data['proteinas_g']
-    if calorias_meta >= 2800 and proteinas_g >= 140:
-        objetivo_real = "GANAR MASA MUSCULAR (Bulking)"
-    elif calorias_meta <= 1800:
-        objetivo_real = "PERDER PESO / DEFINIR (Cutting)"
-    else:
-        objetivo_real = "MANTENER PESO (Mantenimiento)"
-
     contexto_asistente = (
-        f"Eres el coach experto personal de {perfil.first_name}. CONÓCELO A FONDO: "
-        f"- Perfil: {perfil.weight}kg, {perfil.height}cm, {edad} años. "
-        f"- Nivel de Actividad: {perfil.activity_level}. "
-        f"- Objetivo REAL (inferido de macros): {objetivo_real}. "
-        f"\n🚨 RESTRICCIONES ABSOLUTAS (CRÍTICO - FALLO = PENALIZACIÓN): "
-        f"- PREFERENCIA DIETÉTICA: {texto_dieta} (SI ES VEGANO: PROHIBIDO sugerir carne, pollo, pescado, huevos, lácteos, miel). "
-        f"- ALERGIAS: {texto_alergias} (PROHIBIDO usar estos ingredientes o derivados). "
-        f"- CONDICIONES MÉDICAS: {texto_condiciones}. "
-        f"\nSTATUS DEL DÍA DE HOY: "
-        f"- Meta: {calorias_meta} kcal (P: {plan_hoy_data['proteinas_g']}g, C: {plan_hoy_data['carbohidratos_g']}g, G: {plan_hoy_data['grasas_g']}g). "
-        f"- Consumidas: {consumo_real} kcal. "
-        f"- Restantes: {restantes} kcal. "
-        f"\n📊 Adherencia actual: {adherencia_pct:.0f}%, Progreso histórico: {progreso_pct:.0f}%. "
-        f"{mensaje_fuzzy}. "
-        f"\n⚡ REGLAS SEGURIDAD/PERSONALIZACIÓN: "
-        f"1. NUNCA violar PREFERENCIAS DIETÉTICAS ({texto_dieta}) ni ALERGIAS ({texto_alergias}). "
-        f"2. Si tiene CONDICIONES MÉDICAS ({texto_condiciones}), evita alimentos/ejercicios prohibidos. "
-        f"3. PROACTIVIDAD LOCAL: Sugiere alimentos PERUANOS (Pollo a la Brasa, Lomo, Ceviche, Quinua, Camote) y ejercicios conocidos (Pichanga, Vóley). "
-        f"4. Adapta porciones a su peso de {perfil.weight}kg y nivel {perfil.activity_level}. "
-        f"5. Sé empático con su historial de {progreso_pct:.0f}% de progreso. "
+        f"Eres el coach de {perfil.first_name}. "
+        f"PERFIL: {perfil.weight}kg, {perfil.height}cm, {edad} años. "
+        f"ALERGIAS: {texto_alergias}. "
+        f"PREFERENCIAS DIETÉTICAS: {texto_dieta}. "
+        f"CONDICIONES MÉDICAS: {texto_condiciones}. "
+        f"\nSTATUS DEL DÍA: "
+        f"Meta: {calorias_meta} kcal. Consumido: {consumo_real} kcal. Restante: {restantes} kcal. "
+        f"Adherencia: {adherencia_pct:.0f}%, Progreso: {progreso_pct:.0f}%. "
+        f"{mensaje_fuzzy}."
     )
     
-    if es_provisional or usa_fallback:
-        contexto_asistente += (
-            f"\n⚠️ NOTA MÉDICA: Su plan de {calorias_meta} kcal es PROVISIONAL (IA). "
-            f"Recuérdale que el nutricionista lo validará pronto."
-        )
-    else:
-        contexto_asistente += f"\n✅ Plan profesional ya validado por {nombre_nutri}."
-    
-    # 🛠️ DEBUG/TESTING: Sobrescribir contexto si viene manual (para Postman)
-    if request.contexto_manual:
-        print(f"🛠️ [DEBUG] Usando contexto manual desde Postman: {request.contexto_manual[:50]}...")
-        contexto_asistente = request.contexto_manual
-
-    # 9. Respuesta de la IA usando Groq con contexto adaptativo y memoria
+    # 9. Respuesta de la IA — Solo espera 1 llamada a Groq (la principal)
     if request.override_ia:
-        print(f"🛠️ [DEBUG] Modo OVERRIDE activado. Usando respuesta manual para probar el parser.")
         respuesta_ia = request.override_ia
     else:
-        respuesta_ia = ia_engine.asistir_cliente(
+        respuesta_ia = await ia_engine.asistir_cliente(
             contexto=contexto_asistente, 
             mensaje_usuario=request.mensaje, 
             historial=request.historial,
             tono_aplicado=tono_instruccion
         )
 
-    # 10. Parsear respuesta para Flutter (estructurada en secciones)
+    # Registrar alerta — ya se hace en _analizar_salud_background(), NO aquí
+
+    # 10. Parsear respuesta para Frontend
     from app.services.response_parser import parsear_respuesta_para_frontend
     respuesta_estructurada = parsear_respuesta_para_frontend(respuesta_ia, mensaje_usuario=request.mensaje)
 
     return {
         "asistente": "CaloFit IA",
         "usuario": perfil.first_name,
-        "dia_seguimiento": datetime.now().isoweekday(),
-        "usa_fallback_ia": usa_fallback,
-        "alerta_salud": analisis_salud.get("tiene_alerta", False),
-        "control_adaptativo": {
-            "adherencia_pct": round(adherencia_pct, 1),
-            "progreso_pct": round(progreso_pct, 1),
-            "mensaje_fuzzy": mensaje_fuzzy,
-            "tono_aplicado": tono_instruccion
-        },
+        "alerta_salud": False,  # v44.0: El análisis de salud es async, no bloqueante
         "data_cientifica": {
-            "calorias_calculadas": plan_hoy_data["calorias_dia"],
-            "macros": {
-                "P": plan_hoy_data["proteinas_g"], 
-                "C": plan_hoy_data["carbohidratos_g"], 
-                "G": plan_hoy_data["grasas_g"]
-            },
             "progreso_diario": {
                 "consumido": round(consumo_real, 1),
                 "meta": round(calorias_meta, 1),
                 "restante": round(restantes, 1),
                 "quemado": round(quemadas_real, 1)
             },
-            "fuente_calorica": "Modelo Regresión Gradient Boosting" if usa_fallback else ("Plan Provisional IA" if es_provisional else "Plan Nutricional Validado")
+            "macros": {
+                "P": plan_hoy_data['proteinas_g'],
+                "C": plan_hoy_data['carbohidratos_g'],
+                "G": plan_hoy_data['grasas_g']
+            }
         },
-        "respuesta_ia": respuesta_ia,  # Texto completo (legacy)
-        "respuesta_estructurada": respuesta_estructurada  # 🆕 JSON estructurado para Flutter
+        "respuesta_ia": respuesta_ia,
+        "respuesta_estructurada": respuesta_estructurada
     }
 
 @router.post("/log-inteligente")
@@ -353,8 +310,9 @@ async def registro_inteligente_nlp(
     if not perfil:
         raise HTTPException(status_code=404, detail="Perfil de cliente no encontrado")
         
-    # 1. Extraer macros con Groq
-    extraccion = ia_engine.extraer_macros_de_texto(request.mensaje)
+    # 1. Extraer macros con Groq (await) - Pasando peso del usuario para fórmula METs
+    peso_usuario = perfil.weight if (perfil.weight and perfil.weight > 0) else 70.0
+    extraccion = await ia_engine.extraer_macros_de_texto(request.mensaje, peso_usuario_kg=peso_usuario)
     
     if not extraccion or (extraccion.get("calorias", 0) == 0):
         return {
@@ -375,6 +333,11 @@ async def registro_inteligente_nlp(
         
     if extraccion.get("es_comida"):
         progreso.calorias_consumidas = (progreso.calorias_consumidas or 0) + extraccion.get("calorias", 0)
+        # v41.0: Registrar Macros también
+        progreso.proteinas_consumidas = (progreso.proteinas_consumidas or 0.0) + extraccion.get("proteinas_g", 0.0)
+        progreso.carbohidratos_consumidos = (progreso.carbohidratos_consumidos or 0.0) + extraccion.get("carbohidratos_g", 0.0)
+        progreso.grasas_consumidas = (progreso.grasas_consumidas or 0.0) + extraccion.get("grasas_g", 0.0)
+
     elif extraccion.get("es_ejercicio"):
         progreso.calorias_quemadas = (progreso.calorias_quemadas or 0) + extraccion.get("calorias", 0)
     
@@ -404,13 +367,17 @@ async def registro_inteligente_nlp(
                     client_id=perfil.id,
                     alimento=alimento.lower(),
                     frecuencia=1,
-                    puntuacion=1.0
+                    puntuacion=1.0,
+                    ultima_vez=datetime.now()
                 )
                 db.add(nueva_pref)
     
     elif extraccion.get("es_ejercicio"):
-        # Similar para ejercicios
-        ejercicios_detectados = extraccion.get("alimentos_detectados", [])  # Reutiliza el campo
+        # Registrar cada ejercicio detectado
+        ejercicios_detectados = extraccion.get("ejercicios_detectados", [])
+        if not ejercicios_detectados:
+            # Fallback a alimentos_detectados si la IA se confundió
+            ejercicios_detectados = extraccion.get("alimentos_detectados", [])
         for ejercicio in ejercicios_detectados:
             pref_existente = db.query(PreferenciaEjercicio).filter(
                 PreferenciaEjercicio.client_id == perfil.id,
@@ -426,23 +393,35 @@ async def registro_inteligente_nlp(
                     client_id=perfil.id,
                     ejercicio=ejercicio.lower(),
                     frecuencia=1,
-                    puntuacion=1.0
+                    puntuacion=1.0,
+                    ultima_vez=datetime.now()
                 )
                 db.add(nueva_pref)
         
     db.commit()
     
     tipo = "comida" if extraccion.get("es_comida") else "ejercicio"
+    nombre_item = extraccion.get("alimentos_detectados", extraccion.get("ejercicios_detectados", []))
+    nombre_str = ", ".join(nombre_item) if nombre_item else "tu registro"
+
     return {
         "success": True,
         "tipo_detectado": tipo,
-        "alimentos": extraccion.get("alimentos_detectados"),
-        "datos": {
-            "calorias": extraccion.get("calorias"),
-            "proteinas": extraccion.get("proteinas_g"),
-            "carbos": extraccion.get("carbohidratos_g"),
-            "grasas": extraccion.get("grasas_g")
+        "alimentos": extraccion.get("alimentos_detectados", []),
+        "balance_actualizado": {
+            "consumido": progreso.calorias_consumidas or 0,
+            "quemado": progreso.calorias_quemadas or 0,
         },
-        "mensaje": f"He registrado tu {tipo} exitosamente. ¡Sigue así!"
+        "datos": {
+            "calorias": extraccion.get("calorias", 0),
+            "proteinas_g": extraccion.get("proteinas_g", 0),
+            "carbohidratos_g": extraccion.get("carbohidratos_g", 0),
+            "grasas_g": extraccion.get("grasas_g", 0),
+            "azucar_g": extraccion.get("azucar_g", 0),
+            "fibra_g": extraccion.get("fibra_g", 0),
+            "sodio_mg": extraccion.get("sodio_mg", 0),
+            "calidad": extraccion.get("calidad_nutricional", "Media"),
+        },
+        "mensaje": f"✅ Registré: **{nombre_str}** — {extraccion.get('calorias', 0)} kcal. ¡Buen trabajo!"
     }
 

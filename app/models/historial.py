@@ -46,6 +46,12 @@ class ProgresoCalorias(Base):
     fecha = Column(Date, nullable=False, default=func.current_date())
     calorias_consumidas = Column(Integer, nullable=True, default=0)
     calorias_quemadas = Column(Integer, nullable=False, default=0)
+    
+    # Nuevos campos para tracking de macros (v41.0)
+    proteinas_consumidas = Column(Float, nullable=True, default=0.0)
+    carbohidratos_consumidos = Column(Float, nullable=True, default=0.0)
+    grasas_consumidas = Column(Float, nullable=True, default=0.0)
+    
     deficit_superavit = Column(Integer, nullable=True)  # Calculado: consumidas - (tmb + quemadas)
     created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
 

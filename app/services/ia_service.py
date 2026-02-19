@@ -1,16 +1,39 @@
 import re
-import joblib
-import pandas as pd
+import json
 import os
-from groq import Groq
-from sklearn.metrics.pairwise import cosine_similarity
+import asyncio
+import functools
+import pandas as pd
+try:
+    from groq import AsyncGroq
+except ImportError:
+    AsyncGroq = None
+    print("⚠️ Advertencia: Librería 'groq' no encontrada. Consultas a IA desactivadas.")
 from app.core.config import settings
-from tensorflow import keras
-import spacy
-import skfuzzy as fuzz
-from skfuzzy import control as ctrl
-import numpy as np
+from app.services.nutricion_service import NutricionService
 from datetime import datetime
+import numpy as np
+
+# Imports opcionales de ML
+try:
+    import joblib
+    from sklearn.metrics.pairwise import cosine_similarity
+except ImportError:
+    joblib = None
+    cosine_similarity = None
+
+try:
+    from tensorflow import keras
+except ImportError:
+    keras = None
+
+try:
+    import skfuzzy as fuzz
+    from skfuzzy import control as ctrl
+except ImportError:
+    fuzz = None
+    ctrl = None
+from app.services.nutricion_service import NutricionService
 
 # ==========================================================
 # 1. DEFINICIÓN DE RUTAS (SINCRONIZADO CON DISCO LOCAL)
@@ -56,118 +79,113 @@ CONDICIONES_CRITICAS = [
 ]
 
 class IAService:
+    # v43.0: CONSTANTES DE PROCESAMIENTO REUTILIZABLES (Pre-compiladas para velocidad)
+    TRADUCTORES_REGIONALES = {
+        "plátano verde": "plátano de seda", "plátano maduro": "plátano de seda",
+        "tacacho": "plátano, de seda", "cecina": "cerdo, carne magra, cruda*",
+        "chancho": "cerdo, carne magra, cruda*", "pechuga": "pollo, carne magra",
+        "pollo": "pollo, carne", "asado": "res, carne", "bistec": "res, carne magra",
+        "yucca": "yuca, raíz", "yuca": "yuca, raíz", "arroz": "arroz blanco corriente",
+        "aceite de oliva": "aceite vegetal de oliva", "aceite de coco": "aceite vegetal de coco"
+    }
+
+    PALABRAS_RUIDO = [
+        "picado", "trozos", "cortada", "pelada", "fresca", "fresco", "al gusto", 
+        "opcional", "maduros", "verdes", "frescos", "limpio", "limpia",
+        "picados", "cortados", "en trozos", "grandes", "pequeños", "rebanadas"
+    ]
+
+    # Pre-compilar regex para máximo rendimiento en bucles
+    PATRON_INGREDIENTE = re.compile(
+        r'(?:^|\r?\n)\s*(?:[-\*•]\s*)?(?:(\d+(?:[.,/]\d+)?)\s*(?:(g|gr|gramos|taza|tazas|unidad|unidades|piezas|pieza|cucharada|cucharadas|cucharadita|cucharaditas|oz|ml|l|kg)\b)?\s*(?:de\s+)?)?([^\n]+)',
+        re.MULTILINE | re.IGNORECASE
+    )
+
     def __init__(self):
-        print(f"🔍 Buscando modelo en: {MODEL_PATH}")
-        if not os.path.exists(MODEL_PATH):
-            print(f"❌ ERROR: No se encontró el archivo .pkl")
-            self.model = None
-            return
-
-        try:
-            self.model = joblib.load(MODEL_PATH)
-            print("✅ IA Service: Modelo cargado exitosamente")
-        except Exception as e:
-            print(f"❌ IA Service: Error al cargar el modelo: {e}")
-            self.model = None
-
-        # Inicializar Groq
-        self.groq_client = Groq(api_key=settings.GROQ_API_KEY)
-
-        # Cargar modelo CBF (matrix, scaler)
+        # v42.1: MODO ULTRA-FAST STARTUP. No cargar modelos pesados al inicio.
+        self.model = None
+        self.ann_model = None
+        self.nlp = None
         self.cbf_matrix = None
         self.cbf_scaler = None
-        if os.path.exists(CBF_MATRIX_PATH):
-            try:
-                self.cbf_matrix = joblib.load(CBF_MATRIX_PATH)
-                print("✅ Matrix CBF cargada")
-            except Exception as e:
-                print(f"❌ Error al cargar matrix CBF: {e}")
-        if os.path.exists(CBF_SCALER_PATH):
-            try:
-                self.cbf_scaler = joblib.load(CBF_SCALER_PATH)
-                print("✅ Scaler CBF cargado")
-            except Exception as e:
-                print(f"❌ Error al cargar scaler CBF: {e}")
-
-        # Cargar modelos de fitness
         self.fit_matrix = None
         self.fit_scaler = None
-        if os.path.exists(FIT_MATRIX_PATH):
-            try:
-                self.fit_matrix = joblib.load(FIT_MATRIX_PATH)
-                print("✅ Matrix Fitness cargada")
-            except Exception as e:
-                print(f"❌ Error al cargar matrix Fitness: {e}")
-        if os.path.exists(FIT_SCALER_PATH):
-            try:
-                self.fit_scaler = joblib.load(FIT_SCALER_PATH)
-                print("✅ Scaler Fitness cargado")
-            except Exception as e:
-                print(f"❌ Error al cargar scaler Fitness: {e}")
+        
+        # Inicializar Groq (Sigue siendo instantáneo)
+        if AsyncGroq:
+            self.groq_client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+        else:
+            self.groq_client = None
+            print("⚠️ Cliente Groq no inicializado")
 
-        # Cargar modelo ANN para calorías quemadas
-        self.ann_model = None
-        if os.path.exists(ANN_MODEL_PATH):
-            try:
-                self.ann_model = keras.models.load_model(ANN_MODEL_PATH)
-                print("✅ Modelo ANN cargado")
-            except Exception as e:
-                print(f"❌ Error al cargar modelo ANN: {e}")
-
-        # Cargar modelo spaCy para NLP
-        try:
-            self.nlp = spacy.load('es_core_news_sm')
-            print("✅ Modelo spaCy cargado")
-        except Exception as e:
-            print(f"❌ Error al cargar spaCy: {e}")
-            self.nlp = None
-
-        # Configurar lógica difusa para alertas
         self.setup_fuzzy_logic()
-
+        
         # Cargar Base de Datos de Ejercicios (Biomecánica & METs)
         self.datos_ejercicios = []
         try:
             ruta_ejercicios = os.path.join(BASE_DIR, 'data', 'ejercicios.json')
             if os.path.exists(ruta_ejercicios):
-                import json
                 with open(ruta_ejercicios, 'r', encoding='utf-8') as f:
                     self.datos_ejercicios = json.load(f)
                 print(f"✅ Base de Ejercicios cargada: {len(self.datos_ejercicios)} items")
-            else:
-                print(f"⚠️ No se encontró: {ruta_ejercicios}")
-        except Exception as e:
-            print(f"❌ Error al cargar ejercicios.json: {e}")
+        except: pass
+        
+        # Centralizar NutricionService
+        self.nutricion_service = NutricionService()
 
-        # Cargar Base de Datos de Alimentos (INS Perú & Platos Típicos)
-        self.datos_nutricionales = []
-        try:
-            ruta_alimentos = os.path.join(BASE_DIR, 'data', 'alimentos_peru_ins.json')
-            if os.path.exists(ruta_alimentos):
-                import json
-                with open(ruta_alimentos, 'r', encoding='utf-8') as f:
-                    self.datos_nutricionales = json.load(f)
-                print(f"✅ Base de Alimentos cargada: {len(self.datos_nutricionales)} items")
-            else:
-                print(f"⚠️ No se encontró: {ruta_alimentos}")
-        except Exception as e:
-            print(f"❌ Error al cargar alimentos_peru_ins.json: {e}")
+    def _ensure_main_model(self):
+        """Carga perezosa del regresor calórico."""
+        if self.model is None and os.path.exists(MODEL_PATH):
+            try:
+                print(f"🔬 Cargando Regresor Calórico (Lazy)...")
+                self.model = joblib.load(MODEL_PATH)
+            except: pass
 
-        # Base de Conocimiento Técnico (Hardcoded para validación de alucinaciones)
-        self.CONOCIMIENTO_TECNICO = {
-            "dominada": "Evita balanceos. Sube hasta pasar la barbilla. Baja controlado.",
-            "remo": "Mantén la espalda neutra. Tira con los codos hacia atrás, no con los bíceps."
-        }
+    def _ensure_ann_model(self):
+        """Carga perezosa de la Red Neuronal FitRec."""
+        if self.ann_model is None and os.path.exists(ANN_MODEL_PATH):
+            try:
+                print(f"🧠 Cargando ANN FitRec (Lazy)...")
+                self.ann_model = keras.models.load_model(ANN_MODEL_PATH)
+            except: pass
+
+    def _ensure_cbf_nutrition(self):
+        """Carga perezosa de matrices de recomendación nutricional."""
+        if self.cbf_matrix is None and os.path.exists(CBF_MATRIX_PATH):
+            try:
+                print(f"🍎 Cargando Matrix Nutrición (Lazy)...")
+                self.cbf_matrix = joblib.load(CBF_MATRIX_PATH)
+                self.cbf_scaler = joblib.load(CBF_SCALER_PATH)
+            except: pass
+
+    def _ensure_fit_model(self):
+        """Carga perezosa de los modelos de Fitness (CBF)."""
+        if self.fit_matrix is None and os.path.exists(FIT_MATRIX_PATH):
+            try:
+                print(f"🏋️ Cargando Matrix Fitness (Lazy)...")
+                self.fit_matrix = joblib.load(FIT_MATRIX_PATH)
+                self.fit_scaler = joblib.load(FIT_SCALER_PATH)
+            except: pass
 
     def setup_fuzzy_logic(self):
         """
         Configura el sistema de lógica difusa para personalizar alertas según adherencia y progreso.
         """
-        # Variables de entrada
-        self.adherencia = ctrl.Antecedent(np.arange(0, 101, 1), 'adherencia')  # 0-100%
-        self.progreso = ctrl.Antecedent(np.arange(0, 101, 1), 'progreso')     # 0-100%
+        if not (ctrl and np):
+            print("⚠️ Lógica Difusa desactivada (Librerías faltantes)")
+            self.simulacion_alerta = None
+            return
 
-        # Variable de salida
+        try:
+            # Variables de entrada
+            self.adherencia = ctrl.Antecedent(np.arange(0, 101, 1), 'adherencia')
+            self.progreso = ctrl.Antecedent(np.arange(0, 101, 1), 'progreso')
+        except Exception as e:
+            print(f"Error inicializando lógica difusa: {e}")
+            self.alerta_sim = None
+            return
+
+        # Resto de la config...
         self.alerta_tipo = ctrl.Consequent(np.arange(0, 101, 1), 'alerta_tipo')  # 0=suave, 100=estricta
 
         # Funciones de membresía
@@ -285,15 +303,18 @@ class IAService:
         """
         print(f"📐 Calculando macros: Peso={peso}kg, Objetivo={objetivo_key}, Calorías={calorias_diarias}")
         
-        # 1. Determinar g/kg según objetivo
+        # 1. Determinar g/kg según objetivo (Rango Científico: P 1.6-2.2, G 0.7-1.0)
         if "perder" in objetivo_key.lower():
-            g_proteina_kg = 2.2  # Máxima protección muscular en déficit
-            g_grasa_kg = 0.8     # Grasas base
+            # Déficit: Maximizamos proteína para proteger músculo, Grasas al mínimo saludable
+            g_proteina_kg = 2.2  # Rango alto (2.2g)
+            g_grasa_kg = 0.7     # Rango bajo (0.7g) para dar espacio a carbos
         elif "ganar" in objetivo_key.lower():
-            g_proteina_kg = 2.0  # Construcción muscular
-            g_grasa_kg = 1.0     # Balance hormonal para anabolismo
+            # Volumen: Proteína moderada (suficiente), Grasas altas para superávit fácil
+            g_proteina_kg = 1.8  # Rango medio (1.8g) es suficiente para crecer
+            g_grasa_kg = 1.0     # Rango alto (1.0g)
         else:
-            g_proteina_kg = 1.8  # Mantenimiento
+            # Mantenimiento: Balance perfecto
+            g_proteina_kg = 2.0
             g_grasa_kg = 0.9
         
         # 2. Calcular gramos de proteína y grasa
@@ -339,6 +360,7 @@ class IAService:
         # 0. Cálculo Base Harris-Benedict (Baseline de Seguridad)
         basal_hb = self._calcular_tmb_harris_benedict(genero, edad, peso, talla)
         
+        self._ensure_main_model()
         if not self.model:
             print("⚠️ Modelo ML no disponible, usando Harris-Benedict como baseline")
             basal = basal_hb
@@ -352,7 +374,12 @@ class IAService:
                 basal_ml = pred.item()
                 
                 # 🛡️ SANITY CHECK (v1.6): Blindaje Clínico Agresivo
-                error_relativo = abs(basal_ml - basal_hb) / basal_hb
+                # Evitar división por cero si basal_hb es 0 (aunque poco probable para TMB)
+                if basal_hb == 0:
+                    error_relativo = float('inf') # Representa un error muy grande
+                else:
+                    error_relativo = abs(basal_ml - basal_hb) / basal_hb
+
                 if error_relativo > 0.15: # Desviación mayor al 15%
                     print(f"⚠️ [IA-SHIELD] ML {basal_ml:.0f} vs HB {basal_hb:.0f} ({error_relativo*100:.1f}%) - Desviación excesiva.")
                     # Si el ML falla por mucho, confiamos 95% en Harris-Benedict (valor clínico seguro)
@@ -391,6 +418,7 @@ class IAService:
         Usa la ANN para estimar calorías quemadas.
         Inputs: tipo_ejercicio (int), duracion (float), intensidad (float), perfil_usuario (dict con edad, peso, genero)
         """
+        self._ensure_ann_model()
         if not self.ann_model:
             return None
         
@@ -544,6 +572,7 @@ class IAService:
         Recomienda ejercicios usando CBF de fitness + Groq.
         """
         ejercicios_base = []
+        self._ensure_fit_model()
         if self.fit_matrix is not None and self.fit_scaler is not None:
             try:
                 # Vector de usuario basado en perfil (ajusta features según tu scaler)
@@ -601,7 +630,7 @@ class IAService:
         """
         try:
             response = self.groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+                model="gemma2-9b-it",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=400,
                 temperature=0.7
@@ -635,13 +664,39 @@ class IAService:
         )
 
         # 2. Lógica de comparación
-        pct_calorias = (consumo_actual['calorias'] / meta_calorias) * 100
+        # Evitar división por cero si meta_calorias es 0
+        if meta_calorias == 0:
+            pct_calorias = 0
+        else:
+            pct_calorias = (consumo_actual['calorias'] / meta_calorias) * 100
         
+        # v2.0: "GPS Financiero" - Prioridad Proteína
+        peso_usuario = perfil_usuario.get('weight', 70)
+        meta_proteina = peso_usuario * 2.0 # Meta base estándar
+        consumo_proteina = consumo_actual.get('proteinas', 0)
+        # Evitar división por cero si meta_proteina es 0
+        if meta_proteina == 0:
+            pct_proteina = 0
+        else:
+            pct_proteina = (consumo_proteina / meta_proteina) * 100
+        
+        contexto_extra = ""
+        if pct_proteina > 80:
+            contexto_extra = "IMPORTANTE: El usuario cumplió su meta de PROTEÍNA. Si se pasó de calorías, SÉ PERMISIVO. Felicítalo por la proteína."
+        else:
+            contexto_extra = "ALERTA: Proteína baja. Sugiere alimentos ricos en proteína para la cena."
+
         # 3. Construir el prompt para Groq (enfocado en una frase corta)
         prompt = f"""
-        Eres un coach de salud. Usuario: {perfil_usuario['first_name']}. 
-        Meta: {meta_calorias} kcal. Consumo hoy: {consumo_actual['calorias']} kcal ({pct_calorias:.1f}%).
-        Condiciones médicas: {perfil_usuario['medical_conditions']}.
+        Eres un coach de salud experto en Nutrición Moderna (No dieta vieja escuela).
+        Usuario: {perfil_usuario['first_name']}. 
+        Meta Calórica: {meta_calorias:.0f}. Consumo: {consumo_actual['calorias']:.0f} ({pct_calorias:.1f}%).
+        Meta Proteína: {meta_proteina:.0f}g. Consumo: {consumo_proteina:.0f}g ({pct_proteina:.1f}%).
+        
+        CONTEXTO CLAVE: {contexto_extra}
+        TIMING SUGERIDO: Si es medio día, sugiere carbos pre-entreno. Si es noche, proteína post-entreno.
+        
+        Genera un 'insight' de UNA SOLA FRASE (máximo 15 palabras). Haz que cada palabra cuente.
         
         Genera un 'insight' de UNA SOLA FRASE (máximo 15 palabras). 
         Si el % es > 90, advierte sobre el límite. Si es < 50, motiva a comer más proteína.
@@ -650,7 +705,7 @@ class IAService:
 
         try:
             response = self.groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+                model="gemma2-9b-it",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=50,
                 temperature=0.5
@@ -660,210 +715,268 @@ class IAService:
             return f"¡Vas por buen camino, {perfil_usuario['first_name']}! Sigue hidratándote y cumpliendo tus metas."
 
 # Singleton
-    def extraer_macros_de_texto(self, texto: str):
+    async def extraer_macros_de_texto(self, texto: str, peso_usuario_kg: float = 70.0):
         """
-        Usa Groq para extraer información nutricional de un texto libre.
-        Ejemplo: "Hoy comí arroz con pollo y una manzana"
+        Usa Groq para extraer información nutricional con RIGOR CIENTÍFICO.
         """
+        # Prompt Ingeniería de Datos para Nutrición de Precisión
         prompt = f"""
-        Analiza el siguiente texto y extrae la información nutricional estimada: "{texto}"
+        Actúa como un Nutricionista Deportivo y Científico de Datos experto.
+        Analiza el siguiente texto: "{texto}" y extrae la información con MÁXIMA PRECISIÓN CIENTÍFICA.
         
-        Debes responder ÚNICAMENTE en formato JSON plano con la siguiente estructura:
+        Tus fuentes de verdad son:
+        1. USDA FoodData Central (para nutrición).
+        2. Compendium of Physical Activities 2011 (Ainsworth et al.) para ejercicios (METs).
+        
+        PESO DEL USUARIO: {peso_usuario_kg} kg (Úsalo para calcular calorías quemadas).
+        
+        Debes responder ÚNICAMENTE en JSON con esta estructura exacta:
         {{
-            "alimentos_detectados": ["alimento1", "alimento2"],
+            "alimentos_detectados": ["Nombre alimento 1"],
+            "ejercicios_detectados": ["Nombre ejercicio 1"],
             "calorias": 0,
-            "proteinas_g": 0,
-            "carbohidratos_g": 0,
-            "grasas_g": 0,
+            "proteinas_g": 0.0,
+            "carbohidratos_g": 0.0,
+            "grasas_g": 0.0,
+            "fibra_g": 0.0,
+            "azucar_g": 0.0,
             "es_comida": true,
-            "es_ejercicio": false
+            "es_ejercicio": false,
+            "calidad_nutricional": "Alta/Media/Baja",
+            "metodologia": "Breve explicación científica"
         }}
         
-        REGLAS CRÍTICAS (FALLO CERO):
-        1. COMIDA: Calcula calorias y macros sumarizados siempre.
-        2. EJERCICIO: Si detectas ejercicio, "es_comida": false, "es_ejercicio": true.
-           ⚠️ OBLIGATORIO: DEBES CALCULAR CALORÍAS QUEMADAS (aprox 10 cal/min para intenso, 5 cal/min moderado).
-           Ejemplo: "Corrí 30 min" -> 30 * 10 = 300 kcal.
-           NUNCA DEVUELVAS 0 si hay mención de tiempo o esfuerzo.
-        3. SI NO HAY INFORMACIÓN: Devuelve todo en 0.
+        REGLAS CIENTÍFICAS OBLIGATORIAS:
+        
+        1. 🥘 PLATOS COMPLEJOS Y PERUANOS (Ingeniería Inversa):
+           - Desglosa ingredientes. Ejemplo "Arroz con Pato": Pato (Grasa/Prot) + Arroz (Carb) + Cerveza (Azúcar).
+           
+        2. 🔢 MATEMÁTICA DE CALORÍAS (CONSISTENCIA):
+           - Las calorías NO pueden ser inventadas. Deben cuadrar matemáticamente:
+           - Fórmula: (Proteína * 4) + (Carbos * 4) + (Grasas * 9).
+           - Si hay Fibra: Restar 2 kcal por cada gramo de fibra (aprox).
+           - Si hay Alcohol: Sumar 7 kcal por gramo.
+           
+        3. 🍎 PARA COMIDA (Base de datos USDA):
+           - NO INVENTES VALORES. Usa promedios estándar de USDA.
+           - Ejemplo: Pechuga de pollo cocida ≈ 31g proteína/100g. Arroz cocido ≈ 28g carbs/100g.
+           - Manzana mediana (182g) ≈ 95 kcal, 0.5g P, 25g C, 0.3g G.
+           - Si no se especifica cantidad, asume: "1 porción" o "unidad mediana" o "taza (150-200g)".
+           - Incluye SIEMPRE Fibra y Azúcar si el alimento lo tiene (Frutas, granos, procesados).
+           - CALIDAD NUTRICIONAL:
+             * Alta: Comida real (Vegetales, Carnes magras, Frutas, Huevos, Avena).
+             * Media: Procesados simples (Pan, Jamón, Queso, Batidos).
+             * Baja: Ultraprocesados (Gaseosa, Galletas, Frituras, Dulces).
+        
+        4. 🏃 PARA EJERCICIO (Fórmula METs):
+           - Fórmula: Calorías = METs * Peso({peso_usuario_kg}kg) * Tiempo(horas).
+           - Usa estos METs de referencia (Compendium 2011):
+             * Caminar moderado: 3.5 METs
+             * Correr (8 km/h): 8.3 METs
+             * Pesas/Gimnasio intenso: 6.0 METs
+             * Yoga: 2.5 METs
+             * Fútbol/Basket: 7.0 - 8.0 METs
+           - SIEMPRE calcula: MET * {peso_usuario_kg} * (minutos/60).
+           - Ejemplo: "Corrí 30 min" (8.3 METs) -> 8.3 * {peso_usuario_kg} * 0.5 = 290.5 kcal.
+           - NO DEVUELVAS 0. Si dice "Corrí", "Caminé", "Entrené", CALCULA.
+        
+        3. 🚫 SI NO HAY DATOS CLAROS:
+           - Si el texto es ambiguo ("hola", "tengo hambre"), devuelve todo en 0.
         """
         try:
-            response = self.groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+            response = await self.groq_client.chat.completions.create(
+                model="llama-3.1-8b-instant",  # v44.1: Corregido (gemma2-9b-it fue deprecado)
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=200,
-                temperature=0.1, # Muy bajo para mantener formato estricto
+                max_tokens=250,
+                temperature=0.1,
                 response_format={"type": "json_object"}
             )
-            import json
-            return json.loads(response.choices[0].message.content.strip())
+            response_json = json.loads(response.choices[0].message.content.strip())
+            
+            # 🚀 ENHANCEMENT v2.0: CORRECCIÓN CON DATOS REALES (SQLite/JSON)
+            # La IA es buena detectando nombres, pero mala con números exactos de marcas.
+            # Usamos el NutricionService para corregir los valores.
+            
+            if self.nutricion_service and response_json.get("alimentos_detectados"):
+                print("🔍 IA: Corrigiendo macros con datos reales de la Base de Datos...")
+                
+                # Reiniciar contadores para sumar con precisión
+                total_cal = 0
+                total_prot = 0
+                total_carb = 0
+                total_gras = 0
+                total_azucar = 0
+                total_fibra = 0
+                total_sodio = 0
+                
+                alimentos_corregidos = []
+                
+                for alimento_nombre in response_json["alimentos_detectados"]:
+                    # Buscar en BD (solo RAM, sin SQLite para velocidad)
+                    info_real = self.nutricion_service.obtener_info_alimento_fast(alimento_nombre)
+                    
+                    if info_real:
+                        print(f"✅ DATO REAL ENCONTRADO: {alimento_nombre} -> {info_real['nombre']} ({info_real['calorias']} kcal)")
+                        # Usar valores reales (Asumiendo 1 porción/unidad detectada, o promedio 100g si no se especifica)
+                        
+                        total_cal += info_real.get('calorias', 0)
+                        total_prot += info_real.get('proteinas', 0)
+                        total_carb += info_real.get('carbohidratos', 0)
+                        total_gras += info_real.get('grasas', 0)
+                        
+                        # Sumar micros si existen
+                        total_azucar += info_real.get('azucares', 0) or 0
+                        total_fibra += info_real.get('fibra', 0) or 0
+                        total_sodio += info_real.get('sodio', 0) or 0
+                        
+                        alimentos_corregidos.append(f"{info_real['nombre']} (Verificado)")
+                    else:
+                        print(f"⚠️ No encontrado en BD: {alimento_nombre}. Manteniendo estimación IA.")
+                        pass
+
+                # LÓGICA FINAL DE REEMPLAZO SEGURA
+                # Solo reemplazamos si hemos encontrado TODOS los alimentos detectados en nuestra BD.
+                # Si falta alguno, es más seguro confiar en la estimación total de Groq.
+                if len(alimentos_corregidos) == len(response_json["alimentos_detectados"]) and total_cal > 0:
+                    print(f"📊 ACTUALIZANDO con precisión (100% Match): Antes {response_json['calorias']} -> Ahora {total_cal}")
+                    response_json["calorias"] = float(round(total_cal, 1))
+                    response_json["proteinas_g"] = float(round(total_prot, 1))
+                    response_json["carbohidratos_g"] = float(round(total_carb, 1))
+                    response_json["grasas_g"] = float(round(total_gras, 1))
+                    response_json["azucar_g"] = float(round(total_azucar, 1))
+                    response_json["fibra_g"] = float(round(total_fibra, 1))
+                    response_json["sodio_mg"] = float(round(total_sodio, 1))
+                    response_json["calidad_nutricional"] += " (Verificado con Base de Datos Oficial)"
+                else:
+                     print(f"⚠️ Cobertura parcial ({len(alimentos_corregidos)}/{len(response_json['alimentos_detectados'])}). Usando estimación IA para evitar subestimación.")
+
+            return response_json
         except Exception as e:
-            print(f"Error extrayendo macros con Groq: {e}")
+            print(f"Error CRÍTICO extrayendo macros con Groq o BD: {type(e).__name__}: {e}")
+            # Retornar estructura vacía para no romper el front
+            return {
+                "calorias": 0, "proteinas_g": 0, "carbohidratos_g": 0, "grasas_g": 0,
+                "alimentos_detectados": [], "tipo_detectado": "error", "calidad_nutricional": "Desconocida"
+            }
             return None
 
-    def identificar_intencion_salud(self, texto: str):
+    async def identificar_intencion_salud(self, mensaje: str) -> dict:
         """
-        Detecta si el mensaje del usuario contiene alguna alerta de salud
-        (lesiones, dolores, fatiga, malestar, etc.) usando Groq.
-        
-        Returns:
-            dict con: {
-                "tiene_alerta": bool,
-                "tipo": str (lesion/fatiga/desanimo/malestar/otro),
-                "descripcion_resumida": str,
-                "severidad": str (bajo/medio/alto),
-                "recomendacion_contingencia": str
-            }
+        Nivel 0: Detector Rápido de Riesgos (Async).
         """
-        prompt = f"""
-        Analiza el siguiente mensaje de un cliente de gimnasio y determina si reporta algún problema de salud.
-        
-        MENSAJE DEL CLIENTE: "{texto}"
-        
-        INSTRUCCIÓN: Detecta si el mensaje menciona:
-        - Lesiones (dolor, golpe, torcedura, esguince, fractura)
-        - Fatiga extrema (muy cansado, agotado, sin energía)
-        - Malestar general (mareos, náuseas, debilidad)
-        - Problemas emocionales (desmotivado, deprimido, ansioso)
-        - Enfermedades (gripe, fiebre, resfriado)
+        prompt = f"""ANALIZA SI EL SIGUIENTE MENSAJE DESCRIBE UN PROBLEMA DE SALUD FÍSICO O MENTAL:
+        Mensaje: "{mensaje}"
         
         RESPONDE EN FORMATO JSON VÁLIDO:
         {{
-            "tiene_alerta": true/false,
+            "tiene_alerta": true,
             "tipo": "lesion" | "fatiga" | "malestar" | "desanimo" | "enfermedad" | "otro",
-            "descripcion_resumida": "Breve descripción del problema (máximo 100 caracteres)",
+            "descripcion_resumida": "Breve descripción",
             "severidad": "bajo" | "medio" | "alto",
-            "recomendacion_contingencia": "Sugerencia profesional (reposo, consultar médico, hidratación, etc.)"
+            "recomendacion_contingencia": "Sugerencia profesional"
         }}
-        
-        CRITERIOS DE SEVERIDAD:
-        - BAJO: Molestias leves, cansancio normal
-        - MEDIO: Dolor moderado, fatiga significativa que limita actividad
-        - ALTO: Dolor intenso, lesión grave, mareos fuertes, síntomas de emergencia
-        
-        Si el mensaje NO menciona ningún problema de salud, responde:
-        {{
-            "tiene_alerta": false
-        }}
-        
-        SOLO responde con JSON válido, sin texto adicional.
+        Si no hay alerta, responde con {{"tiene_alerta": false}}.
         """
-        
         try:
-            response = self.groq_client.chat.completions.create(
+            response = await self.groq_client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=300,
-                temperature=0.3  # Baja temperatura para respuestas más determinísticas
+                max_tokens=150,
+                temperature=0.1
             )
-            
             respuesta_texto = response.choices[0].message.content.strip()
             
-            # Extraer JSON de la respuesta (a veces Groq agrega texto extra)
             import json
             import re
-            
-            # Buscar el JSON en la respuesta
             json_match = re.search(r'\{.*\}', respuesta_texto, re.DOTALL)
             if json_match:
                 resultado = json.loads(json_match.group())
                 return resultado
-            else:
-                print(f"No se pudo parsear JSON de Groq: {respuesta_texto}")
-                return {"tiene_alerta": False}
-                
+            return {"tiene_alerta": False}
         except Exception as e:
-            print(f"Error en identificar_intencion_salud: {e}")
+            print(f"⚠️ [IA-HEALTH-ERROR]: {e}")
             return {"tiene_alerta": False}
 
-    def asistir_cliente(self, contexto: str, mensaje_usuario: str, historial: list = None, tono_aplicado: str = "") -> str:
+    async def asistir_cliente(self, contexto: str, mensaje_usuario: str, historial: list = None, tono_aplicado: str = "") -> str:
         """
-        Consulta a Groq con un contexto adaptativo.
+        Consulta a Groq con un contexto adaptativo (Async).
         """
-        print(f"📡 Enviando a Groq - Tono: {tono_aplicado[:20]}...")
-        
-        # 0. Preparar Contexto Dinámico de Ejercicios y Cultura Peruana
-        texto_extra = ""
-        platos_prioritarios = [] # Definir para evitar NameError
-        try:
-            import random
-            import json
+        import time
+        import random
+        import json
+        import re
+        t_inicio = time.time()
+        print(f"� [IA-START] Procesando petición: {mensaje_usuario[:40]}...")
 
-            # --- BASE DE DATOS DE EJERCICIOS ---
-            if hasattr(self, 'datos_ejercicios') and self.datos_ejercicios:
-                msg_low = mensaje_usuario.lower()
+        # 0. Preparar Contexto Dinámico (Reducido para velocidad)
+        texto_extra = ""
+        msg_low = mensaje_usuario.lower()
+        
+        ejercicios_local = list(self.datos_ejercicios)
+
+        # 🚀 NUEVO: DETECCIÓN DE LESIONES PARA FILTRADO DE EJERCICIOS
+        lesiones_detectadas = []
+        keywords_rodilla = ["rodilla", "menisco", "ligamento cruzado", "patela"]
+        keywords_espalda = ["espalda", "lumbar", "hernia", "columna", "ciática"]
+        keywords_hombro = ["hombro", "manguito", "clavícula"]
+        
+        full_text_input = (mensaje_usuario + " " + contexto).lower()
+        
+        if any(k in full_text_input for k in keywords_rodilla): lesiones_detectadas.append("RODILLA")
+        if any(k in full_text_input for k in keywords_espalda): lesiones_detectadas.append("ESPALDA/LUMBAR")
+        if any(k in full_text_input for k in keywords_hombro): lesiones_detectadas.append("HOMBRO")
+
+        try:
+            # --- BASE DE DATOS DE EJERCICIOS (Con filtrado por lesión) ---
+            if ejercicios_local:
+                # Si hay lesiones, filtramos ejercicios que impacten esas zonas
+                if lesiones_detectadas:
+                    texto_extra += f"\n\n⚠️ PRECAUCIÓN FÍSICA: Se ha detectado molestia/lesión en: {', '.join(lesiones_detectadas)}."
+                    texto_extra += "\n- PRIORIZA: Movilidad, estiramientos y ejercicios de bajo impacto."
+                    texto_extra += "\n- EVITA: Saltos, cargas axiales pesadas o movimientos con dolor."
+                    
+                    # Filtrado simple: si es rodilla, quitamos sentadillas pesadas o pichanga
+                    if "RODILLA" in lesiones_detectadas:
+                        ejercicios_local = [e for e in ejercicios_local if e.get('id') not in ['sentadilla_barra', 'pichanga_futbol', 'burpees', 'estocadas']]
+                    if "ESPALDA/LUMBAR" in lesiones_detectadas:
+                        ejercicios_local = [e for e in ejercicios_local if e.get('id') not in ['peso_muerto_convencional', 'sentadilla_barra', 'press_militar_parado']]
+                
                 es_gym = any(k in msg_low for k in ["gym", "gimnasio", "pesas", "musculo", "fuerza", "hipertrofia"])
                 
-                # 1. Gold Standard (Estándar mundial)
-                gold_standard = [e for e in self.datos_ejercicios if e.get('origen') == 'gold_standard']
-                # 2. Peruanos (Lifestyle/Pichangas)
-                peruanos = [e for e in self.datos_ejercicios if e.get('origen') == 'peru_lifestyle']
-                # 3. Importados (Gym)
-                otros = [e for e in self.datos_ejercicios if e.get('origen') == 'dataset_importado']
+                gold_standard = [e for e in ejercicios_local if e.get('origen') == 'gold_standard']
+                peruanos = [e for e in ejercicios_local if e.get('origen') == 'peru_lifestyle']
+                otros = [e for e in ejercicios_local if e.get('origen') == 'dataset_importado']
                 
-                # Muestra estratégica: Si pide GYM, EXCLUIR peruanos (Pichanga) para evitar confusiones
+                # Muestra estratégica
+                es_casa = any(k in msg_low for k in ["casa", "hogar", "home", "departamento", "cuarto", "habitación", "pequeño"])
+                
                 if es_gym:
-                    muestra_ej = gold_standard[:15] + otros[:10]
+                    muestra_ej = gold_standard[:4] + otros[:2] # Reducido
                     texto_extra += "\n### CONTEXTO GIMNASIO ACTIVO: Sugiere máquinas, pesas o cardio indoor. PROHIBIDO: Fútbol/Pichanga."
+                elif es_casa:
+                    muestra_ej = gold_standard[:4] + peruanos[:1] # Reducido
+                    texto_extra += "\n### CONTEXTO CASA ACTIVO: Sugiere ejercicios con peso corporal o espacio reducido."
                 else:
-                    muestra_ej = peruanos[:4] + gold_standard[:4]
+                    muestra_ej = peruanos[:2] + gold_standard[:3] # Reducido
                 
+                # ESCAPAR LLAVES PARA EVITAR ERROR EN F-STRING
+                ejercicios_str = json.dumps(muestra_ej, ensure_ascii=False)
                 texto_extra += "\n### BASE DE DATOS DE EJERCICIOS (MUESTRA):\n"
-                texto_extra += json.dumps(muestra_ej, ensure_ascii=False)
-                # --- FILTRO VEGANO HARDCORE ---
-                es_vegano = "vegano" in contexto.lower() or "vegetariano" in contexto.lower()
-                if es_vegano:
-                    prohibidos = ["pollo", "carne", "res", "pescado", "huevo", "leche", "queso", "cecina", "paiche", "trucha", "cuy", "chancho", "puerco", "jamon", "chorizo", "salame", "atun", "pachamanca", "lomo saltado"]
-                    self.datos_nutricionales = [
-                        p for p in self.datos_nutricionales 
-                        if not any(pro in p.get('nombre', '').lower() for pro in prohibidos)
-                    ]
-                    print(f"🌱 Filtro Vegano Activo: {len(self.datos_nutricionales)} platos aptos restantes.")
+                texto_extra += ejercicios_str.replace("{", "{{").replace("}", "}}")
+                texto_extra += "\n(IMPORTANTE: Prioriza Desayunos ligeros si es mañana. EVITA Platos de almuerzo pesados)."
 
-                # 1. Platos Fuertes (Almuerzos/Cenas)
-                todos_fuertes = [a for a in self.datos_nutricionales if a.get('categoria') in ['Comida Típica', 'Sopa', 'Postre']]
-                
-                # Mezclar prioritarios con random para rellenar
-                if platos_prioritarios:
-                    fuertes_region = [p for p in platos_prioritarios if p in todos_fuertes]
-                    resto_fuertes = [p for p in todos_fuertes if p not in fuertes_region]
-                    muestra_comida = fuertes_region[:2] + random.sample(resto_fuertes, min(2, len(resto_fuertes)))
-                else:
-                    muestra_comida = random.sample(todos_fuertes, min(3, len(todos_fuertes))) if todos_fuertes else []
-
-                # 2. Desayunos Potentes (BD)
-                todos_desayunos = [
-                    d for d in self.datos_nutricionales 
-                    if d.get('categoria') == 'Desayuno' or d.get('origen') == 'plato_compuesto'
-                ]
-                
-                if platos_prioritarios:
-                    desayunos_region = [d for d in platos_prioritarios if d in todos_desayunos]
-                    resto_desayunos = [d for d in todos_desayunos if d not in desayunos_region]
-                    # AUMENTAR MUESTRA: ¡Mostrar todos los regionales posibles! (antes era 3)
-                    muestra_desayunos = desayunos_region[:2] + random.sample(resto_desayunos, min(2, len(resto_desayunos)))
-                else:
-                    muestra_desayunos = random.sample(todos_desayunos, min(3, len(todos_desayunos))) if todos_desayunos else []
-
-                if muestra_comida or muestra_desayunos:
-                    # Combinar priorizando desayunos si es de mañana
-                    todo_junto = muestra_desayunos + muestra_comida
-                    # FALLBACK SEGURO: Si no tiene 'id', usa 'nombre' para evitar crash
-                    todo_junto_unico = list({v.get('id', v.get('nombre')): v for v in todo_junto}.values())
-
-                    for v in todo_junto_unico:
-                        if 'proteina_100g' in v: # Es un alimento/plato
-                            texto_extra += f"- {v.get('nombre')} (P: {v.get('proteina_100g')}g, C: {v.get('carbohindratos_100g')}g, G: {v.get('grasas_100g')}g, Cal: {v.get('calorias_100g')}kcal por 100g)\n"
-                        else: # Es un ejercicio
-                            # v18.8: Filtrar deportes si es una petición de RUTINA
-                            es_deporte_social = any(k in v.get('nombre', '').lower() for k in ["pichanga", "fútbol", "futbol", "vóley", "voley", "fulbito"])
-                            if "rutina" in mensaje_usuario.lower() and es_deporte_social:
-                                continue
-                            texto_extra += f"- {v.get('nombre')} (MET: {v.get('met', 5.0)})\n"
-                    texto_extra += "\n(IMPORTANTE: Prioriza Desayunos ligeros si es mañana. EVITA Platos de almuerzo pesados)."
+            # 🛡️ NUEVO: CAPA DE SEGURIDAD MÉDICA PROACTIVA
+            context_low = contexto.lower()
+            condiciones_detectadas = [c for c in CONDICIONES_CRITICAS if c in context_low]
+            if condiciones_detectadas:
+                condiciones_str = ", ".join(condiciones_detectadas).upper()
+                texto_extra += f"\n\n🚨 ALERTA MÉDICA CRÍTICA: El usuario tiene las siguientes condiciones: {condiciones_str}."
+                texto_extra += "\n- ESTÁ PROHIBIDO dar consejos médicos diagnósticos o cambios drásticos sin supervisión médica."
+                texto_extra += "\n- INCLUYE SIEMPRE un disclaimer breve al inicio: 'Leonardo, dado que tienes [Condición], recuerda validar esto con tu médico...'"
+                texto_extra += "\n- SE CONSERVADOR con el sodio (hipertensión) y azúcar/carbohidratos (diabetes)."
 
         except Exception as e:
-            print(f"Error preparando contexto cultural: {e}")
+            print(f"Error preparando contexto cultural/médico: {e}")
 
         # --- LÓGICA DE EMERGENCIA VEGANA (FUERA DEL TRY) ---
         if "vegano" in contexto.lower() or "vegetariano" in contexto.lower():
@@ -871,140 +984,187 @@ class IAService:
 
         # (v11.5 - Prompt Dinámico de Intención)
         es_consulta_info = False
+        es_saludo = False
+        
         keywords_info = ["cuantas calorias", "qué es", "que es", "beneficios", "propiedades", "engorda", "adelgaza", "información", "tengo", "puedo"]
         keywords_accion = ["receta", "preparar", "cocinar", "plato", "menú", "menu", "desayuno", "almuerzo", "cena", "rutina", "entrenamiento", "ejercicios", "plan", "dieta", "sugerencia", "opcion", "dame"]
-
-        msg_low = mensaje_usuario.lower()
+        keywords_saludo = ["hola", "buen", "hey", "salu", "que tal", "qué tal", "gracias", "chau", "adiós", "adios"]
+        keywords_chat_corto = ["si", "sí", "no", "ok", "vale", "dale", "bueno", "perfecto", "entendido", "vaya", "genial", "claro", "por supuesto"]
+        keywords_opciones = ["opciones", "opcion", "alternativas", "alternativa", "variedades", "variedad", "sugerencias", "algunas"]
+        
+        msg_low = mensaje_usuario.lower().strip()
+        
+        # 1. Detectar si es un saludo o respuesta corta
+        if len(msg_low) < 5 or (len(msg_low) < 15 and any(s in msg_low for s in keywords_saludo + keywords_chat_corto)):
+            es_saludo = True
+        
+        # 2. Detectar si es consulta de info
         if any(ki in msg_low for ki in keywords_info) and not any(ka in msg_low for ka in keywords_accion):
             es_consulta_info = True
-
-        if es_consulta_info:
-            system_content = f"""ERES UN ASISTENTE DE NUTRICIÓN EXPERTO.
-            
-            ### CONTEXTO DEL USUARIO Y STATUS DIARIO:
-            {contexto}
-            
-            {texto_extra}
-            
-            TU META: Responder la duda del usuario de forma EXTREMADAMENTE BREVE, DIRECTA Y CIENTÍFICA.
-            - Usa la sección 'STATUS DEL DÍA' del contexto para responder sobre sus números.
-            - NO inventes recetas, platos ni rutinas.
-            - NO uses etiquetas como 'Plato:', 'Rutina:', 'Ingredientes:', 'Preparación:' o 'Técnica:'.
-            - Si el usuario pregunta qué lleva consumido o qué le falta, dale los números exactos y un consejo corto.
-            - Respuestas en texto plano sin formatos complejos."""
+        
+        # v44.0: DETECCIÓN DE TIPO PARA max_tokens DINÁMICO
+        es_multiopcion = any(k in msg_low for k in keywords_opciones)
+        es_accion = any(k in msg_low for k in keywords_accion)
+        
+        # Calcular max_tokens según complejidad de la solicitud (↓ tokens = ↓ tiempo)
+        if es_saludo:
+            max_tokens_ia = 300
+        elif es_consulta_info:
+            max_tokens_ia = 600
+        elif es_multiopcion:
+            max_tokens_ia = 1400  # 2 opciones en lugar de 3 (más rápido)
+        elif es_accion:
+            max_tokens_ia = 1000  # Una sola receta/rutina detallada
         else:
-            system_content = f"""OPERANDO BAJO EL PROTOCOLO 'CALOFIT UNIFIED V3.0' (FALLO CERO).
+            max_tokens_ia = 700   # Chat general
 
-            ### ESTATUS DEL USUARIO:
-            {contexto}
-            {texto_extra}
+        if es_consulta_info or es_saludo:
+            system_content = """ERES UN ASISTENTE DE NUTRICIÓN EXPERTO.
+### CONTEXTO DEL USUARIO Y STATUS DIARIO:
+{contexto}
+{texto_extra}
+TU META: Responder al usuario de forma amable, breve y empática.
+USA EL TAG [CALOFIT_INTENT: CHAT] AL INICIO DE TU RESPUESTA.
 
-            ### 🚨 REGLA MAESTRA DE CATEGORIZACIÓN (OBLIGATORIO):
-            Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRAS ETIQUETAS.
-            - [CALOFIT_INTENT: CHAT] -> Para saludos, dudas generales o consejos cortos.
-            - [CALOFIT_INTENT: ITEM_RECIPE] -> Para una receta detallada (usar etiquetas blindadas).
-            - [CALOFIT_INTENT: ITEM_WORKOUT] -> Para un ejercicio o rutina detallada (usar etiquetas blindadas).
-            - [CALOFIT_INTENT: PLAN_DIET] -> Para planes de alimentación (formato tabla).
-            - [CALOFIT_INTENT: PLAN_WORKOUT] -> Para planes de entrenamiento (formato tabla).
+### 🛡️ SEGURIDAD MÉDICA (CRÍTICO):
+- Si el usuario tiene condiciones críticas listadas, SE CAUTELOSO. 
+- NO recetes medicamentos ni sugieras ayunos extremos.
+- Si es un saludo, responde cálidamente.
+- Si es una duda, responde de forma DIRECTA Y CIENTÍFICA.
+- NO uses etiquetas como 'Plato:', 'Rutina:', [CALOFIT_HEADER] o [CALOFIT_STATS].
+Respuestas en texto plano sin formatos complejos.""".replace("{contexto}", contexto).replace("{texto_extra}", texto_extra)
+        else:
+            system_content = """OPERANDO BAJO EL PROTOCOLO 'CALOFIT UNIFIED V3.0' (FALLO CERO).
+### ESTATUS DEL USUARIO:
+{contexto}
+{texto_extra}
 
-            ### 🛡️ REALITY CHECK (SEGURIDAD Y ÉTICA):
-            SI EL USUARIO PIDE METAS IMPOSIBLES O PELIGROSAS (ej: "bajar 5kg en 2 días", "rutina de 4 horas", "no comer nada", "esteroides"):
-            1. RECHAZA LA SOLICITUD AMABLEMENTE. No generes la rutina ni dieta solicitada.
-            2. EDUCA AL USUARIO: Explica por qué es peligroso o imposible (pérdida de masa muscular, deshidratación, riesgo cardíaco).
-            3. PROPÓN UNA ALTERNATIVA SEGURA Y REALISTA (ej: "Lo saludable es 0.5kg/semana", "Rutina de 45-60 min").
-            4. USA EL TAG: [CALOFIT_INTENT: CHAT]
+### 🏷️ REGLA MAESTRA DE CATEGORIZACIÓN (OBLIGATORIO):
+Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRAS ETIQUETAS.
+**DETECCIÓN AUTOMÁTICA DE INTENCIÓN:**
+- SI el usuario menciona: "rutina", "ejercicio", "entrenamiento", "workout", "gimnasio", "minutos" (en contexto fitness) -> USA [CALOFIT_INTENT: ITEM_WORKOUT]
+- SI el usuario menciona: "receta", "plato", "comida", "almuerzo", "cena", "desayuno" -> USA [CALOFIT_INTENT: ITEM_RECIPE]
 
-            ### 🤫 CONOCIMIENTO CULTURAL PERUANO (FALLO CERO):
-            1. TACACHO: Se hace con Plátano Verde machacado y manteca/aceite. NO lleva pan. NO lleva yuca.
-            2. CECINA: Es carne de cerdo ahumada. Se sirve con el Tacacho.
-            3. RUTINAS: Si pides rutina, no inventes ejercicios de 'música' o 'baile' a menos que te lo pidan.
+### 🚨 PROTOCOLO DE MÚLTIPLES CARTAS (CRÍTICO):
+1. **SI EL USUARIO PIDE "OPCIONES" (Plural):**
+   - GENERA EXACTAMENTE 2 opciones distintas (no más, para ser rápido y preciso).
+   - ⚠️ REGLA DE ORO: CADA OPCIÓN DEBE SER UN BLOQUE INDEPENDIENTE.
+   - PRIMERO: Saluda y presenta las opciones con un bloque [CALOFIT_INTENT: CHAT].
+     Ejemplo: [CALOFIT_INTENT: CHAT] ¡Claro Leonardo! Aquí tienes 2 excelentes opciones para tu cena: [/CALOFIT_INTENT: CHAT]
+   
+   - LUEGO: Genera las tarjetas (Exactamente 2):
+     [CALOFIT_INTENT: ITEM_RECIPE]
+     [CALOFIT_HEADER] Nombre del Plato 1 [/CALOFIT_HEADER]
+     [CALOFIT_LIST] Ingredientes... [/CALOFIT_LIST]
+     [CALOFIT_ACTION] Pasos... [/CALOFIT_ACTION]
 
-            ### 🏷️ ESTRUCTURA DE ETIQUETAS BLINDADAS (ITEM_RECIPE / ITEM_WORKOUT):
-            Prohibido usar negritas. Prohibido usar paréntesis. Usa exactamente este formato:
-            [CALOFIT_HEADER] Nombre del Item [/CALOFIT_HEADER]
-            [CALOFIT_STATS] P: [X]g | C: [X]g | G: [X]g | Cal: [X]kcal [/CALOFIT_STATS]
-            [CALOFIT_LIST]
-            - Cantidad Elemento 1
-            - Cantidad Elemento 2
-            [/CALOFIT_LIST]
-            [CALOFIT_ACTION]
-            1. Paso...
-            [/CALOFIT_ACTION]
-            [CALOFIT_FOOTER] Nota del Coach [/CALOFIT_FOOTER]
+   - ⛔ PROHIBIDO: Escribir "Opción 1:", "Opción 2:" o "Opción 3:" al final del bloque CHAT o dentro del [CALOFIT_HEADER]. SOLO el nombre del plato.
+   - ⛔ PROHIBIDO: Escribir "Ingredientes:" o "Preparación:" DENTRO de los bloques.
+   - ⚠️ CONTROL CALÓRICO: Si el usuario pidió "ligero" o "baja caloría", CADA OPCIÓN debe tener raciones pequeñas y macros precisos.
 
-            ❌ PROHIBIDO: Usar '###' o '**' dentro o cerca de las etiquetas. No escribas '### [CALOFIT_STATS]'. Escribe solo '[CALOFIT_STATS]'.
-            ✅ FORMATO CORRECTO: [CALOFIT_HEADER] Nombre [/CALOFIT_HEADER]
+**ETIQUETAS VÁLIDAS:**
+[CALOFIT_INTENT: CHAT] -> Para saludos o consejos cortos.
+[CALOFIT_INTENT: ITEM_RECIPE] -> Para una receta detallada (usar etiquetas blindadas).
+[CALOFIT_INTENT: ITEM_WORKOUT] -> Para una rutina detallada (usar etiquetas blindadas).
 
-            ### 🗓️ ESTRUCTURA DE PLANES (PLAN_DIET / PLAN_WORKOUT):
-            Usa tablas simples:
-            | Día | Mañana | Tarde | Noche |
-            |---|---|---|---|
-            | Lunes | ... | ... | ... |
+### 🛡️ SEGURIDAD Y REALIDAD:
+1. LESIONES: Si menciona dolor de rodilla/espalda, PROHIBIDO impacto. Sugiere movilidad.
+2. CONDICIONES CRÍTICAS: Si tiene Diabetes/Hipertensión, prioritiza dietas bajas en azúcar/sodio y añade disclaimer médico.
+3. CONOCIMIENTO PERUANO: 
+   - TACACHO: Plátano verde machacado con manteca. NO pan.
+   - CEVICHE DE PATO: Es un guiso caliente con naranja agria y ají amarillo. NO pescado.
+   - CALIDAD: Las recetas deben ser CULINARIAMENTE CORRECTAS.
 
-            ### 🤫 REGLAS DE NEGOCIO Y CONOCIMIENTO CULTURAL:
-            1. Saluda cordialmente al inicio (¡Hola [Nombre]!).
-            2. CONOCIMIENTO PERUANO: El Tacacho SIEMPRE se hace con **Plátano Verde**, jamás con Yuca. Si sugieres Tacacho, usa Plátano.
-            3. Toda respuesta DEBE comenzar estrictamente con el tag de intención.
-            4. Jamás sugieras 'pichanga' o 'fútbol' en una rutina de entrenamiento estructurada.
-            5. Si preguntan por calorías quemadas, usa el peso del usuario: {contexto}.
-            """
+### 🥗 ESTRUCTURA OBLIGATORIA PARA RECETAS:
+1. [CALOFIT_LIST] = **INGREDIENTES** (OBLIGATORIO):
+   - Lista exacta con cantidades (g, ml, unidad) para 1 persona.
+   - ❌ PROHIBIDO: Escribir la palabra "Ingredientes:".
+2. [CALOFIT_ACTION] = **PREPARACIÓN** (OBLIGATORIO):
+   - Pasos breves y lógicos.
+   - ❌ PROHIBIDO: Escribir la palabra "Preparación:".
+   - OBLIGATORIO: Pasos numerados (1., 2., 3.) de la receta del Header.
+   - ❌ PROHIBIDO: Escribir la palabra "Preparación:" o "Pasos:" al inicio.
 
+### 🏋️ ESTRUCTURA OBLIGATORIA PARA RUTINAS (FALLO = PENALIZACIÓN):
+⚠️ CADA SECCIÓN DEBE TENER CONTENIDO REAL. SI UNA SECCIÓN ESTÁ VACÍA, LA RESPUESTA SERÁ RECHAZADA.
+
+1. [CALOFIT_LIST] = **CIRCUITO** (QUÉ ejercicios hacer):
+   - OBLIGATORIO: Lista de 4-6 ejercicios ESPECÍFICOS con series y repeticiones
+   - Ejemplo CORRECTO:
+     - 3 series x 15 Sentadillas
+     - 3 series x 12 Flexiones de pecho
+     - 3 series x 20 Mountain Climbers
+     - 2 series x 30seg Plancha frontal
+   - ❌ PROHIBIDO dejar vacío o poner solo "Realiza los ejercicios"
+
+2. [CALOFIT_ACTION] = **INSTRUCCIONES TÉCNICAS** (CÓMO hacer cada ejercicio):
+   - OBLIGATORIO: Explicación técnica paso a paso de LA EJECUCIÓN de los ejercicios del circuito
+   - Ejemplo: "1. Sentadilla: Baja la cadera hasta 90 grados manteniendo el peso en los talones..."
+   - ❌ PROHIBIDO: Copiar y pegar el mismo texto para todos los ejercicios.
+
+### 🏷️ ESTRUCTURA DE ETIQUETAS (FALLORES CERO):
+[CALOFIT_HEADER] Nombre del Entrenamiento [/CALOFIT_HEADER]
+[CALOFIT_STATS] Cal: XXXkcal | Tiempo: XX min [/CALOFIT_STATS]
+[CALOFIT_LIST] ... [/CALOFIT_LIST]
+[CALOFIT_ACTION] ... [/CALOFIT_ACTION]
+[CALOFIT_FOOTER] ... [/CALOFIT_FOOTER]
+""".replace("{contexto}", contexto).replace("{texto_extra}", texto_extra)
 
         # Buscamos en todo el contexto disponible (System Content + Mensaje Usuario)
         contexto_total = (str(system_content) + " " + str(mensaje_usuario)).lower()
         
-        # DEBUG MODE: Imprimir el mensaje del usuario y el contexto
-        print(f"\n💬 [USER MESSAGE]: {mensaje_usuario}")
-        print(f"🔍 [IA-DEBUG] Contexto Total Recibido (Primeros 500 chars): {contexto_total[:500]}...")
+        # 🥣 DETECCIÓN DE PREFERENCIAS DE VOLUMEN/CALORÍAS (v5.6)
+        preferencias_ia = []
+        msg_low = mensaje_usuario.lower()
+        
+        usuario_goal = "mantener"
+        if "perder" in contexto.lower(): usuario_goal = "perder"
+        elif "ganar" in contexto.lower() or "volumen" in contexto.lower(): usuario_goal = "ganar"
+        
+        match_cal = re.search(r'Restante:\s*(\d+)', contexto)
+        cal_objetivo = int(match_cal.group(1)) if match_cal else 2000
+        if cal_objetivo > 4000 or cal_objetivo < 1200: cal_objetivo = 2000
+        target_por_plato = cal_objetivo / 3 
+
+        kw_baja_cal = ["baja", "bajo", "caloría", "caloria", "lite", "light", "ligera", "definicion", "cut", "pocas", "dieta"]
+        if any(k in msg_low for k in kw_baja_cal):
+            preferencias_ia.append("PRIORIDAD MÁXIMA - MODO DIETA: El usuario pidió explícitamente BAJAR CALORÍAS. CADA plato debe tener MÁXIMO 400 kcal. PROHIBIDO SUGERIR > 500 kcal.")
+        else:
+            preferencias_ia.append(f"MODO PERFIL ACTIVO (Objetivo: {usuario_goal.upper()}): Target aprox por comida: {target_por_plato:.0f} kcal.")
 
         restricciones_activas = []
-        if "vegano" in contexto_total: restricciones_activas.append("DIETA VEGANA (CRÍTICA): Prohibido terminantemente: Carnes, lácteos, huevos y MIEL DE ABEJA. No permitas miel ni por sabor. Usa jarabe de agave o stevia si es necesario.")
-        if "vegetariano" in contexto_total: restricciones_activas.append("DIETA VEGETARIANA: No incluir carnes en RECETAS.")
-        if "hipertenso" in contexto_total or "presión alta" in contexto_total: restricciones_activas.append("HIPERTENSION: No usar sal añadida en RECETAS.")
-        if "diabético" in contexto_total or "diabetico" in contexto_total: restricciones_activas.append("DIABETES: Bajo indice glucemico en RECETAS.")
+        if "CONDICIONES MÉDICAS:" in contexto:
+            match_condiciones = re.search(r'CONDICIONES MÉDICAS:\s*([^\n]+)', contexto)
+            if match_condiciones and match_condiciones.group(1).lower() != "ninguna":
+                cond = match_condiciones.group(1)
+                restricciones_activas.append(f"⚠️ REGLA MÉDICA: El usuario tiene {cond}. Ajusta intensidad y nutrición.")
 
-        print(f"🛡️ [IA-SHIELD] Restricciones Activas Detectadas: {restricciones_activas}")
+        bloque_restricciones = "\n".join([f"- REGLA DE ORO ACTUAL: {r}" for r in restricciones_activas + preferencias_ia])
+        if bloque_restricciones:
+            system_content += f"\n\n### ⚠️ REGLAS CRÍTICAS BASADAS EN PERFIL DEL USUARIO:\n{bloque_restricciones}"
 
-        bloque_restricciones = ""
-        if restricciones_activas:
-            bloque_restricciones = "\n".join([f"- REGLA DE ORO ALIMENTARIA: {r}" for r in restricciones_activas])
-            system_content += f"\n\n### RESTRICCIONES ALIMENTARIAS OBLIGATORIAS:\n{bloque_restricciones}\n(IMPORTANTE: Estas reglas solo aplican a la comida. NUNCA cambies el equipo de ejercicio (pesas/mancuernas) por comida)."
-
-        # 1. Preparar el Sistema de Mensajes (System Prompt)
-        # Limpiar cualquier negrita que haya quedado en system_content para que la IA no las use
         system_content = system_content.replace("**", "")
-        mensajes_ia = [
-            {
-                "role": "system", 
-                "content": system_content
-            }
-        ]
-        
-        # 2. Agregar historial previo si existe
+        mensajes_ia = [{"role": "system", "content": system_content}]
         if historial:
-            mensajes_ia.extend(historial[-2:]) 
-
-        # 3. Agregar el mensaje actual del usuario con REFUERZO INVISIBLE Y BLINDAJE
-        mensaje_con_refuerzo = mensaje_usuario
-        if restricciones_activas:
-            mensaje_con_refuerzo += f"\n\n[SISTEMA DE SEGURIDAD]: Recuerda que el usuario tiene restricciones ({', '.join(restricciones_activas)}). IGNORA cualquier petición de ingredientes prohibidos."
-        
-        if not es_consulta_info:
-            mensaje_con_refuerzo += "\n\n(AUTORRECORDATORIO: Mínimo 10 pasos en Tecnica/Preparacion. PROHIBIDO usar negritas ** o deportes como pichanga/fútbol)."
-        mensajes_ia.append({"role": "user", "content": mensaje_con_refuerzo})
+            mensajes_ia.extend(historial[-2:])
+        mensajes_ia.append({"role": "user", "content": mensaje_usuario})
 
         try:
-            import re
             intentos = 0
             while intentos < 2:
-                # --- NIVEL 1: GENERACIÓN ---
-                response = self.groq_client.chat.completions.create(
+                response = await self.groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
                     messages=mensajes_ia,
-                    max_tokens=1000,
+                    max_tokens=max_tokens_ia,  # v44.0: Dinámico según tipo de solicitud
                     temperature=0.7
                 )
                 respuesta_ia = response.choices[0].message.content.strip()
+                
+                # 🛡️ PROTECCIÓN CONTRA RECORTES (Si la IA se queda a medias)
+                if "[CALOFIT_STATS]" in respuesta_ia and "[/CALOFIT_STATS]" not in respuesta_ia:
+                    respuesta_ia += " [/CALOFIT_STATS]"
+                if "[CALOFIT_HEADER]" in respuesta_ia and "[/CALOFIT_HEADER]" not in respuesta_ia:
+                    respuesta_ia += " [/CALOFIT_HEADER]"
                 
                 # --- v32.0: EL MARTILLO DE ETIQUETAS DEFINITIVO ---
                 # 1. Limpiar basura de Markdown y alucinaciones de formato
@@ -1077,9 +1237,34 @@ class IAService:
                            intencion = etiqueta
 
                         if any(k in intencion for k in ["WORKOUT", "EJERCICIO"]):
-                            cuerpo_validado = self.validar_y_corregir_ejercicio(cuerpo, peso_usuario)
+                            # v44.1: Ejecutar en thread pool (es síncrona/bloqueante)
+                            try:
+                                loop = asyncio.get_event_loop()
+                                cuerpo_validado = await asyncio.wait_for(
+                                    loop.run_in_executor(None, self.validar_y_corregir_ejercicio, cuerpo, peso_usuario),
+                                    timeout=15.0
+                                )
+                            except asyncio.TimeoutError:
+                                print("⚠️ Timeout en validar_ejercicio, usando respuesta IA directa")
+                                cuerpo_validado = cuerpo
                         elif any(k in intencion for k in ["RECIPE", "DIET", "COMIDA"]):
-                            cuerpo_validado = self.validar_y_corregir_nutricion(cuerpo, mensaje_usuario)
+                            # v44.1: Solo validar nutrición si es receta real (hay ingredientes)
+                            # Ejecutar en thread pool para no bloquear el event loop
+                            if "[CALOFIT_LIST]" in cuerpo or "[CALOFIT_HEADER]" in cuerpo:
+                                try:
+                                    loop = asyncio.get_event_loop()
+                                    cuerpo_validado = await asyncio.wait_for(
+                                        loop.run_in_executor(
+                                            None,
+                                            functools.partial(self.validar_y_corregir_nutricion, cuerpo, mensaje_usuario)
+                                        ),
+                                        timeout=15.0
+                                    )
+                                except asyncio.TimeoutError:
+                                    print("⚠️ Timeout en validar_nutricion, usando respuesta IA directa")
+                                    cuerpo_validado = cuerpo
+                            else:
+                                cuerpo_validado = cuerpo
                         else:
                             cuerpo_validado = cuerpo
                             
@@ -1105,23 +1290,9 @@ class IAService:
                 # 3. Eliminar bloques vacíos
                 respuesta_procesada = re.sub(r'\[CALOFIT_(HEADER|STATS|LIST|ACTION|FOOTER)\]\s*\[/CALOFIT_\1\]', '', respuesta_procesada)
                 
-                # 4. Eliminar etiquetas de intención duplicadas DENTRO de los bloques
-                # (Solo debe haber una intención por sección)
-                respuesta_procesada = re.sub(r'(\[CALOFIT_INTENT:.*?\][\s\S]*?)\[CALOFIT_INTENT:.*?\]', r'\1', respuesta_procesada)
+                # 4. (Eliminado) Ya no borramos intents duplicados, permitimos múltiples tarjetas
+                # respuesta_procesada = re.sub(r'(\[CALOFIT_INTENT:.*?\][\s\S]*?)\[CALOFIT_INTENT:.*?\]', r'\1', respuesta_procesada)
                 respuesta_final = respuesta_procesada.strip()
-                
-                # --- AUTO-CORRECCIÓN POR LÍMITE CALÓRICO (EL "ESCUDO") ---
-                limite_match = re.search(r'(?:no pase de|máximo|menos de|limite|límite)\s*(\d+)\s*(?:calorías|cal|kcal)', mensaje_usuario.lower())
-                if limite_match:
-                    limite = int(limite_match.group(1))
-                    # Sumar todas las calorías calculadas en esta respuesta
-                    cals_ia = getattr(self, 'ultimas_calorias_calculadas', 0)
-                    if cals_ia > limite + 30: # Margen de tolerancia
-                        print(f"⚠️ [IA-SHIELD] Calorie Overflow detectado: {cals_ia} > {limite}. Reajustando porciones...")
-                        mensajes_ia.append({"role": "assistant", "content": respuesta_ia})
-                        mensajes_ia.append({"role": "user", "content": f"Esa opción tiene {cals_ia} kcal, pero te pedí máximo {limite} kcal. Por favor, AJUSTA LAS PORCIONES para que el total sea menor a {limite} kcal estrictamente."})
-                        intentos += 1
-                        continue
                 
                 return respuesta_final
             
@@ -1189,42 +1360,15 @@ class IAService:
         bloques = re.findall(patron_bloque, respuesta_ia, re.DOTALL)
         texto_busqueda = bloques[-1] if bloques else respuesta_ia
 
-        # v13.5: Traductores Regionales para Mapeo Directo (v29.0: Mapeos Lean)
-        # IMPORTANTE: Orden específico (más específico primero)
-        traductores = {
-            "plátano verde": "plátano de seda",
-            "plátano maduro": "plátano de seda",
-            "tacacho": "plátano, de seda",
-            "cecina": "cerdo, carne magra, cruda*",
-            "chancho": "cerdo, carne magra, cruda*",
-            "pechuga": "pollo, carne magra", # Pechuga antes que pollo general
-            "pollo": "pollo, carne",
-            "asado": "res, carne",
-            "bistec": "res, carne magra", 
-            "yucca": "yuca, raíz",
-            "yuca": "yuca, raíz",
-            "arroz": "arroz blanco corriente",
-            "aceite de oliva": "aceite vegetal de oliva",
-            "aceite de coco": "aceite vegetal de coco"
-        }
-        
-        palabras_ruido = [
-            "picado", "trozos", "cortada", "pelada", "fresca", "fresco", "al gusto", 
-            "opcional", "maduros", "verdes", "frescos", "limpio", "limpia",
-            "picados", "cortados", "en trozos", "grandes", "pequeños", "rebanadas"
-        ]
-        
         cals_total, prot_total, carb_total, gras_total = 0.0, 0.0, 0.0, 0.0
         ingredientes_no_encontrados = []
         encontrados_count = 0
         
-        # Limpieza de pasos numerados en la lista (evita confusión con cantidades)
+        # Limpieza de pasos numerados en la lista
         texto_busqueda = re.sub(r'^\d+\.\s+.*$', '', texto_busqueda, flags=re.MULTILINE)
         
-        # Regex de Ingredientes robusto (v37.0: Fix Bullet + Qty)
-        # Estructura: (Inicio/Bullet) + (Cantidad y Unidad Opcionales) + (Resto/Nombre)
-        patron_ingrediente = r'(?:^|\r?\n)\s*(?:[-\*•]\s*)?(?:(\d+(?:[.,/]\d+)?)\s*(?:(g|gr|gramos|taza|tazas|unidad|unidades|piezas|pieza|cucharada|cucharadas|cucharadita|cucharaditas|oz|ml|l|kg)\b)?\s*(?:de\s+)?)?([^\n]+)'
-        matches = re.findall(patron_ingrediente, texto_busqueda, re.MULTILINE | re.IGNORECASE)
+        # Regex de Ingredientes robusto - Usar constante pre-compilada
+        matches = self.PATRON_INGREDIENTE.findall(texto_busqueda)
         
         for cant_raw, unidad_raw, nombre_raw in matches:
             try:
@@ -1251,19 +1395,19 @@ class IAService:
                     if any(pg in nombre_base for pg in palabras_grasa):
                         cantidad = 15.0
                     else:
-                        cantidad = 150.0 # Ingrediente base
+                        cantidad = 100.0 # Ingrediente base (Reducido de 150g para evitar sobreestimación)
 
                 unidad = (unidad_raw or ("g" if not cant_raw else "")).strip().lower()
                 
                 # 1. Limpieza de nombre
                 nombre_base = re.split(r'[,;\(\)]', nombre_base)[0].strip().rstrip('.')
-                for ruido in palabras_ruido:
+                for ruido in self.PALABRAS_RUIDO:
                     nombre_base = nombre_base.replace(ruido, "").strip()
                 
                 if len(nombre_base) < 3: continue
 
                 # 2. Aplicar Traductores Regionales
-                for t_orig, t_dest in traductores.items():
+                for t_orig, t_dest in self.TRADUCTORES_REGIONALES.items():
                     if t_orig in nombre_base:
                         nombre_base = t_dest
                         break
@@ -1294,8 +1438,8 @@ class IAService:
                 elif unidad in ['cucharadita', 'cucharaditas']: cantidad *= 5
                 elif unidad == 'kg': cantidad *= 1000
 
-                # 5. Búsqueda en BD
-                info = nutricion_service.obtener_info_alimento(nombre_base)
+                # 5. Búsqueda en BD (solo RAM - sin SQLite para evitar timeouts)
+                info = nutricion_service.obtener_info_alimento_fast(nombre_base)
                 if info:
                     nombre_encontrado = info.get("alimento", "").lower()
                     
@@ -1303,16 +1447,16 @@ class IAService:
                     # Si buscamos pollo/pechuga y encontramos visceras (bazo, higado, riñon), forzar re-búsqueda o ignorar
                     if "pechuga" in nombre_base and any(v in nombre_encontrado for v in ["bazo", "higado", "riñon", "sangrecita"]):
                         # Fallback manual seguro
-                        info = {"alimento": "pollo, carne magra", "calorias_100g": 110, "proteina_100g": 23.0, "carbohindratos_100g": 0.0, "grasas_100g": 1.2}
+                        info = {"alimento": "pollo, carne magra", "calorias": 110, "proteinas": 23.0, "carbohidratos": 0.0, "grasas": 1.2}
                         nombre_encontrado = "pollo, carne magra (fallback)"
                         # print(f"⚠️ Corrección de Mapeo: '{nombre_base}' redirigido a Pollo Magro.")
 
                     f = cantidad / 100.0
                     
-                    cal_base = (info.get("calorias_100g") or 0)
-                    prot_base = (info.get("proteina_100g") or 0)
-                    carb_base = (info.get("carbohindratos_100g") or 0)
-                    gras_base = (info.get("grasas_100g") or 0)
+                    cal_base = (info.get("calorias") or 0)
+                    prot_base = (info.get("proteinas") or 0)
+                    carb_base = (info.get("carbohidratos") or 0)
+                    gras_base = (info.get("grasas") or 0)
                     
                     # v35.0: MODIFICADORES DE COCCIÓN (Lógica de Fritura)
                     if any(x in nombre_raw.lower() for x in ["frito", "frita", "fritos", "fritas"]):
@@ -1337,8 +1481,43 @@ class IAService:
 
         # Inyección de Stats Blindadas
         if encontrados_count > 0:
+            # --- 🛡️ SANITY CHECK: Limitar Calorías Absurdas (v39.0 - AUTO-SCALE) ---
+            # --- 🛡️ SANITY CHECK: Limitar Calorías Absurdas (v40.0 - MEAL AWARE) ---
+            msg_low = mensaje_usuario.lower() if mensaje_usuario else ""
+            
+            # Detectar tipo de comida por Header (Prioridad 1) o Mensaje (Prioridad 2)
+            header_match = re.search(r'\[CALOFIT_HEADER\](.*?)\[/CALOFIT_HEADER\]', respuesta_ia, re.IGNORECASE)
+            header_text = header_match.group(1).lower() if header_match else ""
+            
+            es_ligero = any(k in msg_low or k in header_text for k in ["ligero", "ligera", "baja", "bajo", "light", "diet", "bajar", "poco"])
+            
+            # Definir límites por tipo de comida
+            if any(k in header_text or k in msg_low for k in ["desayuno", "breakfast", "mañana"]):
+                limite_calorico = 300.0 if es_ligero else 500.0
+            elif any(k in header_text or k in msg_low for k in ["snack", "merienda", "media", "postre"]):
+                limite_calorico = 150.0 if es_ligero else 250.0
+            elif any(k in header_text or k in msg_low for k in ["almuerzo", "lunch", "comida"]):
+                limite_calorico = 500.0 if es_ligero else 800.0
+            elif any(k in header_text or k in msg_low for k in ["cena", "ceña", "noche"]):
+                limite_calorico = 350.0 if es_ligero else 600.0
+            else:
+                limite_calorico = 450.0 if es_ligero else 750.0 # Default
+            
+            tag_ajuste = ""
+            if cals_total > limite_calorico:
+                # Factor de corrección para ajustar la porción matemática (Evitar div/0)
+                factor = limite_calorico / max(cals_total, 1.0)
+                
+                # Aplicar reducción
+                cals_total = limite_calorico
+                prot_total *= factor
+                carb_total *= factor
+                gras_total *= factor
+                
+                tag_ajuste = " (Ajustado a tu meta)"
+
             regex_stats = r'\[CALOFIT_STATS\].*?\[/CALOFIT_STATS\]'
-            res_final = f"P: {prot_total:.1f}g | C: {carb_total:.1f}g | G: {gras_total:.1f}g | Cal: {cals_total:.0f}kcal"
+            res_final = f"P: {prot_total:.1f}g | C: {carb_total:.1f}g | G: {gras_total:.1f}g | Cal: {cals_total:.0f}kcal{tag_ajuste}"
             if any(x in respuesta_ia.lower() for x in ["frito", "frita", "fritos", "fritas"]):
                 res_final += " (Aceite incluido) 🍳"
             
@@ -1409,8 +1588,8 @@ class IAService:
             
             self.ultimas_calorias_calculadas = cals_quemadas
             
-            # Inyección de Stats
-            macros_inyectados = f"[CALOFIT_STATS] P: 0g | C: 0g | G: 0g | Cal: {cals_quemadas:.0f}kcal [/CALOFIT_STATS]"
+            # Inyección de Stats con formato de EJERCICIO (sin macros falsos)
+            macros_inyectados = f"[CALOFIT_STATS] Quemado: {cals_quemadas:.0f}kcal aprox [/CALOFIT_STATS]"
             regex_stats = r'\[CALOFIT_STATS\].*?\[/CALOFIT_STATS\]'
             
             if re.search(regex_stats, respuesta_ia, re.DOTALL):

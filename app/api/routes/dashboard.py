@@ -35,9 +35,9 @@ async def get_daily_summary(
     # Preparamos los valores de consumo (reales o 0)
     consumo_actual = {
         "calorias": progreso_hoy.calorias_consumidas if progreso_hoy else 0,
-        "proteinas": 0,  # Si tienes tabla de macros consumidos, súmalos aquí
-        "carbohidratos": 0,
-        "grasas": 0
+        "proteinas": progreso_hoy.proteinas_consumidas if progreso_hoy else 0.0,
+        "carbohidratos": progreso_hoy.carbohidratos_consumidos if progreso_hoy else 0.0,
+        "grasas": progreso_hoy.grasas_consumidas if progreso_hoy else 0.0
     }
     
     # 🆕 2. Obtener el plan nutricional activo para mostrar OBJETIVO de macros
