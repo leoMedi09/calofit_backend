@@ -168,6 +168,8 @@ async def get_daily_summary(
 
 
     # 4. Respuesta final con macros objetivo incluidos
+    calorias_quemadas_hoy = progreso_hoy.calorias_quemadas if progreso_hoy else 0
+
     return {
         "dieta_recomendada": {
             "calorias_diarias": consumo_actual["calorias"],
@@ -177,7 +179,13 @@ async def get_daily_summary(
             "gasto_metabolico_basal": round(calcular_tmb(cliente), 1),
             "imc": round(calcular_imc(cliente.weight, cliente.height), 1),
         },
-        "plan_nutricional": plan_objetivo,  # 🆕 Macros del plan asignado
+        # 🔥 FIX: Incluir calorías quemadas para que NO se reseteen al refrescar
+        "calorias_quemadas": calorias_quemadas_hoy,
+        "resumen": {
+            "calorias_consumidas": consumo_actual["calorias"],
+            "calorias_quemadas": calorias_quemadas_hoy,
+        },
+        "plan_nutricional": plan_objetivo,
         "ai_insight": ai_insight
     }
 
