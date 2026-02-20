@@ -30,15 +30,29 @@ async def obtener_balance_hoy(
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     
     # Obtener plan activo
+    # Obtener plan activo (Lógica alineada con Dashboard)
     plan_activo = db.query(PlanNutricional).filter(
-        PlanNutricional.client_id == cliente.id,
-        PlanNutricional.status == "validado"
-    ).first()
+        PlanNutricional.client_id == cliente.id
+    ).order_by(PlanNutricional.fecha_creacion.desc()).first()
     
-    objetivo_diario = plan_activo.calorias_ia_base if plan_activo else 2000
+    objetivo_diario = 2000 # Default
+    if plan_activo:
+        # Intentar obtener meta especifica del dia
+        dia_semana = datetime.now().isoweekday()
+        plan_hoy = db.query(PlanDiario).filter(
+            PlanDiario.plan_id == plan_activo.id,
+            PlanDiario.dia_numero == dia_semana
+        ).first()
+        
+        if plan_hoy:
+             objetivo_diario = plan_hoy.calorias_dia
+        else:
+             objetivo_diario = plan_activo.calorias_ia_base or 2000
     
     # Obtener progreso de hoy
-    hoy = date.today()
+    
+    from app.core.utils import get_peru_date
+    hoy = get_peru_date()
     progreso_hoy = db.query(ProgresoCalorias).filter(
         ProgresoCalorias.client_id == cliente.id,
         ProgresoCalorias.fecha == hoy
@@ -68,7 +82,10 @@ async def obtener_balance_hoy(
             "calorias_consumidas": calorias_consumidas or 0,
             "calorias_quemadas": calorias_quemadas or 0,
             "calorias_restantes": calorias_restantes,
-            "objetivo_diario": objetivo_diario
+            "objetivo_diario": objetivo_diario,
+            "proteinas_g": progreso_hoy.proteinas_consumidas if progreso_hoy else 0.0,
+            "carbohidratos_g": progreso_hoy.carbohidratos_consumidos if progreso_hoy else 0.0,
+            "grasas_g": progreso_hoy.grasas_consumidas if progreso_hoy else 0.0
         },
         "alimentos_registrados": [
             {
@@ -139,7 +156,9 @@ async def eliminar_registro(
     db.commit()
     
     # Recalcular balance
-    hoy = date.today()
+    
+    from app.core.utils import get_peru_date
+    hoy = get_peru_date()
     progreso_hoy = db.query(ProgresoCalorias).filter(
         ProgresoCalorias.client_id == cliente.id,
         ProgresoCalorias.fecha == hoy
@@ -147,24 +166,40 @@ async def eliminar_registro(
     
     if progreso_hoy:
         # Obtener plan para calcular restantes
+        # Obtener plan para calcular restantes (Lógica alineada)
         plan_activo = db.query(PlanNutricional).filter(
-            PlanNutricional.client_id == cliente.id,
-            PlanNutricional.status == "validado"
-        ).first()
+            PlanNutricional.client_id == cliente.id
+        ).order_by(PlanNutricional.fecha_creacion.desc()).first()
         
-        objetivo = plan_activo.calorias_ia_base if plan_activo else 2000
+        objetivo = 2000
+        if plan_activo:
+            dia_semana = datetime.now().isoweekday()
+            plan_hoy = db.query(PlanDiario).filter(
+                PlanDiario.plan_id == plan_activo.id,
+                PlanDiario.dia_numero == dia_semana
+            ).first()
+            if plan_hoy:
+                objetivo = plan_hoy.calorias_dia
+            else:
+                objetivo = plan_activo.calorias_ia_base or 2000
         calorias_restantes = objetivo - (progreso_hoy.calorias_consumidas or 0) + (progreso_hoy.calorias_quemadas or 0)
         
         nuevo_balance = {
             "calorias_consumidas": progreso_hoy.calorias_consumidas or 0,
             "calorias_quemadas": progreso_hoy.calorias_quemadas or 0,
-            "calorias_restantes": calorias_restantes
+            "calorias_restantes": calorias_restantes,
+            "proteinas_g": progreso_hoy.proteinas_consumidas or 0.0,
+            "carbohidratos_g": progreso_hoy.carbohidratos_consumidos or 0.0,
+            "grasas_g": progreso_hoy.grasas_consumidas or 0.0
         }
     else:
         nuevo_balance = {
             "calorias_consumidas": 0,
             "calorias_quemadas": 0,
-            "calorias_restantes": 2000
+            "calorias_restantes": 2000,
+            "proteinas_g": 0.0,
+            "carbohidratos_g": 0.0,
+            "grasas_g": 0.0
         }
     
     return {

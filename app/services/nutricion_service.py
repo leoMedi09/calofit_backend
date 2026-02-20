@@ -28,7 +28,7 @@ class NutricionService:
                         clave_raw = item.get("alimento") or item.get("nombre")
                         if clave_raw:
                             self._datos_nutricionales[clave_raw.lower()] = item
-                print(f"✅ NutricionService: Cargados {len(lista_alimentos)} alimentos oficiales del CENAN/INS.")
+                print(f"[*] NutricionService: Cargados {len(lista_alimentos)} alimentos oficiales del CENAN/INS.")
 
             # 2. Cargar Base de Datos OpenFoodFacts (Prioridad Alta - Productos Comerciales)
             # Solo cargamos el JSON ligero (Perú filtrado) para la RAM
@@ -40,12 +40,12 @@ class NutricionService:
                         clave_raw = item.get("alimento")
                         if clave_raw:
                             self._datos_nutricionales[clave_raw.lower()] = item
-                print(f"✅ NutricionService: Cargados {len(lista_off)} productos comerciales de OpenFoodFacts 🇵🇪.")
+                print(f"[*] NutricionService: Cargados {len(lista_off)} productos comerciales de OpenFoodFacts.")
             else:
-                 print(f"⚠️ NutricionService: No se encontró {json_path_off}, usando solo base oficial.")
+                 print(f"[!] NutricionService: No se encontró {json_path_off}, usando solo base oficial.")
 
         except Exception as e:
-            print(f"❌ NutricionService Error: {e}")
+            print(f"[ERR] NutricionService Error: {e}")
 
     def _buscar_en_sqlite(self, nombre_busqueda: str) -> Optional[dict]:
         """Busca en la base de datos masiva SQLite con caché y optimización de índices."""
@@ -124,9 +124,9 @@ class NutricionService:
         sinonimos = {
             "aguacate": "palta", "jitomate": "tomate", "ejote": "vainita",
             "cacahuate": "maní", "puerco": "cerdo", "chancho": "cerdo",
-            "vaca": "res", "jengibre": "kion", "soja": "soya", "calabaza": "zapallo",
+            "vaca": "res", "jengibre": "kion", "soja": "sillao", "soya": "sillao", "calabaza": "zapallo", "lentejas rojas": "lenteja roja", "lenteja roja": "lenteja roja",
             "betabel": "beterraga", "elote": "choclo", "chicharo": "arveja",
-            "frances": "francés", "platano": "plátano"
+            "frances": "francés", "platano": "plátano", "brócoli": "brocoli"
         }
         for s, r in sinonimos.items():
             if s in nombre_clean:
@@ -137,14 +137,23 @@ class NutricionService:
             return self._normalizar_ram(self._datos_nutricionales[nombre_clean])
 
         # 2. Búsqueda Parcial en RAM (O(N)) - Prioridad Local
-        matches = []
+        best = None
+        best_score = -1
         for k, v in self._datos_nutricionales.items():
-            if nombre_clean in k:
-                matches.append(v)
-
-        if matches:
-            matches.sort(key=lambda x: len(x.get('alimento', '')))
-            return self._normalizar_ram(matches[0])
+            pos = nombre_clean.find(k)
+            if pos == -1:
+                if k in nombre_clean: pos = 0
+                elif nombre_clean in k: pos = k.find(nombre_clean)
+                else: continue
+            
+            if len(k) < 3: continue
+            current_score = (1000 / (pos + 1)) + len(k)
+            if current_score > best_score:
+                best = v
+                best_score = current_score
+        
+        if best:
+            return self._normalizar_ram(best)
 
         # 3. Búsqueda en SQLite (Mundial - Plan B)
         if len(nombre_clean) > 3:
@@ -165,9 +174,9 @@ class NutricionService:
         sinonimos = {
             "aguacate": "palta", "jitomate": "tomate", "ejote": "vainita",
             "cacahuate": "maní", "puerco": "cerdo", "chancho": "cerdo",
-            "vaca": "res", "jengibre": "kion", "soja": "soya", "calabaza": "zapallo",
+            "vaca": "res", "jengibre": "kion", "soja": "sillao", "soya": "sillao", "calabaza": "zapallo", "lentejas rojas": "lenteja roja", "lenteja roja": "lenteja roja",
             "betabel": "beterraga", "elote": "choclo", "chicharo": "arveja",
-            "frances": "francés", "platano": "plátano"
+            "frances": "francés", "platano": "plátano", "brócoli": "brocoli"
         }
         for s, r in sinonimos.items():
             if s in nombre_clean:
@@ -179,11 +188,24 @@ class NutricionService:
 
         # 2. Parcial (O(N) solo en RAM, sin SQLite)
         best = None
-        best_len = 9999
+        best_score = -1
         for k, v in self._datos_nutricionales.items():
-            if nombre_clean in k and len(k) < best_len:
+            # v44.1: Sistema de puntuación para evitar que condimentos (ej: sillao) desplacen al principal (ej: tofu)
+            pos = nombre_clean.find(k)
+            if pos == -1: 
+                if k in nombre_clean: pos = 0 # Fallback raro
+                elif nombre_clean in k: pos = k.find(nombre_clean)
+                else: continue
+            
+            if len(k) < 3: continue
+            
+            # Score: Más puntos si aparece antes (pos=0 es oro) y si es más largo/específico
+            # len(k) ayuda a diferenciar 'jugo de naranja' de 'naranja'
+            current_score = (1000 / (pos + 1)) + len(k)
+            
+            if current_score > best_score:
                 best = v
-                best_len = len(k)
+                best_score = current_score
         if best:
             return self._normalizar_ram(best)
 
@@ -197,11 +219,11 @@ class NutricionService:
         
         nombre = item_raw.get("alimento") or item_raw.get("nombre") or "Desconocido"
         
-        # Intentar extraer calorias de varias posibles claves
-        cal = item_raw.get("calorias") or item_raw.get("Energía (kcal)") or item_raw.get("Energía \n(kcal)") or 0
-        prot = item_raw.get("proteinas") or item_raw.get("Proteína \n(g)") or item_raw.get("Proteína (g)") or 0
-        carb = item_raw.get("carbohidratos") or item_raw.get("Carbohidratos \n(g)") or item_raw.get("Carbohidratos totales (g)") or 0
-        gras = item_raw.get("grasas") or item_raw.get("Grasa \n(g)") or item_raw.get("Grasa total (g)") or 0
+        # Intentar extraer calorias de varias posibles claves (incluyendo sufijo _100g de los JSON)
+        cal = item_raw.get("calorias") or item_raw.get("calorias_100g") or item_raw.get("Energía (kcal)") or item_raw.get("Energía \n(kcal)") or 0
+        prot = item_raw.get("proteinas") or item_raw.get("proteina_100g") or item_raw.get("Proteína \n(g)") or item_raw.get("Proteína (g)") or 0
+        carb = item_raw.get("carbohidratos") or item_raw.get("carbohindratos_100g") or item_raw.get("Carbohidratos \n(g)") or item_raw.get("Carbohidratos totales (g)") or 0
+        gras = item_raw.get("grasas") or item_raw.get("grasas_100g") or item_raw.get("Grasa \n(g)") or item_raw.get("Grasa total (g)") or 0
 
         # Micros (A veces no están en JSON RAM)
         azu = item_raw.get("azucares") or 0

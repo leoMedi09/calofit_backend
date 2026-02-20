@@ -20,13 +20,17 @@ async def get_daily_summary(
 ):
     from app.models.historial import ProgresoCalorias
     
+    
+    from app.core.utils import get_peru_date
+
     cliente = db.query(Client).filter(Client.id == cliente_id).first()
     
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     
+
     # 1. Obtener datos de consumo real del historial (ProgresoCalorias)
-    hoy = date.today()
+    hoy = get_peru_date()
     progreso_hoy = db.query(ProgresoCalorias).filter(
         ProgresoCalorias.client_id == cliente_id,
         ProgresoCalorias.fecha == hoy
@@ -487,8 +491,9 @@ async def registrar_peso(
     if peso_data.peso_kg < 30 or peso_data.peso_kg > 300:
         raise HTTPException(status_code=400, detail="Peso fuera de rango realista (30-300 kg)")
 
+
     # Verificar si ya existe registro para hoy
-    hoy = date.today()
+    hoy = get_peru_date()
     registro_existente = db.query(HistorialPeso).filter(
         HistorialPeso.client_id == cliente_id,
         HistorialPeso.fecha_registro == hoy
@@ -564,7 +569,9 @@ async def registrar_calorias_diarias(
     if calorias_data.calorias_consumidas < 0 or calorias_data.calorias_quemadas < 0:
         raise HTTPException(status_code=400, detail="Las calorías no pueden ser negativas")
 
-    hoy = date.today()
+    
+    from app.core.utils import get_peru_date
+    hoy = get_peru_date()
 
     # Verificar si ya existe registro para hoy
     registro_existente = db.query(ProgresoCalorias).filter(

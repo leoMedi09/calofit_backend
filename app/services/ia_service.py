@@ -81,12 +81,21 @@ CONDICIONES_CRITICAS = [
 class IAService:
     # v43.0: CONSTANTES DE PROCESAMIENTO REUTILIZABLES (Pre-compiladas para velocidad)
     TRADUCTORES_REGIONALES = {
+        "ají amarillo": "ají amarillo", "ají panca": "ají panca", "rocoto": "ají", "huacatay": "huacatay",
+        "culantro": "cilantro", "papa amarilla": "papa amarilla", "papa blanca": "papa blanca", "chuño": "papa seca",
+        "charqui": "carne de res seca", "maíz morado": "maíz morado", "choclo": "choclo", "mote": "maíz mote",
+        "cancha": "maíz cancha", "olluco": "olluco", "zapallo loche": "zapallo", "cabrito": "carne de cabrito",
+        "cuy": "carne de cuy", "yuyo": "algas", "tarwi": "chocho", "maca": "maca", "quinua": "quinua",
         "plátano verde": "plátano de seda", "plátano maduro": "plátano de seda",
         "tacacho": "plátano, de seda", "cecina": "cerdo, carne magra, cruda*",
         "chancho": "cerdo, carne magra, cruda*", "pechuga": "pollo, carne magra",
         "pollo": "pollo, carne", "asado": "res, carne", "bistec": "res, carne magra",
         "yucca": "yuca, raíz", "yuca": "yuca, raíz", "arroz": "arroz blanco corriente",
-        "aceite de oliva": "aceite vegetal de oliva", "aceite de coco": "aceite vegetal de coco"
+        "aceite de oliva": "aceite vegetal de oliva", "aceite de coco": "aceite vegetal de coco",
+        "quinoa": "quinua", "jitomate": "tomate", "betabel": "beterraga", "ejote": "vainita",
+        "elote": "choclo", "cacahuate": "maní", "puerco": "cerdo", "aguacate": "palta",
+        "camote": "camote, raíz", "yuca": "yuca, raíz", "soja": "sillao", "soya": "sillao", "lentejas rojas": "lenteja roja", "lenteja roja": "lenteja roja",
+        "lomo": "res, carne magra", "gallina": "gallina, pechuga", "pato": "pato, carne", "avena": "avena, hojuelas", "atun": "pescado atun"
     }
 
     PALABRAS_RUIDO = [
@@ -705,9 +714,9 @@ class IAService:
 
         try:
             response = self.groq_client.chat.completions.create(
-                model="gemma2-9b-it",
+                model="llama-3.1-8b-instant",
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=50,
+                max_tokens=60,
                 temperature=0.5
             )
             return response.choices[0].message.content.strip()
@@ -1059,6 +1068,7 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
      [CALOFIT_ACTION] Pasos... [/CALOFIT_ACTION]
 
    - ⛔ PROHIBIDO: Escribir "Opción 1:", "Opción 2:" o "Opción 3:" al final del bloque CHAT o dentro del [CALOFIT_HEADER]. SOLO el nombre del plato.
+   - ⚠️ CONSISTENCIA (CRÍTICO): Genera el [CALOFIT_LIST] con ingredientes REALES. El sistema calculará las calorías exactas basándose en tu lista. Si incluyes Lomo Saltado, asegúrate de listar carne, papa, arroz y vegetales en cantidades precisas (ej: 150g de carne, 1 taza de arroz) para que el registro posterior coincida con lo mostrado.
    - ⛔ PROHIBIDO: Escribir "Ingredientes:" o "Preparación:" DENTRO de los bloques.
    - ⚠️ CONTROL CALÓRICO: Si el usuario pidió "ligero" o "baja caloría", CADA OPCIÓN debe tener raciones pequeñas y macros precisos.
 
@@ -1070,10 +1080,11 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
 ### 🛡️ SEGURIDAD Y REALIDAD:
 1. LESIONES: Si menciona dolor de rodilla/espalda, PROHIBIDO impacto. Sugiere movilidad.
 2. CONDICIONES CRÍTICAS: Si tiene Diabetes/Hipertensión, prioritiza dietas bajas en azúcar/sodio y añade disclaimer médico.
-3. CONOCIMIENTO PERUANO: 
-   - TACACHO: Plátano verde machacado con manteca. NO pan.
-   - CEVICHE DE PATO: Es un guiso caliente con naranja agria y ají amarillo. NO pescado.
-   - CALIDAD: Las recetas deben ser CULINARIAMENTE CORRECTAS.
+3. CONOCIMIENTO PERUANO Y CASERO (CRÍTICO): 
+   - SIEMPRE enfatiza productos del día a día: **Avena**, **Atún en lata**, **Huevos**, **Arroz**, **Pan**.
+   - PLATOS FUERTES PERUANOS: Recomienda **Lomo Saltado**, **Ají de Gallina**, **Arroz con Pato**, **Seco de Pollo**, **Lentejas con Arroz**.
+   - ⚠️ ADAPTACIÓN VEGANA: Si el perfil es Vegano, transforma los platos: "Saltado de Seitán" (en lugar de Lomo), "Ají de Setas" (en lugar de Gallina), "Seco de Tofu".
+   - CALIDAD: Las recetas deben ser CULINARIAMENTE CORRECTAS y usar ingredientes exactos de la lista para cálculos rápidos.
 
 ### 🥗 ESTRUCTURA OBLIGATORIA PARA RECETAS:
 1. [CALOFIT_LIST] = **INGREDIENTES** (OBLIGATORIO):
@@ -1399,18 +1410,26 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
 
                 unidad = (unidad_raw or ("g" if not cant_raw else "")).strip().lower()
                 
-                # 1. Limpieza de nombre
-                nombre_base = re.split(r'[,;\(\)]', nombre_base)[0].strip().rstrip('.')
+                # 1. Limpiar nombre y cantidad (Preservar paréntesis para no perder 'rojas', 'blanco', etc)
+                nombre_base = nombre_raw.replace('(', ' ').replace(')', ' ').lower().strip()
+                
+                # 🛡️ PROTECCIÓN: Evitar procesar etiquetas como ingredientes
+                if "[calofit_" in nombre_base:
+                    continue
+                
+                # Limpiar comas y puntos finales (ej: "pollo, cocido." -> "pollo")
+                nombre_base = re.split(r'[,;]', nombre_base)[0].strip().rstrip('.')
+                
                 for ruido in self.PALABRAS_RUIDO:
                     nombre_base = nombre_base.replace(ruido, "").strip()
                 
                 if len(nombre_base) < 3: continue
 
-                # 2. Aplicar Traductores Regionales
+                # 2. Aplicar Traductores Regionales (Sin perder el contexto, ej: 'quinoa cocida' -> 'quinua cocida')
                 for t_orig, t_dest in self.TRADUCTORES_REGIONALES.items():
                     if t_orig in nombre_base:
-                        nombre_base = t_dest
-                        break
+                        nombre_base = nombre_base.replace(t_orig, t_dest)
+                        # No rompas, puede haber varios términos
 
                 # 3. Heurística de Unidades Mejorada
                 if not unidad:
@@ -1418,6 +1437,8 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
                         unidad = "unidad"
                     elif any(u in nombre_base for u in ["rebanada", "tajada", "loncha"]):
                         unidad = "rebanada"
+                    elif "lata" in nombre_base:
+                        unidad = "lata"
 
                 # v3.1: Parsing secundario de cantidad en paréntesis (ej: "pechuga (120g)")
                 match_parens = re.search(r'\((\d+(?:[.,]\d+)?)\s*(g|gr|ml)\)', nombre_base)
@@ -1429,14 +1450,21 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
                 # 4. Normalización de peso
                 if unidad in ['g', 'gr', 'gramos', 'ml']: pass
                 elif unidad in ['taza', 'tazas']: cantidad *= 200 
-                elif unidad in ['unidad', 'unidades', 'pieza', 'piezas']: 
-                    # Pechuga promedio = 150g, Huevo = 60g
-                    cantidad *= 150 if any(x in nombre_base for x in ["pechuga", "carne", "bistec"]) else (60 if "huevo" in nombre_base else 100)
+                elif unidad in ['unidad', 'unidades', 'pieza', 'piezas', 'mediano', 'mediana']: 
+                    # Pechuga promedio = 150g, Huevo = 60g, Palta = 150g
+                    if any(x in nombre_base for x in ["pechuga", "carne", "bistec", "palta", "aguacate"]):
+                        cantidad *= 150
+                    elif "huevo" in nombre_base:
+                        cantidad *= 60
+                    else:
+                        cantidad *= 100
                 elif unidad in ['rebanada', 'rebanadas', 'tajada', 'tajadas']:
-                    cantidad *= 30 # Tajada estándar (bajado de 40 a 30)
+                    cantidad *= 30 
                 elif unidad in ['cucharada', 'cucharadas']: cantidad *= 15
                 elif unidad in ['cucharadita', 'cucharaditas']: cantidad *= 5
+                elif unidad in ['lata', 'latas']: cantidad *= 120 # Peso drenado promedio
                 elif unidad == 'kg': cantidad *= 1000
+                elif unidad == 'porcion' or unidad == 'porción': cantidad *= 250
 
                 # 5. Búsqueda en BD (solo RAM - sin SQLite para evitar timeouts)
                 info = nutricion_service.obtener_info_alimento_fast(nombre_base)
@@ -1497,9 +1525,9 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
             elif any(k in header_text or k in msg_low for k in ["snack", "merienda", "media", "postre"]):
                 limite_calorico = 150.0 if es_ligero else 250.0
             elif any(k in header_text or k in msg_low for k in ["almuerzo", "lunch", "comida"]):
-                limite_calorico = 500.0 if es_ligero else 800.0
+                limite_calorico = 550.0 if es_ligero else 950.0
             elif any(k in header_text or k in msg_low for k in ["cena", "ceña", "noche"]):
-                limite_calorico = 350.0 if es_ligero else 600.0
+                limite_calorico = 400.0 if es_ligero else 700.0
             else:
                 limite_calorico = 450.0 if es_ligero else 750.0 # Default
             

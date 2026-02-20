@@ -152,7 +152,8 @@ async def consultar_asistente(
 
     # 4. 🧠 CALCULAR ADHERENCIA Y PROGRESO PARA LÓGICA DIFUSA
     # Obtener progreso de calorías de hoy
-    hoy = datetime.now().date()
+    from app.core.utils import get_peru_date
+    hoy = get_peru_date()
     progreso_hoy = db.query(ProgresoCalorias).filter(
         ProgresoCalorias.client_id == perfil.id,
         ProgresoCalorias.fecha == hoy
@@ -321,7 +322,8 @@ async def registro_inteligente_nlp(
         }
         
     # 2. Actualizar ProgresoCalorias
-    hoy = datetime.now().date()
+    from app.core.utils import get_peru_date
+    hoy = get_peru_date()
     progreso = db.query(ProgresoCalorias).filter(
         ProgresoCalorias.client_id == perfil.id,
         ProgresoCalorias.fecha == hoy
