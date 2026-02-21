@@ -73,17 +73,22 @@ def parsear_respuesta_para_frontend(texto_principal: str, mensaje_usuario: str =
                     elif comida_score > 0:
                         tipo = "comida"
                 
-                # Limpiar items - Regex mejorado para NO borrar cantidades (ej: "100g")
+                # Limpiar items - Regex mejorado (v63): No borrar (X kcal)
                 if lista:
                     items_raw = lista.group(1).strip().split('\n')
                 else:
-                    # Fallback: Buscar líneas con bullets en el bloque si no hay etiqueta
                     items_raw = re.findall(r'^\s*[-\*•]\s+(.+)$', bloque, re.MULTILINE)
 
-                # Solo borra bullets (*, -, •) o números seguidos de punto/paréntesis (1., 1))
-                items = [re.sub(r'^(\s*[-\*•]\s?|\s*\d+[\.\)]\s?)', '', i).strip() for i in items_raw if i.strip()]
-                # Filtrar líneas que solo digan "ingredientes:" o similar
-                items = [i for i in items if not re.match(r'^(ingredientes|ejercicios|lista)[:\.]?$', i, re.IGNORECASE)]
+                # v63: Solo borra bullets, NO borra el contenido entre paréntesis si parece kcal
+                items = []
+                for i in items_raw:
+                    linea = i.strip()
+                    if not linea: continue
+                    # Limpiar bullet inicial
+                    linea = re.sub(r'^(\s*[-\*•]\s?|\s*\d+[\.\)]\s?)', '', linea).strip()
+                    # Filtrar encabezados de lista
+                    if re.match(r'^(ingredientes|ejercicios|lista)[:\.]?$', linea, re.IGNORECASE): continue
+                    items.append(linea)
 
                 # Limpiar pasos
                 if action:
@@ -98,15 +103,24 @@ def parsear_respuesta_para_frontend(texto_principal: str, mensaje_usuario: str =
                 pasos = [p for p in pasos if not re.match(r'^(preparaci[oó]n|instrucciones|pasos|tecnica)[:\.]?$', p, re.IGNORECASE)]
 
                 msg_stats = stats.group(1).strip() if stats else ""
-                # Limpiar texto extra como "(Ajustado a tu meta)" o emojis del stats
-                msg_stats_clean = re.sub(r'\(Ajustado.*?\)', '', msg_stats).strip()
-                if msg_stats_clean.endswith('\U0001f373'):  # emoji sarten
-                    msg_stats_clean = msg_stats_clean[:-1].strip()
+                # v64: Normalizar formato de macros para que el RecipeCard lo entienda perfectamente
+                # Eliminar emojis o texto extra que confunda al parseador de chips del frontend
+                msg_stats_clean = msg_stats.replace('💪', '').replace('🌾', '').replace('🥑', '').replace('🔥', '').strip()
+                # Asegurar formato P: X | C: Y | G: Z | Cal: W
+                msg_stats_clean = re.sub(r'\(Ajustado.*?\)', '', msg_stats_clean).strip()
+                
+                # Si el backend inyectó algo como "P: 30g, C: 20g" corregir a "|"
+                # v65.8: Solo reemplazar coma si va seguida de espacio y parece un nuevo macro (Proteína, Carbo, etc)
+                msg_stats_clean = re.sub(r',\s*(?=(?:P|C|G|Cal|Prot|Gras|Carb)\b)', ' | ', msg_stats_clean, flags=re.IGNORECASE)
+
+                # v65: Normalizar nombres de macros de largo a corto para el frontend
+                msg_stats_clean = re.sub(r'Prote\w*', 'P', msg_stats_clean, flags=re.IGNORECASE)
+                msg_stats_clean = re.sub(r'Carbo\w*', 'C', msg_stats_clean, flags=re.IGNORECASE)
+                msg_stats_clean = re.sub(r'Grasa\w*', 'G', msg_stats_clean, flags=re.IGNORECASE)
+                msg_stats_clean = re.sub(r'Calor\w*', 'Cal', msg_stats_clean, flags=re.IGNORECASE)
 
                 nombre_raw = header.group(1).strip() if header else "Sugerencia CaloFit"
                 nombre_clean = re.sub(r'^(Opción|Option|Plato|Rutina)\s*\d+[:\.]?\s*', '', nombre_raw, flags=re.IGNORECASE).strip()
-
-                print(f"📊 [Parser] Sección '{nombre_clean}' | tipo={tipo} | macros='{msg_stats_clean}'")
 
                 seccion = {
                     "tipo": tipo,
@@ -122,8 +136,8 @@ def parsear_respuesta_para_frontend(texto_principal: str, mensaje_usuario: str =
                     "nota": footer.group(1).strip() if footer else ""
                 }
                 
-        # De-duplicación inteligente (evitar misma sección repetida)
-                if not any(s["nombre"] == seccion["nombre"] and s["tipo"] == seccion["tipo"] for s in resultado["secciones"]):
+                # De-duplicación y guardado
+                if not any(s["nombre"] == seccion["nombre"] for s in resultado["secciones"]):
                     resultado["secciones"].append(seccion)
 
         # --- FASE 3: RECONSTRUCCIÓN DE COMPVERSACIÓN (SIN RESIDUOS DE RECETAS) ---

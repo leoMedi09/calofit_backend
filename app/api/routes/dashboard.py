@@ -52,7 +52,8 @@ async def get_daily_summary(
     plan_objetivo = None
     if plan_maestro:
         # Obtener el plan del día actual
-        dia_semana = datetime.now().isoweekday()
+        from app.core.utils import get_peru_now
+        dia_semana = get_peru_now().isoweekday()
         plan_hoy = db.query(PlanDiario).filter(
             PlanDiario.plan_id == plan_maestro.id,
             PlanDiario.dia_numero == dia_semana

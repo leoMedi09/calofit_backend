@@ -1088,8 +1088,12 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
 
 ### 🥗 ESTRUCTURA OBLIGATORIA PARA RECETAS:
 1. [CALOFIT_LIST] = **INGREDIENTES** (OBLIGATORIO):
-   - Lista exacta con cantidades (g, ml, unidad) para 1 persona.
-   - ❌ PROHIBIDO: Escribir la palabra "Ingredientes:".
+    - Lista exacta con cantidades lógicas para 1 persona:
+      * Sólidos/Proteínas: SIEMPRE en **gramos (g)**.
+      * Líquidos Grandes (agua, caldo, leche): **ml** o **tazas**.
+      * Aliños/Grasas (aceite, limón, vinagre): **cucharadas (cda)** o **cucharaditas (cdta)**.
+    - ⚠️ PROHIBIDO: Usar 'taza' para sólidos o proteínas (ej. espinaca, pollo, arroz).
+    - ❌ PROHIBIDO: Escribir la palabra "Ingredientes:".
 2. [CALOFIT_ACTION] = **PREPARACIÓN** (OBLIGATORIO):
    - Pasos breves y lógicos.
    - ❌ PROHIBIDO: Escribir la palabra "Preparación:".
@@ -1363,7 +1367,6 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
         NIVEL 3: CALCULADORA MATEMÁTICA REAL.
         Escanea la respuesta en busca de ingredientes y los valida contra la BD oficial.
         """
-        from app.services.nutricion_service import nutricion_service
         import re
 
         # 1. ESCÁNER DE BLOQUE (LISTA)
@@ -1385,6 +1388,9 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
             try:
                 # v31.0: Heurística de Cantidad Inteligente (Filtro Anti-Grasa)
                 nombre_base = nombre_raw.lower().strip()
+                
+                # v59: Buscar info del alimento para calcular macros reales
+                info = self.nutricion_service.obtener_info_alimento_fast(nombre_base)
                 
                 # Parsing de cantidad (Soporte decimal y fracción)
                 cantidad = 0.0
@@ -1410,103 +1416,148 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
 
                 unidad = (unidad_raw or ("g" if not cant_raw else "")).strip().lower()
                 
-                # 1. Limpiar nombre y cantidad (Preservar paréntesis para no perder 'rojas', 'blanco', etc)
-                nombre_base = nombre_raw.replace('(', ' ').replace(')', ' ').lower().strip()
-                
-                # 🛡️ PROTECCIÓN: Evitar procesar etiquetas como ingredientes
-                if "[calofit_" in nombre_base:
-                    continue
-                
-                # Limpiar comas y puntos finales (ej: "pollo, cocido." -> "pollo")
-                nombre_base = re.split(r'[,;]', nombre_base)[0].strip().rstrip('.')
-                
-                for ruido in self.PALABRAS_RUIDO:
-                    nombre_base = nombre_base.replace(ruido, "").strip()
-                
-                if len(nombre_base) < 3: continue
+                # 6. SINCRONIZACIÓN Y TOPES "Pancha Chef" (v59)
+                nombre_low = nombre_base.lower()
+                es_sal_o_especia = any(x in nombre_low for x in ["sal", "pimienta", "comino", "laurel", "clavo", "orégano", "especia"])
+                es_aceite_o_grasa = any(x in nombre_low for x in ["aceite", "mantequilla", "margarina", "manteca", "aliño"])
+                es_grano_o_base = any(x in nombre_low for x in ["arroz", "lenteja", "frijol", "frejol", "pasta", "fideo", "quinua", "avena"])
+                es_saborizante = any(x in nombre_low for x in ["agua", "hielo", "vinagre", "limón", "jugo de limón"])
 
-                # 2. Aplicar Traductores Regionales (Sin perder el contexto, ej: 'quinoa cocida' -> 'quinua cocida')
-                for t_orig, t_dest in self.TRADUCTORES_REGIONALES.items():
-                    if t_orig in nombre_base:
-                        nombre_base = nombre_base.replace(t_orig, t_dest)
-                        # No rompas, puede haber varios términos
+                # Aplicar Topes Físicos (v59)
+                cant_visual = cantidad
+                if es_sal_o_especia or es_saborizante:
+                    cals_item = 0.0
+                    if "cucharad" in unidad and cant_visual > 1.0: cant_visual = 1.0 # Max 1 cda sal
+                elif es_aceite_o_grasa:
+                    if "cucharad" in unidad and cant_visual > 2.0: cant_visual = 2.0 # Max 2 cda aceite
+                    elif "ml" in unidad and cant_visual > 30.0: cant_visual = 30.0
+                elif es_grano_o_base:
+                    if "taza" in unidad and cant_visual > 0.5: cant_visual = 0.5 # Max 0.5 tazas cocidas (Legumbres/Cereales)
+                    elif "g" in unidad and cant_visual > 200.0: cant_visual = 200.0
 
-                # 3. Heurística de Unidades Mejorada
-                if not unidad:
-                    if any(u in nombre_base for u in ["huevo", "manzana", "plátano", "pan", "tostada", "fruta"]):
-                        unidad = "unidad"
-                    elif any(u in nombre_base for u in ["rebanada", "tajada", "loncha"]):
-                        unidad = "rebanada"
-                    elif "lata" in nombre_base:
-                        unidad = "lata"
-
-                # v3.1: Parsing secundario de cantidad en paréntesis (ej: "pechuga (120g)")
-                match_parens = re.search(r'\((\d+(?:[.,]\d+)?)\s*(g|gr|ml)\)', nombre_base)
-                if match_parens:
-                    cantidad = float(match_parens.group(1).replace(',', '.'))
-                    unidad = match_parens.group(2)
-                    # print(f"🎯 Parsing Exacto desde Paréntesis: {cantidad}{unidad}")
-
-                # 4. Normalización de peso
-                if unidad in ['g', 'gr', 'gramos', 'ml']: pass
-                elif unidad in ['taza', 'tazas']: cantidad *= 200 
-                elif unidad in ['unidad', 'unidades', 'pieza', 'piezas', 'mediano', 'mediana']: 
-                    # Pechuga promedio = 150g, Huevo = 60g, Palta = 150g
-                    if any(x in nombre_base for x in ["pechuga", "carne", "bistec", "palta", "aguacate"]):
-                        cantidad *= 150
-                    elif "huevo" in nombre_base:
-                        cantidad *= 60
-                    else:
-                        cantidad *= 100
-                elif unidad in ['rebanada', 'rebanadas', 'tajada', 'tajadas']:
-                    cantidad *= 30 
-                elif unidad in ['cucharada', 'cucharadas']: cantidad *= 15
-                elif unidad in ['cucharadita', 'cucharaditas']: cantidad *= 5
-                elif unidad in ['lata', 'latas']: cantidad *= 120 # Peso drenado promedio
-                elif unidad == 'kg': cantidad *= 1000
-                elif unidad == 'porcion' or unidad == 'porción': cantidad *= 250
-
-                # 5. Búsqueda en BD (solo RAM - sin SQLite para evitar timeouts)
-                info = nutricion_service.obtener_info_alimento_fast(nombre_base)
                 if info:
                     nombre_encontrado = info.get("alimento", "").lower()
-                    
-                    # VALIDACIÓN DE CATEGORÍA: Evitar que 'Pechuga' mapee a 'Bazo'
-                    # Si buscamos pollo/pechuga y encontramos visceras (bazo, higado, riñon), forzar re-búsqueda o ignorar
-                    if "pechuga" in nombre_base and any(v in nombre_encontrado for v in ["bazo", "higado", "riñon", "sangrecita"]):
-                        # Fallback manual seguro
-                        info = {"alimento": "pollo, carne magra", "calorias": 110, "proteinas": 23.0, "carbohidratos": 0.0, "grasas": 1.2}
-                        nombre_encontrado = "pollo, carne magra (fallback)"
-                        # print(f"⚠️ Corrección de Mapeo: '{nombre_base}' redirigido a Pollo Magro.")
-
-                    f = cantidad / 100.0
+                    f = (cant_visual if unidad in ['g', 'ml'] else cantidad) / 100.0
                     
                     cal_base = (info.get("calorias") or 0)
                     prot_base = (info.get("proteinas") or 0)
                     carb_base = (info.get("carbohidratos") or 0)
                     gras_base = (info.get("grasas") or 0)
                     
-                    # v35.0: MODIFICADORES DE COCCIÓN (Lógica de Fritura)
                     if any(x in nombre_raw.lower() for x in ["frito", "frita", "fritos", "fritas"]):
                         if "frito" not in nombre_encontrado:
                             gras_base += 8.0
                             cal_base += 72.0
-                            print(f"🍳 Lógica de Cocción: Penalizando fritura para '{nombre_raw}'")
 
-                    cals_item = cal_base * f
+                    # Forzar 0 cals para saborizantes aunque estén en BD
+                    if es_saborizante or es_sal_o_especia:
+                        cals_item = 0.0
+                    else:
+                        cals_item = cal_base * f
+                        
                     cals_total += cals_item
                     prot_total += prot_base * f
                     carb_total += carb_base * f
                     gras_total += gras_base * f
                     
-                    # print(f"📊 Nutri-Debug: '{nombre_raw}' ({cant_raw or '?'}) -> '{nombre_encontrado}' | Qty: {cantidad}{unidad} | F: {f:.2f} | Cals: {cals_item:.2f}")
-
                     encontrados_count += 1
                 else:
-                    if nombre_base not in ["sal", "pimienta", "agua", "hielo", "vinagre", "limón", "jugo de limón"]:
+                    cals_item = 0.0 if (es_saborizante or es_sal_o_especia) else 0.0
+                    if not es_saborizante and not es_sal_o_especia:
                         ingredientes_no_encontrados.append(nombre_base)
+
             except: continue
 
+        # v65.7: Capturar el total original antes del tope para el escalado proporcional de ingredientes
+        cals_total_original = cals_total
+        
+        # v59: Función de Sincronización de Lista (Post-Procesamiento)
+        def corregir_items_lista(match_bloque):
+            bloque = match_bloque.group(1)
+            nuevas_lineas = []
+            factor_scale = 1.0
+            if cals_total_original > limite_calorico_dynamic:
+                factor_scale = limite_calorico_dynamic / max(cals_total_original, 1.0)
+
+            for linea in bloque.split('\n'):
+                if not linea.strip(): continue
+                match_ing = self.PATRON_INGREDIENTE.search(linea)
+                if match_ing:
+                    c, u, n = match_ing.groups()
+                    n_low = n.lower()
+                    # Re-calcular cals para esta línea específica para el label
+                    es_0 = any(x in n_low for x in ["sal", "pimienta", "agua", "laurel", "clavo", "vinagre", "limón", "hielo"])
+                    
+                    # Heurística rápida para el label visual
+                    linea_clean = linea.split('(')[0].strip()
+                    if es_0:
+                        nuevas_lineas.append(f"{linea_clean} (0 kcal)")
+                    else:
+                        # Estimación para el label (v65: Limpiar ruido antes de buscar)
+                        n_limpio = n.lower()
+                        for ruido in self.PALABRAS_RUIDO:
+                            n_limpio = n_limpio.replace(ruido, "").strip()
+                        
+                        info_v = self.nutricion_service.obtener_info_alimento_fast(n_limpio)
+                        if not info_v:
+                            # Fallback 2: Buscar con el nombre original si el limpio falló
+                            info_v = self.nutricion_service.obtener_info_alimento_fast(n)
+
+                        if info_v:
+                            # Normalizar cantidad para el label
+                            cv = float(c.replace(',', '.')) if c else 1.0
+                            
+                            # v66.7: Lógica Culinaria Inteligente (Normalizador de Unidades)
+                            n_low = n.lower()
+                            # Detección de Categorías
+                            es_protein = any(px in n_low for px in ["pollo", "carne", "res", "pescado", "chancho", "cerdo", "pavo", "huevo", "atún", "lomo"])
+                            es_liquido_grande = any(lk in n_low for lk in ["agua", "leche", "caldo", "sopa", "infusión", "infusion", "café", "cafe", "té", "te", "bebida", "yogur"])
+                            es_aliño_grasa = any(ak in n_low for ak in ["limón", "limon", "aceite", "vinagre", "sillao", "soya", "ají", "aji", "aliño", "alino", "mantequilla"])
+                            
+                            linea_remplazo = linea_clean
+                            u_low = u.lower() if u else ""
+                            
+                            # Regla 1: Proteínas / Sólidos NO pueden ir en tazas -> Gramos
+                            if u_low in ['taza', 'tazas'] and (es_protein or not (es_liquido_grande or es_aliño_grasa)):
+                                es_hoja = any(hk in n_low for hk in ["espinaca", "lechuga", "albahaca", "col", "repollo", "acelga", "brote"])
+                                factor_unit = 35 if es_hoja else 180
+                                cv = cv * factor_unit
+                                linea_remplazo = re.sub(rf"{c}\s*{u}", f"{cv:.0f} g", linea_remplazo, flags=re.IGNORECASE)
+                            
+                            # Regla 2: Aliños / Grasas en GRAMOS -> Convertir a Cucharadas/Cucharaditas
+                            elif u_low in ['g', 'gr', 'gramos'] and es_aliño_grasa:
+                                if cv <= 7: 
+                                    u_new, f_conv = "cdta", 5.0
+                                else: 
+                                    u_new, f_conv = "cda", 15.0
+                                cv_new = max(1.0, round(cv / f_conv, 1))
+                                cv_str = f"{int(cv_new)}" if cv_new == int(cv_new) else f"{cv_new}".replace('.', ',')
+                                linea_remplazo = re.sub(rf"{c}\s*{u}", f"{cv_str} {u_new}", linea_remplazo, flags=re.IGNORECASE)
+
+                            # Regla 3: Líquidos Grandes en GRAMOS -> Convertir a ml o Taza
+                            elif u_low in ['g', 'gr', 'gramos'] and es_liquido_grande:
+                                if cv >= 200:
+                                    cv_new = round(cv / 200.0, 1)
+                                    cv_str = f"{int(cv_new)}" if cv_new == int(cv_new) else f"{cv_new}".replace('.', ',')
+                                    linea_remplazo = re.sub(rf"{c}\s*{u}", f"{cv_str} taza", linea_remplazo, flags=re.IGNORECASE)
+                                else:
+                                    linea_remplazo = re.sub(rf"{c}\s*{u}", f"{cv:.0f} ml", linea_remplazo, flags=re.IGNORECASE)
+                            
+                            # Conversión estándar para cálculos internos si no se cambió arriba
+                            else:
+                                if u in ['taza', 'tazas']: cv *= 200
+                                elif u in ['cucharada', 'cucharadas', 'cda']: cv *= 15
+                                elif u in ['cucharadita', 'cucharaditas', 'cdta']: cv *= 5
+                                elif u in ['unidad', 'unidades']: cv *= 150
+                            
+                            c_visual = (info_v.get("calorias") or 0) * (cv / 100.0) * factor_scale
+                            nuevas_lineas.append(f"{linea_remplazo} ({c_visual:.0f} kcal)")
+                        else:
+                            nuevas_lineas.append(linea)
+                else:
+                    nuevas_lineas.append(linea)
+            return "[CALOFIT_LIST]\n" + "\n".join(nuevas_lineas) + "\n[/CALOFIT_LIST]"
+        
         # Inyección de Stats Blindadas
         if encontrados_count > 0:
             # --- 🛡️ SANITY CHECK: Limitar Calorías Absurdas (v39.0 - AUTO-SCALE) ---
@@ -1519,30 +1570,27 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
             
             es_ligero = any(k in msg_low or k in header_text for k in ["ligero", "ligera", "baja", "bajo", "light", "diet", "bajar", "poco"])
             
-            # Definir límites por tipo de comida
+            limite_calorico_dynamic = 450.0 if es_ligero else 750.0
             if any(k in header_text or k in msg_low for k in ["desayuno", "breakfast", "mañana"]):
-                limite_calorico = 300.0 if es_ligero else 500.0
+                limite_calorico_dynamic = 300.0 if es_ligero else 500.0
             elif any(k in header_text or k in msg_low for k in ["snack", "merienda", "media", "postre"]):
-                limite_calorico = 150.0 if es_ligero else 250.0
+                limite_calorico_dynamic = 150.0 if es_ligero else 250.0
             elif any(k in header_text or k in msg_low for k in ["almuerzo", "lunch", "comida"]):
-                limite_calorico = 550.0 if es_ligero else 950.0
+                limite_calorico_dynamic = 550.0 if es_ligero else 950.0
             elif any(k in header_text or k in msg_low for k in ["cena", "ceña", "noche"]):
-                limite_calorico = 400.0 if es_ligero else 700.0
-            else:
-                limite_calorico = 450.0 if es_ligero else 750.0 # Default
+                limite_calorico_dynamic = 400.0 if es_ligero else 700.0
             
             tag_ajuste = ""
-            if cals_total > limite_calorico:
-                # Factor de corrección para ajustar la porción matemática (Evitar div/0)
-                factor = limite_calorico / max(cals_total, 1.0)
-                
-                # Aplicar reducción
-                cals_total = limite_calorico
+            if cals_total > limite_calorico_dynamic:
+                factor = limite_calorico_dynamic / max(cals_total, 1.0)
+                cals_total = limite_calorico_dynamic
                 prot_total *= factor
                 carb_total *= factor
                 gras_total *= factor
-                
                 tag_ajuste = " (Ajustado a tu meta)"
+
+            # v59: Aplicar la Sincronización a la Respuesta IA
+            respuesta_ia = re.sub(patron_bloque, corregir_items_lista, respuesta_ia, flags=re.DOTALL)
 
             regex_stats = r'\[CALOFIT_STATS\].*?\[/CALOFIT_STATS\]'
             res_final = f"P: {prot_total:.1f}g | C: {carb_total:.1f}g | G: {gras_total:.1f}g | Cal: {cals_total:.0f}kcal{tag_ajuste}"
@@ -1555,12 +1603,17 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
             # e.j. [CALOFIT_HEADER] Pollo P: 20g [/CALOFIT_HEADER] -> [CALOFIT_HEADER] Pollo [/CALOFIT_HEADER]
             respuesta_ia = re.sub(r'(\[CALOFIT_HEADER\].*?) (?:P|C|G|Cal):.*?(?=\[/CALOFIT_HEADER\])', r'\1', respuesta_ia, flags=re.IGNORECASE)
 
-            # Reemplazar TODAS las etiquetas de stats (v26.1)
+            # Reemplazar TODAS las etiquetas de stats (v26.1, v61)
             if re.search(regex_stats, respuesta_ia, re.DOTALL):
                 respuesta_ia = re.sub(regex_stats, macros_inyectados, respuesta_ia, flags=re.DOTALL)
             else:
+                # Si no hay stats pero hay un bloque de lista o header, inyectar después del header (solo el primer match)
                 if "[/CALOFIT_HEADER]" in respuesta_ia:
-                    respuesta_ia = respuesta_ia.replace("[/CALOFIT_HEADER]", "[/CALOFIT_HEADER]\n" + macros_inyectados)
+                    respuesta_ia = respuesta_ia.replace("[/CALOFIT_HEADER]", "[/CALOFIT_HEADER]\n" + macros_inyectados, 1)
+                elif "[/CALOFIT_LIST]" in respuesta_ia:
+                    respuesta_ia = respuesta_ia.replace("[/CALOFIT_LIST]", "[/CALOFIT_LIST]\n" + macros_inyectados, 1)
+                else:
+                    respuesta_ia += "\n" + macros_inyectados
             
             self.ultimas_calorias_calculadas = cals_total
             

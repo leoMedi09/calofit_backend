@@ -38,16 +38,39 @@ async def obtener_balance_hoy(
     objetivo_diario = 2000 # Default
     if plan_activo:
         # Intentar obtener meta especifica del dia
-        dia_semana = datetime.now().isoweekday()
+        from app.core.utils import get_peru_now
+        dia_semana = get_peru_now().isoweekday()
         plan_hoy = db.query(PlanDiario).filter(
             PlanDiario.plan_id == plan_activo.id,
             PlanDiario.dia_numero == dia_semana
         ).first()
         
+        if not plan_hoy:
+             # Si no hay para hoy, tomar el primero disponible (Lógica Dashboard)
+             plan_hoy = db.query(PlanDiario).filter(
+                 PlanDiario.plan_id == plan_activo.id
+             ).first()
+
         if plan_hoy:
              objetivo_diario = plan_hoy.calorias_dia
         else:
              objetivo_diario = plan_activo.calorias_ia_base or 2000
+    else:
+        # 🆕 FALLBACK IA (Lógica Dashboard): Calcular si no hay plan
+        from app.services.ia_service import ia_engine
+        from datetime import date
+        genero_map = {"M": 1, "F": 2}
+        genero = genero_map.get(cliente.gender, 1)
+        edad = (date.today().year - cliente.birth_date.year) if cliente.birth_date else 25
+        nivel_map = {"Sedentario": 1.20, "Ligero": 1.375, "Moderado": 1.55, "Activo": 1.725, "Muy activo": 1.90}
+        nivel_actividad = nivel_map.get(cliente.activity_level, 1.20)
+        objetivo_map = {"Perder peso": "perder", "Mantener peso": "mantener", "Ganar masa": "ganar"}
+        objetivo = objetivo_map.get(cliente.goal, "mantener")
+        
+        objetivo_diario = ia_engine.calcular_requerimiento(
+            genero=genero, edad=edad, peso=cliente.weight, talla=cliente.height,
+            nivel_actividad=nivel_actividad, objetivo=objetivo
+        )
     
     # Obtener progreso de hoy
     
