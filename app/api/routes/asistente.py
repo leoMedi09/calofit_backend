@@ -424,6 +424,6 @@ async def registro_inteligente_nlp(
             "sodio_mg": extraccion.get("sodio_mg", 0),
             "calidad": extraccion.get("calidad_nutricional", "Media"),
         },
-        "mensaje": f"✅ Registré: **{nombre_str}** — {extraccion.get('calorias', 0)} kcal. ¡Buen trabajo!"
+        "mensaje": f"✅ Registré: {nombre_str} — {extraccion.get('calorias', 0)} kcal. ¡Buen trabajo!".replace("*", "")
     }
 

@@ -101,7 +101,8 @@ class IAService:
         "lenteja": "lentejas chicas cocidas", "lentejas": "lentejas chicas cocidas", "lentejas cocidas": "lentejas chicas cocidas",
         "cebollita china": "cebolla china", "cebolla": "cebolla roja", "jengibre": "kion", "pecanas": "pecana",
         "ajonjoli": "semilla de ajonjolí*", "ajonjolí": "semilla de ajonjolí*", "sillao": "sillao",
-        "pepino": "pepinillo sin cáscara", "caldo vegetal": "caldo de pollo, o gallina*", "champiñones": "setas", "quinoa": "quinua"
+        "pepino": "pepinillo sin cáscara", "caldo vegetal": "caldo de pollo, o gallina*", "champiñones": "setas", "quinoa": "quinua",
+        "poro": "cebolla blanca", "apio": "apio", "coliflor": "coliflor", "vainitas": "vainita", "pimiento": "pimiento", "zapallito": "zapallito italiano"
     }
 
     PALABRAS_RUIDO = [
@@ -109,8 +110,8 @@ class IAService:
         "opcional", "maduros", "verdes", "frescos", "limpio", "limpia", "frescas",
         "picados", "cortados", "en trozos", "grandes", "pequeños", "rebanadas",
         "cocida", "cocidas", "cocido", "cocidos", "crujiente", "lavada", "lavado",
-        "verduras", "vegetales", "deshilachada", "deshilachado", "molida", "molido", "picadita", "picadito",
-        "cocida en agua", "cocidas en agua", "cocido en agua", "en agua", "con agua"
+        "verduras", "vegetales", "deshilachada", "deshilachado", "molida", "molido", "picadita", "picadito", "picada", "picado",
+        "cocida en agua", "cocidas en agua", "cocido en agua", "en agua", "con agua", "en cubos", "en rodajas", "en juliana", "trozado", "trozada", "fresco", "fresca"
     ]
 
     # Pre-compilar regex para máximo rendimiento en bucles
@@ -811,6 +812,12 @@ class IAService:
             )
             response_json = json.loads(response.choices[0].message.content.strip())
             
+            # v69.3: Limpieza profunda de nombres (eliminar ** que la IA a veces inyecta)
+            if "alimentos_detectados" in response_json:
+                response_json["alimentos_detectados"] = [a.replace("*", "").strip() for a in response_json["alimentos_detectados"]]
+            if "ejercicios_detectados" in response_json:
+                response_json["ejercicios_detectados"] = [e.replace("*", "").strip() for e in response_json["ejercicios_detectados"]]
+            
             # 🚀 ENHANCEMENT v2.0: CORRECCIÓN CON DATOS REALES (SQLite/JSON)
             # La IA es buena detectando nombres, pero mala con números exactos de marcas.
             # Usamos el NutricionService para corregir los valores.
@@ -830,24 +837,16 @@ class IAService:
                 alimentos_corregidos = []
                 
                 for alimento_nombre in response_json["alimentos_detectados"]:
-                    # Buscar en BD (solo RAM, sin SQLite para velocidad)
-                    info_real = self.nutricion_service.obtener_info_alimento_fast(alimento_nombre)
+                    # v70.0: Usar el motor único para coherencia absoluta
+                    res = self._calcular_exacto_de_alimento(alimento_nombre, "1", "unidad")
                     
-                    if info_real:
-                        print(f"✅ DATO REAL ENCONTRADO: {alimento_nombre} -> {info_real['nombre']} ({info_real['calorias']} kcal)")
-                        # Usar valores reales (Asumiendo 1 porción/unidad detectada, o promedio 100g si no se especifica)
-                        
-                        total_cal += info_real.get('calorias', 0)
-                        total_prot += info_real.get('proteinas', 0)
-                        total_carb += info_real.get('carbohidratos', 0)
-                        total_gras += info_real.get('grasas', 0)
-                        
-                        # Sumar micros si existen
-                        total_azucar += info_real.get('azucares', 0) or 0
-                        total_fibra += info_real.get('fibra', 0) or 0
-                        total_sodio += info_real.get('sodio', 0) or 0
-                        
-                        alimentos_corregidos.append(f"{info_real['nombre']} (Verificado)")
+                    if res["encontrado"]:
+                        print(f"✅ DATO REAL ENCONTRADO (v70.0): {alimento_nombre} -> {res['cals']} kcal")
+                        total_cal += res["cals"]
+                        total_prot += res["prot"]
+                        total_carb += res["carb"]
+                        total_gras += res["gras"]
+                        alimentos_corregidos.append(f"{alimento_nombre} (Verificado)")
                     else:
                         print(f"⚠️ No encontrado en BD: {alimento_nombre}. Manteniendo estimación IA.")
                         pass
@@ -864,7 +863,9 @@ class IAService:
                     response_json["azucar_g"] = float(round(total_azucar, 1))
                     response_json["fibra_g"] = float(round(total_fibra, 1))
                     response_json["sodio_mg"] = float(round(total_sodio, 1))
-                    response_json["calidad_nutricional"] += " (Verificado con Base de Datos Oficial)"
+                    # v69.0: NO inyectar textos largos aquí, rompen la UI del móvil.
+                    # El campo 'calidad_nutricional' debe ser corto: "Alta", "Media" o "Baja".
+                    # response_json["calidad_nutricional"] += " (Verificado...)" <- ELIMINADO
                 else:
                      print(f"⚠️ Cobertura parcial ({len(alimentos_corregidos)}/{len(response_json['alimentos_detectados'])}). Usando estimación IA para evitar subestimación.")
 
@@ -1052,10 +1053,21 @@ USA EL TAG [CALOFIT_INTENT: CHAT] AL INICIO DE TU RESPUESTA.
 - NO uses etiquetas como 'Plato:', 'Rutina:', [CALOFIT_HEADER] o [CALOFIT_STATS].
 Respuestas en texto plano sin formatos complejos.""".replace("{contexto}", contexto).replace("{texto_extra}", texto_extra)
         else:
-            system_content = """OPERANDO BAJO EL PROTOCOLO 'CALOFIT UNIFIED V3.0' (FALLO CERO).
+            system_content = """OPERANDO BAJO EL PROTOCOLO 'CALOFIT UNIFIED V3.1' (PROTOCOLO INQUEBRANTABLE).
+### REGLA DE ORO #0:
+TODA receta o rutina DEBE usar obligatoriamente los bloques [CALOFIT_INTENT], [CALOFIT_HEADER], [CALOFIT_LIST] y [CALOFIT_ACTION].
+PROHIBIDO responder en texto plano sin estas etiquetas bajo ninguna circunstancia (incluso si pides dieta o bajo en calorías).
+
 ### ESTATUS DEL USUARIO:
 {contexto}
 {texto_extra}
+
+### 📏 REGLA DE UNIDADES (OBLIGATORIO):
+USA ÚNICAMENTE UNIDADES MÉTRICAS:
+- SÓLIDOS: **g** (gramos). NO USES TAZAS.
+- LÍQUIDOS/PURÉS: **ml** (mililitros). NO USES TAZAS.
+- PEQUEÑAS CANTIDADES: **cda** (cucharada) o **cdta** (cucharadita).
+- UNIDADES: **unidad** (ej: 1 unidad de huevo).
 
 ### 🏷️ REGLA MAESTRA DE CATEGORIZACIÓN (OBLIGATORIO):
 Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRAS ETIQUETAS.
@@ -1087,22 +1099,21 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
 [CALOFIT_INTENT: ITEM_WORKOUT] -> Para una rutina detallada (usar etiquetas blindadas).
 
 ### 🛡️ SEGURIDAD Y REALIDAD:
-1. LESIONES: Si menciona dolor de rodilla/espalda, PROHIBIDO impacto. Sugiere movilidad.
-2. CONDICIONES CRÍTICAS: Si tiene Diabetes/Hipertensión, prioritiza dietas bajas en azúcar/sodio y añade disclaimer médico.
-3. CONOCIMIENTO PERUANO Y CASERO (CRÍTICO): 
+1. LESIONES: Si menciona dolor de rodilla/espalda, PROHIBIDO impacto (saltos, correr). Sugiere movilidad y fuerza isométrica.
+2. ALERGIAS E INTOLERANCIAS (CRÍTICO): Revisa el perfil del usuario. SI es alérgico a un alimento (ej. Maní, Mariscos), PROHIBIDO incluirlo en la lista de ingredientes o preparación.
+3. CONDICIONES CRÍTICAS: Si tiene Diabetes/Hipertensión, prioritiza dietas bajas en azúcar/sodio y añade disclaimer médico.
+4. CONOCIMIENTO PERUANO Y CASERO (CRÍTICO): 
    - SIEMPRE enfatiza productos del día a día: **Avena**, **Atún en lata**, **Huevos**, **Arroz**, **Pan**.
    - PLATOS FUERTES PERUANOS: Recomienda **Lomo Saltado**, **Ají de Gallina**, **Arroz con Pato**, **Seco de Pollo**, **Lentejas con Arroz**.
    - ⚠️ ADAPTACIÓN VEGANA: Si el perfil es Vegano, transforma los platos: "Saltado de Seitán" (en lugar de Lomo), "Ají de Setas" (en lugar de Gallina), "Seco de Tofu".
-   - CALIDAD: Las recetas deben ser CULINARIAMENTE CORRECTAS y usar ingredientes exactos de la lista para cálculos rápidos.
-   - 💡 CONSULTA DE PLATOS: Si el usuario pregunta por un plato específico (ej. "¿Cuántas calorías tiene un arroz chaufa?"), NO respondas solo con texto genérico. Trátalo como un [CALOFIT_INTENT: ITEM_RECIPE], ofrece una versión balanceada del plato con su [CALOFIT_HEADER], [CALOFIT_LIST] detallado y [CALOFIT_ACTION] para que el usuario obtenga el registro nutricional exacto.
+   - 💡 CONSULTA DE PLATOS: Si el usuario pregunta por un plato específico, NO respondas solo con texto genérico. Trátalo como un [CALOFIT_INTENT: ITEM_RECIPE], ofrece una versión balanceada del plato.
 
 ### 🥗 ESTRUCTURA OBLIGATORIA PARA RECETAS:
     - ⚠️ PORCIONES (CRÍTICO): Todas las recetas y porciones DEBEN ser calculadas para **1 PERSONA** (un solo comensal). Si el usuario pide para más, multiplica las cantidades, pero por defecto siempre para 1.
     - Lista exacta con cantidades lógicas para 1 persona:
       * Sólidos/Proteínas: SIEMPRE en **gramos (g)**.
-      * Líquidos Grandes (agua, caldo, leche): **ml** o **tazas**.
+      * Líquidos Grandes (agua, caldo, leche): **ml**. (NO USAR TAZAS).
       * Aliños/Grasas (aceite, limón, vinagre): **cucharadas (cda)** o **cucharaditas (cdta)**.
-    - ⚠️ PROHIBIDO: Usar 'taza' para sólidos o proteínas (ej. espinaca, pollo, arroz).
     - 🥣 SOPAS Y CALDOS (OBLIGATORIO): Si sugieres una sopa o caldo, DEBES incluir "agua" o "caldo" como ingrediente base en la lista y mencionar el proceso de hervido en la preparación.
     - ❌ PROHIBIDO: Escribir la palabra "Ingredientes:".
 2. [CALOFIT_ACTION] = **PREPARACIÓN** (OBLIGATORIO):
@@ -1375,10 +1386,34 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
     # ✅ Función Matemática (Revertido nombre original para evitar crash)
     def validar_y_corregir_nutricion(self, respuesta_ia: str, mensaje_usuario: str = None) -> str:
         """
-        v67.7: MOTOR DE VALIDACIÓN POR TARJETA (Opciones Independientes).
-        Sincroniza el HEADER con la suma exacta de los ingredientes redondeados.
+        v68.2: MOTOR DE VALIDACIÓN CON RE-ETIQUETADO AUTOMÁTICO.
+        Sincroniza el HEADER con la suma exacta y repara formatos rotos.
         """
         import re
+
+        # --- v68.2: SANITIZADOR DE ETIQUETAS (REPARAR FORMATO ROTO) ---
+        # Si la IA respondió sin etiquetas pero parece una receta (tiene lista con viñetas)
+        if "[CALOFIT_INTENT" not in respuesta_ia and ("•" in respuesta_ia or "*" in respuesta_ia or "Ingredientes:" in respuesta_ia):
+            # Intentar envolver el contenido en un formato válido
+            match_header = re.search(r'^(.*?)(?:\n|\r|$)', respuesta_ia)
+            header_sug = match_header.group(1).strip() if match_header else "Sugerencia CaloFit"
+            
+            # Extraer ingredientes (buscando líneas con * o •)
+            ing_lines = re.findall(r'[•\*]\s*(.*?)(?:\n|\r|$)', respuesta_ia)
+            prep_match = re.search(r'(?:Preparación|Pasos|Instrucciones):?\s*(.*)', respuesta_ia, re.DOTALL | re.IGNORECASE)
+            prep_sug = prep_match.group(1).strip() if prep_match else "Sigue las instrucciones generales."
+            
+            if ing_lines:
+                lista_fake = "\n".join([f"* {line}" for line in ing_lines])
+                respuesta_ia = f"""[CALOFIT_INTENT: ITEM_RECIPE]
+[CALOFIT_HEADER] {header_sug[:40]} [/CALOFIT_HEADER]
+[CALOFIT_LIST]
+{lista_fake}
+[/CALOFIT_LIST]
+[CALOFIT_ACTION]
+{prep_sug}
+[/CALOFIT_ACTION]
+[/CALOFIT_INTENT: ITEM_RECIPE]"""
 
         # Regex para capturar tarjetas de receta completas
         patron_card = r'(\[CALOFIT_INTENT:\s*ITEM_RECIPE\].*?\[/CALOFIT_INTENT:\s*ITEM_RECIPE\])'
@@ -1395,8 +1430,133 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
         else:
             # Fallback para respuestas sin INTENT tags pero con LISTA
             if "[CALOFIT_LIST]" in respuesta_ia:
+                # v70.0: DETECTOR DE CONSULTA DIRECTA
+                # Si el usuario hace una pregunta informativa y no un registro explícito,
+                # preferimos responder con texto directo en lugar de Card.
+                msg_low = mensaje_usuario.lower()
+                es_consulta_directa = any(k in msg_low for k in ["cuántas", "cuantas", "qué tiene", "que tiene", "cuánto de", "cuanto de", "macros de"])
+                if es_consulta_directa and "registra" not in msg_low and "anota" not in msg_low:
+                    print("🔍 v70.0: Consulta directa detectada, convirtiendo Card a texto...")
+                    # Extraer info de la card y convertirla a texto amigable
+                    respuesta_ia = self._convertir_card_a_texto_directo(respuesta_ia, mensaje_usuario)
+                    return respuesta_ia
+                
                 return self._procesar_card_nutricional_v67(respuesta_ia, mensaje_usuario)
             return respuesta_ia
+
+    def _calcular_exacto_de_alimento(self, nombre_raw: str, cant_raw: str, unidad_raw: str):
+        """
+        MOTOR ÚNICO v70.0: Centraliza la lógica de búsqueda y cálculo nutricional.
+        Garantiza coherencia total entre Chat y Registro.
+        """
+        n_limpio = nombre_raw.lower()
+        for ruido in self.PALABRAS_RUIDO:
+            n_limpio = n_limpio.replace(ruido, "").strip()
+        
+        # Traducción Regional
+        n_query = n_limpio
+        for original, trad in self.TRADUCTORES_REGIONALES.items():
+            if original in n_limpio:
+                n_query = trad
+                break
+        
+        info = self.nutricion_service.obtener_info_alimento_fast(n_query)
+        if not info and n_query != n_limpio:
+            info = self.nutricion_service.obtener_info_alimento_fast(n_limpio)
+        if not info:
+            info = self.nutricion_service.obtener_info_alimento_fast(nombre_raw.lower().strip())
+        
+        cantidad = self._parse_cantidad(cant_raw)
+        if cantidad == 0.0:
+            # v70.0: Mejora de estimación de piezas si no hay cantidad
+            if any(x in n_limpio for x in ["manzana", "pera", "plátano", "huevo", "pan", "unidad", "pieza"]):
+                cantidad = 1.0
+                if not unidad_raw: unidad_raw = "unidad"
+            else:
+                cantidad = 15.0 if any(pg in n_limpio for pg in ["aceite", "mantequilla", "aliño"]) else 100.0
+        
+        unidad = (unidad_raw or ("g" if not cant_raw else "")).strip().lower()
+        
+        # Clasificación
+        es_sal_o_especia = any(x == n_limpio or (x in n_limpio and len(n_limpio) < 6) for x in ["sal", "pimienta", "comino", "laurel", "clavo", "orégano", "especia", "canela"])
+        es_saborizante = any(x == n_limpio for x in ["agua", "hielo"])
+        
+        cant_visual = cantidad
+        cals_item, p_item, c_item, g_item = 0.0, 0.0, 0.0, 0.0
+        
+        if info and not (es_sal_o_especia or es_saborizante):
+            equiv_g = cant_visual
+            if not unidad_raw or unidad == "":
+                if any(x in n_limpio for x in ["manzana", "pera", "plátano", "huevo"]): equiv_g = cant_visual * 150
+                elif "diente" in n_limpio: equiv_g = cant_visual * 5
+                
+            if unidad in ['taza', 'tazas']: equiv_g = cant_visual * 200
+            elif unidad in ['cucharada', 'cda']: equiv_g = cant_visual * 15
+            elif unidad in ['cucharadita', 'cdta']: equiv_g = cant_visual * 5
+            elif unidad in ['unidad', 'unidades', 'pieza', 'piezas']: equiv_g = cant_visual * 150
+            
+            f = equiv_g / 100.0
+            cals_item = (info.get("calorias") or 0) * f
+            p_item = (info.get("proteinas") or 0) * f
+            c_item = (info.get("carbohidratos") or 0) * f
+            g_item = (info.get("grasas") or 0) * f
+            
+            if "frito" in nombre_raw.lower() and "frito" not in info.get("alimento",""):
+                cals_item += 72.0
+                g_item += 8.0
+        else:
+            if not (es_sal_o_especia or es_saborizante):
+                equiv_g = cant_visual
+                if not unidad_raw or unidad == "":
+                    if any(x in n_limpio for x in ["manzana", "pera", "plátano", "huevo"]): equiv_g = cant_visual * 150
+                
+                if unidad in ['taza', 'tazas']: equiv_g = cant_visual * 200
+                elif unidad in ['cucharada', 'cda']: equiv_g = cant_visual * 15
+                elif unidad in ['cucharadita', 'cdta']: equiv_g = cant_visual * 5
+                elif unidad in ['unidad', 'unidades', 'pieza', 'piezas']: equiv_g = cant_visual * 150
+                
+                f_est = equiv_g / 100.0
+                cals_item = 45.0 * f_est
+                p_item = 1.2 * f_est
+                c_item = 9.0 * f_est
+                g_item = 0.4 * f_est
+        
+        if not (es_sal_o_especia or es_saborizante) and cals_item < 1.0:
+            cals_item = 1.0
+            
+        return {
+            "cals": cals_item, "prot": p_item, "carb": c_item, "gras": g_item,
+            "cant_visual": cant_visual, "unidad": unidad, "es_0": (es_sal_o_especia or es_saborizante),
+            "encontrado": bool(info)
+        }
+
+    def _convertir_card_a_texto_directo(self, card_text: str, mensaje_usuario: str) -> str:
+        """v70.1: Convierte la Card interactiva en una respuesta de texto amigable y coherente."""
+        import re
+        patron_stats = r'\[CALOFIT_STATS\](.*?)\[/CALOFIT_STATS\]'
+        match_stats = re.search(patron_stats, card_text)
+        stats = match_stats.group(1).replace("Cal:", "🔥 Calorías:").replace("P:", "🥚 P:").replace("C:", "🍞 C:").replace("G:", "🥑 G:").strip() if match_stats else ""
+        
+        # Limpiar etiquetas
+        texto = re.sub(r'\[CALOFIT_.*?\]', '', card_text)
+        texto = re.sub(r'\[/CALOFIT_.*?\]', '', texto)
+        
+        # Extraer nombre del header para el título
+        match_h = re.search(r'\[CALOFIT_HEADER\](.*?)\[/CALOFIT_HEADER\]', card_text)
+        titulo = match_h.group(1).strip() if match_h else "Información Nutricional"
+        
+        # Extraer ingredientes de la lista procesada (ya corregidos por el motor)
+        match_l = re.search(r'\[CALOFIT_LIST\](.*?)\[/CALOFIT_LIST\]', card_text, re.DOTALL)
+        lista = match_l.group(1).strip() if match_l else ""
+        
+        res = f"🍏 **{titulo}**\n\n"
+        if lista:
+            res += f"{lista}\n\n"
+        if stats:
+            res += f"📊 **Macros calculados:** {stats}\n"
+        
+        res += "\n💡 *Nota: Estos valores coinciden exactamente con lo que se registrará si confirmas la comida.*"
+        return res
 
     def _procesar_card_nutricional_v67(self, card_text: str, mensaje_usuario: str) -> str:
         """Helper v67.7 para procesar una tarjeta individual y cuadrar sumas."""
@@ -1418,80 +1578,21 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
         ingredientes_no_encontrados = []
         
         for cant_raw, unidad_raw, nombre_raw in matches:
-            try:
-                # v67.7: Limpieza de Ruido (Macheo Exacto)
-                n_limpio = nombre_raw.lower()
-                for ruido in self.PALABRAS_RUIDO:
-                    n_limpio = n_limpio.replace(ruido, "").strip()
-                
-                # Traducción Regional
-                n_query = n_limpio
-                for original, trad in self.TRADUCTORES_REGIONALES.items():
-                    if original in n_limpio:
-                        n_query = trad
-                        break
-                
-                info = self.nutricion_service.obtener_info_alimento_fast(n_query)
-                if not info and n_query != n_limpio:
-                    info = self.nutricion_service.obtener_info_alimento_fast(n_limpio)
-                if not info:
-                    info = self.nutricion_service.obtener_info_alimento_fast(nombre_raw.lower().strip())
-                
-                cantidad = self._parse_cantidad(cant_raw)
-                if cantidad == 0.0:
-                    cantidad = 15.0 if any(pg in n_limpio for pg in ["aceite", "mantequilla", "aliño"]) else 100.0
-                
-                unidad = (unidad_raw or ("g" if not cant_raw else "")).strip().lower()
-                
-                # v67.7: Reglas de "Pancha Chef" sobre N_LIMPIO (Evita bug de 'quinoa en agua')
-                es_sal_o_especia = any(x == n_limpio or (x in n_limpio and len(n_limpio) < 8) for x in ["sal", "pimienta", "comino", "laurel", "clavo", "orégano", "especia"])
-                es_saborizante = any(x == n_limpio for x in ["agua", "hielo"])
-                es_aceite_o_grasa = any(x in n_limpio for x in ["aceite", "mantequilla", "aliño"])
-                es_grano_o_base = any(x in n_limpio for x in ["arroz", "lenteja", "frijol", "fideo", "quinua", "avena"])
-                
-                cant_visual = cantidad
-                # Topes Físicos
-                if es_sal_o_especia or es_saborizante:
-                    pass
-                elif es_aceite_o_grasa:
-                    if "cucharad" in unidad and cant_visual > 2.0: cant_visual = 2.0
-                elif es_grano_o_base:
-                    if "taza" in unidad and cant_visual > 0.5: cant_visual = 0.5
-                
-                cals_item, p_item, c_item, g_item = 0.0, 0.0, 0.0, 0.0
-                
-                if info and not (es_sal_o_especia or es_saborizante):
-                    equiv_g = cant_visual
-                    if unidad in ['taza', 'tazas']: equiv_g = cant_visual * 200
-                    elif unidad in ['cucharada', 'cda']: equiv_g = cant_visual * 15
-                    elif unidad in ['cucharadita', 'cdta']: equiv_g = cant_visual * 5
-                    elif unidad in ['unidad', 'unidades']: equiv_g = cant_visual * 150
-                    
-                    f = equiv_g / 100.0
-                    cals_item = (info.get("calorias") or 0) * f
-                    p_item = (info.get("proteinas") or 0) * f
-                    c_item = (info.get("carbohidratos") or 0) * f
-                    g_item = (info.get("grasas") or 0) * f
-                    
-                    if "frito" in nombre_raw.lower() and "frito" not in info.get("alimento",""):
-                        cals_item += 72.0
-                        g_item += 8.0
-                else:
-                    if not (es_sal_o_especia or es_saborizante):
-                        ingredientes_no_encontrados.append(n_limpio)
+            res = self._calcular_exacto_de_alimento(nombre_raw, cant_raw, unidad_raw)
+            if not res["encontrado"] and not res["es_0"]:
+                ingredientes_no_encontrados.append(nombre_raw.lower())
 
-                ingredientes_calculados.append({
-                    "nombre_raw": nombre_raw,
-                    "cant_visual": cant_visual,
-                    "unidad": unidad,
-                    "cals": cals_item,
-                    "prot": p_item,
-                    "carb": c_item,
-                    "gras": g_item,
-                    "es_0": (es_sal_o_especia or es_saborizante),
-                    "n_low": nombre_raw.lower()
-                })
-            except: continue
+            ingredientes_calculados.append({
+                "nombre_raw": nombre_raw,
+                "cant_visual": res["cant_visual"],
+                "unidad": res["unidad"],
+                "cals": res["cals"],
+                "prot": res["prot"],
+                "carb": res["carb"],
+                "gras": res["gras"],
+                "es_0": res["es_0"],
+                "n_low": nombre_raw.lower()
+            })
 
         # Escalar
         cals_original = sum(it["cals"] for it in ingredientes_calculados)
@@ -1529,10 +1630,30 @@ Toda respuesta DEBE comenzar con una etiqueta de intención exacta. NO USES OTRA
             
             # Label Visual con Normalización (Simplificado v66.7 - v67.7)
             # v67.7: Garantizar que CADA ingrediente tenga su label (X kcal)
+            # v67.9: ELIMINACIÓN DE 'TAZA' (Filtro de Salida Forzoso)
+            u_final = it["unidad"]
+            c_final = it["cant_visual"]
+            n_low = it["n_low"]
+            
+            if u_final in ['taza', 'tazas', 'tazita', 'tacita']:
+                # Decidir si es líquido o sólido para convertir a ml o g
+                es_liq = any(lk in n_low for lk in ["leche", "agua", "caldo", "jugo", "sopa", "infusión", "café", "té", "bebida", "yogur", "salsa", "puré", "pure"])
+                if es_liq:
+                    u_final = "ml"
+                    c_final = c_final * 200
+                else:
+                    u_final = "g"
+                    # Densidad variable: Hojas vs Granos
+                    es_hoja = any(hk in n_low for hk in ["espinaca", "lechuga", "albahaca", "col", "acelga"])
+                    factor_est = 35 if es_hoja else 180
+                    c_final = c_final * factor_est
+
             linea_limpia = it["nombre_raw"].split('(')[0].strip()
-            # Tratamiento de unidades (taza -> g, etc) omitido para brevedad pero sumando macros reales
             label_cals = f"({c_round} kcal)" if not it["es_0"] else "(0 kcal)"
-            nuevas_lineas.append(f"* {it['cant_visual'] if it['cant_visual'] != int(it['cant_visual']) else int(it['cant_visual'])} {it['unidad']} de {linea_limpia} {label_cals}")
+            
+            # Formatear números (ej: 150.0 -> 150)
+            c_str = f"{int(c_final)}" if c_final == int(c_final) else f"{round(c_final, 1)}".replace('.', ',')
+            nuevas_lineas.append(f"* {c_str} {u_final} de {linea_limpia} {label_cals}")
 
         res_stats = f"P: {suma_p:.1f}g | C: {suma_c:.1f}g | G: {suma_g:.1f}g | Cal: {suma_cals}kcal{tag_ajuste}"
         if "frito" in card_text.lower(): res_stats += " (Aceite incluido) 🍳"
