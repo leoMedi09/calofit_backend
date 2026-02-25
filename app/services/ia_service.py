@@ -267,25 +267,46 @@ class IAService:
     def generar_alerta_fuzzy(self, adherencia_pct, progreso_pct):
         """
         Usa lógica difusa para generar alertas personalizadas.
+        Retorna: dict {"mensaje": str, "nivel": str, "score": float}
         """
         if not hasattr(self, 'alerta_sim'):
-            return "Alerta moderada: Recuerda seguir tu plan."
+            return {
+                "mensaje": "Alerta moderada: Recuerda seguir tu plan.",
+                "nivel": "Medio",
+                "score": 50.0
+            }
 
         self.alerta_sim.input['adherencia'] = adherencia_pct
         self.alerta_sim.input['progreso'] = progreso_pct
         
         try:
             self.alerta_sim.compute()
-            tipo_alerta = self.alerta_sim.output['alerta_tipo']
+            score = self.alerta_sim.output['alerta_tipo']
             
-            if tipo_alerta < 33:
-                return "¡Excelente progreso! Sigue así, campeón."
-            elif tipo_alerta < 66:
-                return "Vas bien, pero puedes mejorar un poco más."
+            if score < 33:
+                return {
+                    "mensaje": "¡Excelente progreso! Sigue así, campeón.",
+                    "nivel": "Bajo",
+                    "score": round(float(score), 2)
+                }
+            elif score < 66:
+                return {
+                    "mensaje": "Vas bien, pero puedes mejorar un poco más.",
+                    "nivel": "Medio",
+                    "score": round(float(score), 2)
+                }
             else:
-                return "Necesitas más compromiso. ¡Vamos, tú puedes!"
+                return {
+                    "mensaje": "Necesitas más compromiso. ¡Vamos, tú puedes!",
+                    "nivel": "Alto",
+                    "score": round(float(score), 2)
+                }
         except:
-            return "Alerta moderada: Mantén el ritmo."
+            return {
+                "mensaje": "Alerta moderada: Mantén el ritmo.",
+                "nivel": "Medio",
+                "score": 50.0
+            }
 
     # ==========================================================
     # FUNCIONES CENTRALIZADAS - EVITAR DUPLICACIÓN
@@ -517,7 +538,8 @@ class IAService:
                 perfil_usuario['objetivo'] = 'mantener'
 
         # Generar alerta personalizada con fuzzy logic
-        alerta_personalizada = self.generar_alerta_fuzzy(adherencia_pct, progreso_pct)
+        alerta_data = self.generar_alerta_fuzzy(adherencia_pct, progreso_pct)
+        alerta_personalizada = alerta_data.get("mensaje", "")
         
         # 1. Calcular calorías exactas usando el ML
         genero_map = {"M": 1, "F": 2}

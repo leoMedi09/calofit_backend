@@ -178,7 +178,8 @@ async def consultar_asistente(
             adherencia_pct = 85
         
         # 5. 🎯 APLICAR LÓGICA DIFUSA PARA PERSONALIZAR EL TONO
-        mensaje_fuzzy = ia_engine.generar_alerta_fuzzy(adherencia_pct, progreso_pct)
+        alerta_fuzzy = ia_engine.generar_alerta_fuzzy(adherencia_pct, progreso_pct)
+        mensaje_fuzzy = alerta_fuzzy.get("mensaje", "")
         
         if "Excelente" in mensaje_fuzzy:
             tono_instruccion = "Usa un tono muy motivador y celebratorio."
