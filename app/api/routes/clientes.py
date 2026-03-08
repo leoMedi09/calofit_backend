@@ -202,6 +202,10 @@ async def subir_foto_perfil_cliente(
     
     file_bytes = await file.read()
     
+    # 0. Borrar foto anterior si existe
+    if current_user.profile_picture_url:
+        local_storage.delete_file(current_user.profile_picture_url)
+    
     # Guardar Localmente
     relative_path = local_storage.save_file(file_bytes, file.filename)
     public_url = local_storage.get_public_url(relative_path)
@@ -494,6 +498,7 @@ def obtener_perfil_por_uid_con_dieta(
         activity_level=cliente.activity_level,
         assigned_coach_id=cliente.assigned_coach_id,
         assigned_nutri_id=cliente.assigned_nutri_id,
+        profile_picture_url=cliente.profile_picture_url,
         dieta_recomendada=dieta_schema
     )
     
@@ -566,7 +571,8 @@ def obtener_perfil_por_uid(
         weight=cliente.weight or 0.0,
         height=cliente.height or 0.0,
         assigned_coach_id=cliente.assigned_coach_id,
-        assigned_nutri_id=cliente.assigned_nutri_id
+        assigned_nutri_id=cliente.assigned_nutri_id,
+        profile_picture_url=cliente.profile_picture_url
     )
     
     return perfil_response
@@ -762,6 +768,7 @@ def recalcular_dieta(
         activity_level=cliente.activity_level,
         assigned_coach_id=cliente.assigned_coach_id,
         assigned_nutri_id=cliente.assigned_nutri_id,
+        profile_picture_url=cliente.profile_picture_url,
         dieta_recomendada=dieta_schema
     )
     

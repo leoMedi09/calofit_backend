@@ -74,6 +74,7 @@ class ClientResponseConDieta(BaseModel):
     assigned_coach_id: Optional[int]
     assigned_nutri_id: Optional[int]
     medical_conditions: List[str] = []
+    profile_picture_url: Optional[str] = None
 
     # ✅ NUEVO: Recomendación de dieta automática
     dieta_recomendada: RecomendacionDietaCompleta

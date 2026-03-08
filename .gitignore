@@ -75,6 +75,7 @@ yarn-error.log
 *.dylib
 
 # 🎯 Específicos del proyecto
+app/uploads/
 alembic/versions/__pycache__/
 .mypy_cache/
 .dmypy.json

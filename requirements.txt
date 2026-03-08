@@ -34,6 +34,7 @@ es_core_news_sm @ https://github.com/explosion/spacy-models/releases/download/es
 # === Integraciones Externas ===
 firebase-admin==6.7.0
 resend==2.6.0
+cloudinary==1.41.0
 
 # === Utilidades ===
 requests==2.32.3

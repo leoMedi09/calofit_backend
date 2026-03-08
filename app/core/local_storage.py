@@ -1,33 +1,90 @@
 import os
 import uuid
+import cloudinary
+import cloudinary.uploader
 from datetime import datetime
+from app.core.config import settings
 
-# Directorio base para subidas
-UPLOAD_DIR = "app/uploads/profiles"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# Configurar Cloudinary
+cloudinary.config(
+    cloud_name=settings.CLOUDINARY_CLOUD_NAME,
+    api_key=settings.CLOUDINARY_API_KEY,
+    api_secret=settings.CLOUDINARY_API_SECRET,
+    secure=True
+)
 
 class LocalStorage:
     @staticmethod
     def save_file(file_bytes: bytes, original_filename: str) -> str:
         """
-        Guarda un archivo en el disco local y retorna la URL pública relativa.
+        Sube un archivo a Cloudinary y retorna la URL pública válida.
         """
-        extension = original_filename.split(".")[-1]
-        unique_filename = f"{uuid.uuid4()}_{int(datetime.utcnow().timestamp())}.{extension}"
-        file_path = os.path.join(UPLOAD_DIR, unique_filename)
-        
-        with open(file_path, "wb") as f:
-            f.write(file_bytes)
+        try:
+            # Subir a Cloudinary
+            # Usamos el buffer de bytes directamente
+            upload_result = cloudinary.uploader.upload(
+                file_bytes,
+                folder="profiles",
+                resource_type="image"
+            )
             
-        # Retornamos la ruta relativa que será servida por FastAPI
-        return f"/uploads/profiles/{unique_filename}"
+            public_url = upload_result.get("secure_url")
+            
+            if public_url:
+                print(f"✅ Imagen subida exitosamente a Cloudinary: {public_url}")
+                return public_url
+            
+        except Exception as e:
+            print(f"❌ Error al subir a Cloudinary: {e}")
+            
+        return ""
 
     @staticmethod
     def get_public_url(relative_path: str) -> str:
         """
-        Convierte una ruta relativa en una URL absoluta basada en la IP del servidor.
+        Si la ruta ya es una URL (Cloudinary), la retorna tal cual.
+        Si es relativa, le añade la base URL.
         """
+        if not relative_path:
+            return ""
+            
+        if relative_path.startswith("http"):
+            return relative_path
+            
         base_url = os.getenv("BASE_URL", "http://localhost:8000")
         return f"{base_url}{relative_path}"
+
+    @staticmethod
+    def delete_file(public_url: str) -> bool:
+        """
+        Maneja la eliminación de archivos. Para Cloudinary, simplemente retorna True
+        (se podría implementar destroy, pero por ahora evitamos complejidad extra).
+        """
+        if not public_url:
+            return False
+            
+        try:
+            # Si es una URL de Cloudinary o Firebase, omitimos eliminación física local
+            if "cloudinary.com" in public_url or "storage.googleapis.com" in public_url:
+                return True
+
+            relative_path = ""
+            if "/uploads/" in public_url:
+                relative_path = "/uploads/" + public_url.split("/uploads/")[-1]
+            else:
+                return False
+
+            # Convertir ruta relativa a ruta de sistema
+            system_path = os.path.join("app", relative_path.lstrip("/"))
+            
+            if os.path.exists(system_path) and os.path.isfile(system_path):
+                if system_path.startswith("app/uploads"):
+                    os.remove(system_path)
+                    print(f"✅ Archivo local eliminado: {system_path}")
+                    return True
+        except Exception as e:
+            print(f"❌ Error eliminando archivo: {e}")
+            
+        return False
 
 local_storage = LocalStorage()

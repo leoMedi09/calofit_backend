@@ -20,6 +20,10 @@ class Settings:
     # Firebase Configuration
     FIREBASE_API_KEY: str = os.getenv("FIREBASE_API_KEY", "")
     FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "calofit-c8c24")
+    # Cloudinary Configuration
+    CLOUDINARY_CLOUD_NAME: str = os.getenv("CLOUDINARY_CLOUD_NAME", "")
+    CLOUDINARY_API_KEY: str = os.getenv("CLOUDINARY_API_KEY", "")
+    CLOUDINARY_API_SECRET: str = os.getenv("CLOUDINARY_API_SECRET", "")
     FIREBASE_STORAGE_BUCKET: str = os.getenv("FIREBASE_STORAGE_BUCKET", "calofit-c8c24.appspot.com")
 
 settings = Settings()

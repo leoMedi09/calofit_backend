@@ -23,11 +23,15 @@ async def subir_foto_perfil(
     # 1. Leer archivo
     file_bytes = await file.read()
     
-    # 2. Guardar Localmente
+    # 2. Borrar foto anterior
+    if current_user.profile_picture_url:
+        local_storage.delete_file(current_user.profile_picture_url)
+    
+    # 3. Guardar Localmente
     relative_path = local_storage.save_file(file_bytes, file.filename)
     public_url = local_storage.get_public_url(relative_path)
     
-    # 3. Actualizar base de datos
+    # 4. Actualizar base de datos
     current_user.profile_picture_url = public_url
     db.commit()
     
@@ -71,9 +75,9 @@ async def leer_mi_perfil(current_user: User = Depends(get_current_user)):
             "foto_perfil": current_user.profile_picture_url # ✅ Añadido para el rediseño premium
         },
         "fisico": {
-            "edad": current_user.age,
-            "peso_kg": current_user.weight,
-            "talla_m": current_user.height,
-            "condiciones": current_user.medical_conditions
+            "edad": getattr(current_user, "age", None),
+            "peso_kg": getattr(current_user, "weight", None),
+            "talla_m": getattr(current_user, "height", None),
+            "condiciones": getattr(current_user, "medical_conditions", [])
         }
     }

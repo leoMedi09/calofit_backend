@@ -102,6 +102,7 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
             "type": user_type,
             "id": user.id,
             "role": getattr(user, 'role_name', 'client') if user_type == "staff" else None,
+            "profile_picture_url": user.profile_picture_url,
         },
     }
     print(f"📦 Respuesta de login: {response_data}")
@@ -459,14 +460,16 @@ async def verify_and_sync_password(
                 "id": user.id,
                 "email": user.email,
                 "name": user.first_name,
-                "type": user_type
+                "type": user_type,
+                "profile_picture_url": user.profile_picture_url,
             }
         else:
             response_data["user_info"] = {
                 "id": user.id,
                 "email": user.email,
                 "name": user.first_name,
-                "type": user_type
+                "type": user_type,
+                "profile_picture_url": user.profile_picture_url,
             }
         
         print(f"✅ Contraseña sincronizada y JWT generado para: {credentials.email}")
