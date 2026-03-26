@@ -1,48 +1,47 @@
 import os
 import uuid
-import cloudinary
-import cloudinary.uploader
 from datetime import datetime
 from app.core.config import settings
-
-# Configurar Cloudinary
-cloudinary.config(
-    cloud_name=settings.CLOUDINARY_CLOUD_NAME,
-    api_key=settings.CLOUDINARY_API_KEY,
-    api_secret=settings.CLOUDINARY_API_SECRET,
-    secure=True
-)
+from app.core.firebase import upload_to_firebase
 
 class LocalStorage:
     @staticmethod
     def save_file(file_bytes: bytes, original_filename: str) -> str:
         """
-        Sube un archivo a Cloudinary y retorna la URL pública válida.
+        Sube un archivo a Firebase Storage y retorna la URL pública válida.
         """
         try:
-            # Subir a Cloudinary
-            # Usamos el buffer de bytes directamente
-            upload_result = cloudinary.uploader.upload(
-                file_bytes,
-                folder="profiles",
-                resource_type="image"
-            )
+            # Generar un nombre único para el archivo
+            ext = os.path.splitext(original_filename)[1]
+            if not ext:
+                ext = ".jpg"
             
-            public_url = upload_result.get("secure_url")
+            # Ruta en Firebase: profiles/UUID.ext
+            remote_path = f"profiles/{uuid.uuid4()}{ext}"
+            
+            # Detectar tipo de contenido
+            content_type = "image/jpeg"
+            if ext.lower() == ".png":
+                content_type = "image/png"
+            elif ext.lower() == ".webp":
+                content_type = "image/webp"
+                
+            # Usar el servicio de Firebase ya existente
+            public_url = upload_to_firebase(file_bytes, remote_path, content_type=content_type)
             
             if public_url:
-                print(f"✅ Imagen subida exitosamente a Cloudinary: {public_url}")
+                print(f"✅ Imagen subida con éxito a Firebase: {public_url}")
                 return public_url
             
         except Exception as e:
-            print(f"❌ Error al subir a Cloudinary: {e}")
+            print(f"❌ Error al subir a Firebase Storage: {e}")
             
         return ""
 
     @staticmethod
     def get_public_url(relative_path: str) -> str:
         """
-        Si la ruta ya es una URL (Cloudinary), la retorna tal cual.
+        Si la ruta ya es una URL (Firebase/Cloudinary), la retorna tal cual.
         Si es relativa, le añade la base URL.
         """
         if not relative_path:
@@ -57,15 +56,14 @@ class LocalStorage:
     @staticmethod
     def delete_file(public_url: str) -> bool:
         """
-        Maneja la eliminación de archivos. Para Cloudinary, simplemente retorna True
-        (se podría implementar destroy, pero por ahora evitamos complejidad extra).
+        Maneja la eliminación de archivos. Para servicios en la nube, marcamos como éxito.
         """
         if not public_url:
             return False
             
         try:
-            # Si es una URL de Cloudinary o Firebase, omitimos eliminación física local
-            if "cloudinary.com" in public_url or "storage.googleapis.com" in public_url:
+            # Si es una URL de Cloudinary o Firebase, no intentamos borrar de local
+            if any(domain in public_url for domain in ["cloudinary.com", "firebasestorage.googleapis.com", "storage.googleapis.com"]):
                 return True
 
             relative_path = ""
@@ -80,10 +78,9 @@ class LocalStorage:
             if os.path.exists(system_path) and os.path.isfile(system_path):
                 if system_path.startswith("app/uploads"):
                     os.remove(system_path)
-                    print(f"✅ Archivo local eliminado: {system_path}")
                     return True
         except Exception as e:
-            print(f"❌ Error eliminando archivo: {e}")
+            print(f"❌ Error eliminando archivo local: {e}")
             
         return False
 

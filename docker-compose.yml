@@ -48,5 +48,18 @@ services:
     ports:
       - "6379:6379"
 
+  # Frontend Flutter Web
+  frontend:
+    build:
+      context: ../calofit_frontend
+      dockerfile: Dockerfile
+    container_name: calofit_frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+
 volumes:
   postgres_data:

@@ -1,12 +1,13 @@
-# 🔒 CREDENCIALES Y SECRETOS
-.env
-.env.local
-.env.*.local
-secrets.json
+# 🔒 CREDENCIALES Y SECRETOS (Habilitados por pedido del usuario para respaldo)
+# .env
+# .env.local
+# .env.*.local
+# secrets.json
 
-# 🔥 FIREBASE
-*firebase-adminsdk*.json
-firebase-key.json
+# 🔥 FIREBASE (Habilitados por pedido del usuario para respaldo)
+# *firebase-adminsdk*.json
+# firebase-key.json
+
 
 # 🐍 Python
 __pycache__/
