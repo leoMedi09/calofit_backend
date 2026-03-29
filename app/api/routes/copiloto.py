@@ -37,7 +37,7 @@ async def consultar_copiloto(
                  current_user=current_user,
                  historial=request.historial
              )
-        elif user_role in ["nutricionista", "coach"]:
+        elif user_role in ["nutricionista", "nutritionist", "coach"]:
              # Usar Servicio de Nutrición Clínica
              resultado = await nutricionista_ia_service.consultar(
                  mensaje=request.mensaje,

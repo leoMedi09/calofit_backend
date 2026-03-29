@@ -11,12 +11,13 @@ from app.models.historial import AlertaSalud, HistorialPeso
 from app.schemas.nutricion import PlanNutricionalResponse, PlanNutricionalUpdate
 from app.schemas.client import StrategicGuideUpdate
 from datetime import datetime, timedelta
+from app.core.utils import calcular_metabolismo_basal, obtener_macros_desglosados
 
 router = APIRouter()
 
 def check_is_nutri(current_user: User):
     role = str(getattr(current_user, "role_name", "")).lower()
-    if role not in ["nutricionista", "admin", "administrador"]:
+    if role not in ["nutricionista", "nutritionist", "admin", "administrador"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Operación permitida solo para Nutricionistas o Administradores"
@@ -58,7 +59,7 @@ def get_assigned_patients(
     # Si es Admin, ve todos los clientes. Si es Nutri, solo los suyos.
     query = db.query(Client)
     role = str(getattr(current_user, "role_name", "")).lower()
-    if role == "nutricionista":
+    if role in ["nutricionista", "nutritionist"]:
         query = query.filter(Client.assigned_nutri_id == current_user.id)
     
     clients = query.all()
@@ -141,7 +142,7 @@ def get_patient_progress(
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
         
     # Verificar que el nutri tenga acceso
-    if current_user.role_name.upper() == "NUTRICIONISTA" and client.assigned_nutri_id != current_user.id:
+    if current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"] and client.assigned_nutri_id != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para ver este paciente")
 
     # Obtener historial de peso, imc y progreso calórico
@@ -183,6 +184,7 @@ def get_patient_progress(
         # Guía Estratégica (Misión Semanal)
         "ai_strategic_focus": client.ai_strategic_focus,
         "is_strategic_guide_validated": client.is_strategic_guide_validated,
+        "is_validated": client.is_strategic_guide_validated,
         # Sincronización v80.0
         "metabolismo_estimado": {
             "tmb": round(tmb_estimada),
@@ -191,7 +193,12 @@ def get_patient_progress(
             "carbohidratos_g": recomendacion_ia["carbohidratos_g"],
             "grasas_g": recomendacion_ia["grasas_g"],
             "distribucion": recomendacion_ia["pct"]
-        }
+        },
+        "current_weight": client.weight,
+        "current_height": client.height,
+        "recommended_foods": client.recommended_foods,
+        "forbidden_foods": client.forbidden_foods,
+        "medical_conditions": client.medical_conditions
     }
 
 @router.get("/cliente/{id}/sugerir-estrategia")
@@ -260,7 +267,7 @@ def update_strategic_guide(
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
         
-    if current_user.role_name.upper() == "NUTRICIONISTA" and client.assigned_nutri_id != current_user.id:
+    if current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"] and client.assigned_nutri_id != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para modificar este paciente")
 
     # Actualización estratégica (v80.0)
@@ -317,7 +324,7 @@ def get_client_plan(
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
         
-    if current_user.role_name.upper() == "NUTRICIONISTA" and client.assigned_nutri_id != current_user.id:
+    if current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"] and client.assigned_nutri_id != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para ver este paciente")
     
     plan = db.query(PlanNutricional).filter(PlanNutricional.client_id == id).order_by(PlanNutricional.fecha_creacion.desc()).first()
@@ -337,7 +344,7 @@ def update_client_plan(
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
         
-    if current_user.role_name.upper() == "NUTRICIONISTA" and client.assigned_nutri_id != current_user.id:
+    if current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"] and client.assigned_nutri_id != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso")
     
     plan = db.query(PlanNutricional).filter(PlanNutricional.client_id == id).order_by(PlanNutricional.fecha_creacion.desc()).first()
@@ -377,7 +384,7 @@ def get_nutri_stats(
     # 1. Filtro base de pacientes asignados
     query = db.query(Client)
     role = str(getattr(current_user, "role_name", "")).lower()
-    if role == "nutricionista":
+    if role in ["nutricionista", "nutritionist"]:
         query = query.filter(Client.assigned_nutri_id == current_user.id)
     
     pacientes = query.all()
@@ -394,7 +401,7 @@ def get_nutri_stats(
 
     # 2. Validaciones Pendientes (Planes en status provisional_ia)
     validaciones_pendientes = db.query(PlanNutricional).join(Client).filter(
-        Client.assigned_nutri_id == current_user.id if role == "nutricionista" else True,
+        Client.assigned_nutri_id == current_user.id if role in ["nutricionista", "nutritionist"] else True,
         PlanNutricional.status == "provisional_ia"
     ).count()
 
@@ -406,7 +413,7 @@ def get_nutri_stats(
     alertas_db_query = db.query(AlertaSalud).filter(
         AlertaSalud.estado == "pendiente"
     ).join(Client).filter(
-        Client.assigned_nutri_id == current_user.id if role == "nutricionista" else True
+        Client.assigned_nutri_id == current_user.id if role in ["nutricionista", "nutritionist"] else True
     )
     alertas_db_count = alertas_db_query.count()
     alertas_recientes_objs = alertas_db_query.order_by(AlertaSalud.fecha_deteccion.desc()).limit(3).all()
