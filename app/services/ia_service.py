@@ -47,9 +47,59 @@ from app.services.nutricion_service import nutricion_service
 
 # Constantes de Salud
 CONDICIONES_CRITICAS = [
-    "diabetes", "hipertensión", "hipertension", "renal", "cardíaca", 
+    "diabetes", "hipertensión", "hipertension", "renal", "cardíaca",
     "cardiaca", "embarazo", "lactancia", "celiaco", "celíaco"
 ]
+
+# ─────────────────────────────────────────────────────────────────────
+# TABLA MET — Ejercicios de Gimnasio y Rutinas
+# Fuente: Compendium of Physical Activities (Ainsworth et al., 2011)
+# Fórmula: kcal = MET × peso_kg × tiempo_horas
+# ─────────────────────────────────────────────────────────────────────
+METS_GYM = {
+    # Pesas / Fuerza
+    "pesas": 5.0, "pesa": 5.0, "peso libre": 5.0, "mancuernas": 4.5,
+    "barra": 5.0, "sentadilla": 5.5, "squat": 5.5, "press banca": 5.0,
+    "press de banca": 5.0, "bench press": 5.0, "deadlift": 6.0,
+    "peso muerto": 6.0, "dominadas": 5.0, "pull up": 5.0, "jalón": 4.5,
+    "remo": 5.0, "curl biceps": 4.0, "curl de biceps": 4.0,
+    "triceps": 4.0, "hombros": 4.5, "press militar": 4.5,
+    "leg press": 5.0, "prensa": 5.0, "extensión": 4.0, "femoral": 4.5,
+    "hip thrust": 4.5, "glúteos": 4.0, "glúte": 4.0,
+    # Cardio de Gym
+    "caminadora": 4.5, "trotadora": 7.0, "trotar caminadora": 7.0,
+    "elíptica": 5.0, "bicicleta estática": 6.0, "spinning": 8.5,
+    "remo máquina": 7.0, "rowing": 7.0, "escaladora": 8.0, "stepper": 6.0,
+    # Cardio General (gym o fuera)
+    "cardio": 6.0, "hiit": 10.0, "circuito": 7.0, "funcional": 6.5,
+    "trotar": 8.0, "correr": 10.0, "saltar soga": 9.0, "cuerda": 9.0,
+    # Core / Abs
+    "abdominales": 3.8, "abs": 3.8, "plancha": 4.0, "crunch": 3.8,
+    "core": 4.0, "flexiones": 4.0, "push up": 4.0, "burpees": 10.0,
+    # Rutinas completas (aproximado)
+    "rutina de pecho": 5.0, "rutina de espalda": 5.0, "rutina de pierna": 5.5,
+    "rutina de hombros": 4.5, "rutina de brazo": 4.0, "rutina de brazos": 4.0,
+    "día de pierna": 5.5, "día de pecho": 5.0, "día de espalda": 5.0,
+    "entrené": 5.0, "entrene": 5.0, "entrenamiento": 5.0, "gym": 5.0,
+    # Yoga / Pilates / Otros
+    "yoga": 2.5, "pilates": 3.5, "stretching": 2.5, "estiramientos": 2.5,
+    "natación": 7.0, "nadar": 7.0, "boxeo": 9.0, "zumba": 6.5,
+}
+
+# Porciones estándar según hora del día (Perú) y tipo de plato
+PORCIONES_ESTANDAR = {
+    # Momento del día
+    "desayuno": 300, "almuerzo": 400, "cena": 300, "snack": 150,
+    "merienda": 150, "media mañana": 150, "lonche": 200,
+    # Tipo de plato
+    "plato": 350, "plato de": 350, "porción": 200, "porcion": 200,
+    "tazón": 300, "tazon": 300, "sopa": 300, "caldo": 300,
+    "ensalada": 200, "fruta": 150, "pan": 80,
+    "vaso": 250, "taza": 240, "botella": 500,
+    "presa": 150, "filete": 150, "bistec": 180,
+    "huevo": 55, "huevos": 110,
+    "porcion pequeña": 150, "porcion grande": 450,
+}
 
 class IAService:
     """Motor de IA de CaloFit — Simplificado para Tesis (Random Forest + KNN + Llama-3)."""
@@ -353,18 +403,150 @@ Reglas:
             "palabras_clave": [w for w in comando.lower().split() if len(w) > 4],
         }
 
-    async def extraer_macros_de_texto(self, texto: str, peso_usuario: float = 70.0) -> Dict:
-        """Extrae macros usando Llama-3 como motor NLP (Registro asistido por IA)."""
-        prompt = f"""Analiza: "{texto}" y extrae macros nutricionales.
-        Responde SOLO el JSON: {{"alimento": "nombre", "calorias": 0, "proteinas_g": 0, "carbohidratos_g": 0, "grasas_g": 0}}
-        Si no sabes, pon -1 en calorias."""
-        
+    async def extraer_macros_de_texto(
+        self, texto: str, peso_usuario_kg: float = 70.0,
+        # Alias para compatibilidad con código anterior
+        peso_usuario: float = None,
+    ) -> Dict:
+        """
+        DB-First: CENAN → SQLite Mundial → LLM (último recurso).
+        Garantiza valores consistentes en todos los contextos:
+        - Solo registrar, solo consultar, recomendar+registrar, voz, texto.
+        Si el LLM es necesario, guarda el resultado para reutilizarlo.
+        """
+        if peso_usuario is not None:
+            peso_usuario_kg = peso_usuario
+
+        texto_lower = texto.lower().strip()
+        from app.services.nutricion_service import nutricion_service
+
+        # ─────────────────────────────────────────────────────────────
+        # PASO 1: Detectar ejercicio de gym (fuente: tabla MET)
+        # ─────────────────────────────────────────────────────────────
+        ejercicio_detectado = None
+        met_detectado = None
+        for ejercicio, met in sorted(METS_GYM.items(), key=lambda x: -len(x[0])):
+            if ejercicio in texto_lower:
+                ejercicio_detectado = ejercicio
+                met_detectado = met
+                break
+
+        if ejercicio_detectado:
+            # Detectar duración: "30 minutos", "1 hora", "45 min", "1h", etc.
+            duracion_min = 45  # default: sesión estándar de gym
+            match_dur = re.search(
+                r'(\d+)\s*(min(?:utos?)?|h(?:oras?|rs?)?)',
+                texto_lower
+            )
+            if match_dur:
+                valor = int(match_dur.group(1))
+                unidad = match_dur.group(2)
+                duracion_min = valor * 60 if unidad.startswith('h') else valor
+
+            calorias = round(met_detectado * peso_usuario_kg * (duracion_min / 60), 1)
+            return {
+                "es_ejercicio": True, "es_comida": False,
+                "calorias": calorias, "proteinas_g": 0,
+                "carbohidratos_g": 0, "grasas_g": 0,
+                "fibra_g": 0, "azucar_g": 0, "sodio_mg": 0,
+                "ejercicios_detectados": [f"{ejercicio_detectado} {duracion_min} min"],
+                "alimentos_detectados": [],
+                "calidad_nutricional": "Alta",
+                "duracion_min": duracion_min,
+                "met": met_detectado,
+                "origen": "Tabla MET Científica 🏋️"
+            }
+
+        # ─────────────────────────────────────────────────────────────
+        # PASO 2: Detectar porción según hora peruana y texto
+        # ─────────────────────────────────────────────────────────────
+        try:
+            from app.core.utils import get_peru_now
+            hora_peru = get_peru_now().hour
+        except Exception:
+            hora_peru = 12
+
+        # Porción base según hora del día
+        if 5 <= hora_peru < 10:
+            porcion_g = PORCIONES_ESTANDAR["desayuno"]   # 300g
+        elif 10 <= hora_peru < 12:
+            porcion_g = PORCIONES_ESTANDAR["snack"]      # 150g
+        elif 12 <= hora_peru < 15:
+            porcion_g = PORCIONES_ESTANDAR["almuerzo"]   # 400g
+        elif 15 <= hora_peru < 18:
+            porcion_g = PORCIONES_ESTANDAR["snack"]      # 150g
+        elif 18 <= hora_peru < 21:
+            porcion_g = PORCIONES_ESTANDAR["cena"]       # 300g
+        else:
+            porcion_g = PORCIONES_ESTANDAR["snack"]      # 150g (nocturno)
+
+        # Sobreescribir si el usuario especifica cantidad explícita
+        match_cantidad = re.search(
+            r'(\d+(?:\.\d+)?)\s*(?:g\b|gr\b|gramos?|ml\b|kg\b)',
+            texto_lower
+        )
+        if match_cantidad:
+            porcion_g = float(match_cantidad.group(1))
+
+        # Sobreescribir si el texto menciona tipo de plato/momento
+        for keyword, gramos in PORCIONES_ESTANDAR.items():
+            if keyword in texto_lower:
+                porcion_g = gramos
+                break
+
+        # ─────────────────────────────────────────────────────────────
+        # PASO 3: Buscar en CENAN/INS (fuente de verdad oficial Perú)
+        # ─────────────────────────────────────────────────────────────
+        info_db = nutricion_service.obtener_info_alimento(texto)
+        if info_db and float(info_db.get("calorias", 0) or 0) > 0:
+            factor = porcion_g / 100.0
+            print(f"✅ [DB-First] '{texto}' → {info_db['nombre']} ({porcion_g}g) = {round(info_db['calorias'] * factor, 1)} kcal [{info_db.get('origen','BD')}]")
+            return {
+                "es_comida": True, "es_ejercicio": False,
+                "calorias": round(float(info_db["calorias"]) * factor, 1),
+                "proteinas_g": round(float(info_db.get("proteinas", 0) or 0) * factor, 1),
+                "carbohidratos_g": round(float(info_db.get("carbohidratos", 0) or 0) * factor, 1),
+                "grasas_g": round(float(info_db.get("grasas", 0) or 0) * factor, 1),
+                "fibra_g": round(float(info_db.get("fibra", 0) or 0) * factor, 1),
+                "azucar_g": round(float(info_db.get("azucares", 0) or 0) * factor, 1),
+                "sodio_mg": round(float(info_db.get("sodio", 0) or 0) * factor, 1),
+                "alimentos_detectados": [info_db["nombre"]],
+                "ejercicios_detectados": [],
+                "calidad_nutricional": "Alta",
+                "porcion_g": porcion_g,
+                "origen": info_db.get("origen", "BD Oficial 🇵🇪"),
+            }
+
+        # ─────────────────────────────────────────────────────────────
+        # PASO 4: LLM como último recurso (platos compuestos no en BD)
+        # El resultado se devuelve; el AsistenteService lo guardará
+        # en PreferenciaAlimento para que la próxima vez sea consistente.
+        # ─────────────────────────────────────────────────────────────
+        print(f"⚠️ [DB-First] '{texto}' no encontrado en BD → usando LLM (se cacheará)")
+        meal_context = "de desayuno" if 5 <= hora_peru < 10 else "estándar"
+        prompt = (
+            f'Soy un nutricionista peruano. Dame los macros de "{texto}" '
+            f'para {porcion_g}g (1 porción {meal_context}). '
+            f'Responde SOLO JSON sin texto extra: '
+            f'{{"alimento": "nombre", "calorias": 0, "proteinas_g": 0, "carbohidratos_g": 0, '
+            f'"grasas_g": 0, "es_comida": true}}'
+        )
         raw = await self._llamar_groq(prompt, max_tokens=200, temp=0.1)
         try:
             m = re.search(r'\{.*\}', raw, re.DOTALL)
-            if m: return json.loads(m.group())
-        except: pass
-        return {"alimento": texto, "calorias": -1, "proteinas_g": 0, "carbohidratos_g": 0, "grasas_g": 0}
+            parsed = json.loads(m.group()) if m else {}
+            if parsed.get("calorias", 0):
+                parsed.setdefault("es_comida", True)
+                parsed.setdefault("es_ejercicio", False)
+                parsed.setdefault("alimentos_detectados", [parsed.get("alimento", texto)])
+                parsed.setdefault("ejercicios_detectados", [])
+                parsed.setdefault("calidad_nutricional", "Media")
+                parsed["porcion_g"] = porcion_g
+                parsed["origen"] = "LLM (Llama-3)"
+                return parsed
+        except Exception:
+            pass
+        return {"es_comida": False, "es_ejercicio": False, "calorias": 0, "alimentos_detectados": [], "ejercicios_detectados": []}
 
     # ══════════════════════════════════════════════════════════════════
     # GENERADORES DE PLAN INICIAL

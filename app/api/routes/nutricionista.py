@@ -370,10 +370,9 @@ def update_strategic_guide(
         client.forbidden_foods = guide.forbidden_foods
     if guide.medical_conditions is not None:
         client.medical_conditions = guide.medical_conditions
-    
-    # ✅ (v80.0) No marcamos como validado globalmente al editar alimentos.
-    # La validación oficial es un proceso semanal por separado (validate_plan).
-         
+    if guide.nutri_weekly_note is not None:          # 🆕 Mensaje semanal del nutri
+        client.nutri_weekly_note = guide.nutri_weekly_note
+
     db.commit()
     return {"status": "success", "message": "Guía estratégica actualizada para la IA"}
 @router.post("/validar-plan/{id}")
@@ -676,7 +675,15 @@ def delete_client(
         except Exception as e:
             print(f"⚠️ Firebase: No se pudo eliminar el usuario ({e}). Continuando con la BD...")
 
-    # 2. Eliminar de la base de datos (cascade elimina historial, planes, alertas, etc.)
+    # 2. Borrar PlanDiario y PlanNutricional manualmente ANTES que el cliente
+    #    (SQLAlchemy hace UPDATE client_id=None en vez de DELETE cuando hay referencias activas)
+    planes = db.query(PlanNutricional).filter(PlanNutricional.client_id == id).all()
+    for plan in planes:
+        db.query(PlanDiario).filter(PlanDiario.plan_id == plan.id).delete(synchronize_session=False)
+    db.query(PlanNutricional).filter(PlanNutricional.client_id == id).delete(synchronize_session=False)
+    db.flush()
+
+    # 3. Ahora eliminar el cliente (el resto de relaciones sí tienen cascade correcto)
     db.delete(client)
     db.commit()
 

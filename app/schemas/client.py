@@ -97,6 +97,7 @@ class StrategicGuideUpdate(BaseModel):
     forbidden_foods: Optional[List[str]] = None
     medical_conditions: Optional[List[str]] = None  # Nutri también puede ajustar
     is_strategic_guide_validated: Optional[bool] = None
+    nutri_weekly_note: Optional[str] = None          # 🆕 Mensaje/meta semanal al cliente
 
 class ResetPasswordRequest(BaseModel):
     """Para cuando el usuario ingresa su email para recibir el código"""

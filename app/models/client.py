@@ -38,10 +38,11 @@ class Client(Base):
     assigned_nutri_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     
     # --- CAMPOS ESTRATÉGICOS IA (v80.0) ---
-    ai_strategic_focus = Column(String, nullable=True)  # Foco semanal sugerido por Nutri
-    recommended_foods = Column(ARRAY(String), nullable=True, default=[]) # Lista Blanca
-    forbidden_foods = Column(ARRAY(String), nullable=True, default=[])  # Lista Negra
-    is_strategic_guide_validated = Column(Boolean, default=False) # ✅ Indica si el Nutri ya validó la estrategia
+    ai_strategic_focus = Column(String, nullable=True)       # Foco semanal sugerido por Nutri
+    recommended_foods = Column(ARRAY(String), nullable=True, default=[])  # Lista Blanca
+    forbidden_foods = Column(ARRAY(String), nullable=True, default=[])    # Lista Negra
+    nutri_weekly_note = Column(Text, nullable=True)           # 🆕 Mensaje/meta semanal del Nutricionista al cliente
+    is_strategic_guide_validated = Column(Boolean, default=False)         # ✅ Indica si el Nutri ya validó la estrategia
     profile_picture_url = Column(String, nullable=True) # ✅ URL de la foto de perfil en Firebase Storage
     is_profile_complete = Column(Boolean, default=False)  # 🆕 False hasta que el cliente llene sus datos en el Onboarding
     

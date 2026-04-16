@@ -754,12 +754,24 @@ class AsistenteService:
                 print(f"Error en ML Recomendador: {e}")
                 bloque_recomendacion_ml = ""
 
+        # ═══ BLOQUE NUTRI — VA PRIMERO (máxima prioridad para el LLM) ═══
+        nota_semanal = getattr(perfil, 'nutri_weekly_note', None)
+        bloque_nutri_header = (
+            f"\n⚠️ INSTRUCCIONES OBLIGATORIAS DEL NUTRICIONISTA (NO NEGOCIABLES):\n"
+            f"• FOCO SEMANAL: {foco}\n"
+            f"• ALIMENTOS QUE DEBES PRIORIZAR: {', '.join(alimentos_rec) if alimentos_rec else 'Sin restricción especial'}\n"
+            f"• ALIMENTOS TERMINANTEMENTE PROHIBIDOS: {', '.join(alimentos_pro) if alimentos_pro else 'Ninguno'} "
+            f"— NUNCA los sugieras, aunque el cliente los pida directamente.\n"
+            + (f"• META/MENSAJE SEMANAL DEL NUTRICIONISTA: \"{nota_semanal}\"\n"
+               f"  → Cuando el cliente salude o pregunte cómo le va, MENCIONAA esta meta como contexto motivacional.\n"
+               if nota_semanal else "")
+            + "━" * 60 + "\n"
+        )
+
         return (
-            f"Eres el coach de {perfil.first_name}. "
-            f"FOCO ESTRATÉGICO (Orden del Nutricionista): {foco}. "
-            f"ALIMENTOS RECOMENDADOS: {', '.join(alimentos_rec) if alimentos_rec else 'Normal'}. "
-            f"ALIMENTOS PROHIBIDOS (NUNCA SUGERIR): {', '.join(alimentos_pro) if alimentos_pro else 'Ninguno'}. "
-            f"PERFIL: {perfil.weight}kg, {perfil.height}cm, {edad} años. "
+            bloque_nutri_header
+            + f"Eres el coach personal de {perfil.first_name}. "
+            f"PERFIL: {perfil.weight}kg, {perfil.height}cm, {edad} años, {perfil.gender}. "
             f"ALERGIAS: {texto_alergias}. "
             f"PREFERENCIAS DIETÉTICAS: {texto_dieta}. "
             f"CONDICIONES MÉDICAS/LESIONES: {texto_condiciones}. "
@@ -778,7 +790,7 @@ class AsistenteService:
             f"\n4. Indica también el TIPO DE PREGUNTA con el tag: [CALOFIT_QUESTION_TYPE:TIPO] donde TIPO es ABIERTA (requiere opciones, pasos o explicación detallada) o RAPIDA (respuesta directa a una duda concreta o registro)."
             f"\n5. En MODO RECIPE, CADA ÍTEM en 'ingredientes' DEBE incluir sus calorías estimadas al lado (ej: '100g de Pollo (165 kcal)')."
             f"\n6. REGLA DE CONSISTENCIA: La preparación (pasos) SOLO debe usar ingredientes listados en la sección de ingredientes. NO inventes ingredientes nuevos en los pasos."
-            f"\n7. RESTRICCIONES CRÍTICAS: NUNCA sugieras alimentos listados en ALIMENTOS PROHIBIDOS o ALERGIAS. Al sugerir rutinas de ejercicio, ADAPTA el entrenamiento para NO AFECTAR lesiones. PROHIBIDO sugerir deportes (fútbol, vóley, básquet, etc.) como rutina; DISEÑA RUTINAS DE FITNESS (Gimnasio o Casa)."
+            f"\n7. RESTRICCIÓN TOTAL: NUNCA sugieras los ALIMENTOS PROHIBIDOS del Nutricionista, aunque el cliente lo pida explícitamente. Si lo pide, explica amablemente que tu nutricionista no lo recomienda. Al sugerir rutinas, diseña solo RUTINAS DE GYM/FITNESS, no deportes recreativos."
             f"\n8. REGLA DE MACROS OBLIGATORIA: En MODO RECIPE, al final de cada opción/receta DEBES incluir una línea de macros EXACTA con el formato: 'macros: Xcal, Xg proteína, Xg carbohidratos, Xg grasa'. Calcula sumando los ingredientes. Esta línea ES CRÍTICA para el registro consistente."
             f"{bloque_saludo}"
         )
