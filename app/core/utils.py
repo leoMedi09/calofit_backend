@@ -1,6 +1,6 @@
 import re
 from datetime import datetime, date, timedelta, timezone
-from typing import Optional, Dict
+from typing import Any, Dict, Optional, Sequence
 
 def get_peru_now() -> datetime:
     """Retorna la fecha y hora actual en zona horaria de Perú (UTC-5)"""
@@ -15,14 +15,21 @@ def get_peru_date() -> date:
     return get_peru_now().date()
 
 
-def parsear_macros_de_texto(macros_str: str) -> Optional[Dict[str, float]]:
+def parsear_macros_de_texto(
+    macros_str: str,
+    objetivo_plato: Optional[str] = None,
+) -> Optional[Dict[str, float]]:
     """
     Parsea string de macros en múltiples formatos que el LLM puede generar:
       - "P: 30g | C: 20g | G: 10g | Cal: 380kcal"
       - "653 kcal, 51g de proteína, 28g de grasa y 40g de carbohidratos"
       - "380 kcal | prot: 35g | carb: 45g | gras: 12g"
       - "Calorías: 500 | Proteínas: 40g | Carbohidratos: 50g | Grasas: 15g"
+
+    Si solo hay calorías, estima P/C/G con ``macros_desde_calorias_pct_clasico``
+    (opcional ``objetivo_plato`` para % ganar/perder/mantener).
     """
+    from app.core.macros_diarios import macros_desde_calorias_pct_clasico
     if not macros_str or not macros_str.strip():
         return None
     s = macros_str.strip()
@@ -36,10 +43,11 @@ def parsear_macros_de_texto(macros_str: str) -> Optional[Dict[str, float]]:
 
     # ── Proteínas ───────────────────────────────────────────────────
     p = (
-        re.search(r'P(?:rot(?:eína?s?)?)?\s*:\s*([\d.,]+)', s, re.IGNORECASE) or
-        re.search(r'([\d.,]+)\s*g\s*(?:de\s+)?prot(?:eína?s?)?', s, re.IGNORECASE) or
-        re.search(r'prot(?:eína?s?)?\s*[:\-]\s*([\d.,]+)', s, re.IGNORECASE) or
-        re.search(r'prot(?:eína?s?)?\s+([\d.,]+)\s*g', s, re.IGNORECASE)
+        re.search(r'P(?:rot(?:eína?s?)?)?\s*:\s*([\d.,]+)', s, re.IGNORECASE)
+        or re.search(r"(?<![A-Za-z0-9])P\s+([\d.,]+)\s*g\b", s, re.IGNORECASE)
+        or re.search(r'([\d.,]+)\s*g\s*(?:de\s+)?prot(?:eína?s?)?', s, re.IGNORECASE)
+        or re.search(r'prot(?:eína?s?)?\s*[:\-]\s*([\d.,]+)', s, re.IGNORECASE)
+        or re.search(r'prot(?:eína?s?)?\s+([\d.,]+)\s*g', s, re.IGNORECASE)
     )
 
     # ── Carbohidratos ────────────────────────────────────────────────
@@ -69,14 +77,20 @@ def parsear_macros_de_texto(macros_str: str) -> Optional[Dict[str, float]]:
         carb_val = to_float(c)
         gras_val = to_float(g)
 
-        # Si solo tenemos calorías, estimar macros proporcionales (30/40/30)
+        # Solo kcal: mismo reparto % que CalculadorDietaAutomatica (app.core.macros_diarios)
         if cal_val > 0 and prot_val == 0 and carb_val == 0 and gras_val == 0:
-            prot_val = round(cal_val * 0.30 / 4, 1)
-            carb_val = round(cal_val * 0.40 / 4, 1)
-            gras_val = round(cal_val * 0.30 / 9, 1)
+            est = macros_desde_calorias_pct_clasico(cal_val, objetivo_plato)
+            prot_val = est["proteinas_g"]
+            carb_val = est["carbohidratos_g"]
+            gras_val = est["grasas_g"]
 
         if cal_val == 0 and prot_val == 0:
             return None
+
+        # Si el modelo dio P/C/G pero olvidó Cal, derivar kcal (Atwater aprox.).
+        atwater = 4.0 * prot_val + 4.0 * carb_val + 9.0 * gras_val
+        if atwater > 0 and cal_val <= 0:
+            cal_val = round(atwater, 1)
 
         return {
             "proteinas_g":    prot_val,
@@ -86,6 +100,75 @@ def parsear_macros_de_texto(macros_str: str) -> Optional[Dict[str, float]]:
         }
     except (ValueError, AttributeError):
         return None
+
+
+# Palabras en nombre/ingredientes que implican aporte proteico relevante (plato típico).
+_PALABRAS_FUENTE_PROTEINA = frozenset(
+    (
+        "pollo", "pechuga", "muslo", "pavo", "pato", "huevo", "huevos",
+        "carne", "res", "ternera", "cerdo", "chancho", "chicharron", "chicharrón",
+        "lomo", "bistec", "brocheta",
+        "pescado", "pez", "trucha", "tilapia", "corvina", "chita", "caballa",
+        "atún", "atun", "marisc", "langost", "camar", "pulpo", "calamar",
+        "queso", "requesón", "requeson", "yogurt", "yoghurt", "leche", "suero",
+        "lenteja", "lentejas", "garbanzo", "garbanzos", "frejol", "frejoles",
+        "poroto", "porotos", "arveja", "arvejas", "haba", "habas",
+        "quinua", "quinoa", "soya", "tofu", "sibayo",
+        "tocino", "jamón", "jamon", "tocineta", "sardina", "caballa",
+    )
+)
+
+
+def _texto_plato_sugiere_proteina(nombre_plato: str, ingredientes: Optional[Sequence[str]]) -> bool:
+    txt = f"{nombre_plato or ''} {' '.join(ingredientes or ())}".lower()
+    return any(p in txt for p in _PALABRAS_FUENTE_PROTEINA)
+
+
+def coherenciar_macros_tarjeta(
+    parsed: Optional[Dict[str, Any]],
+    nombre_plato: str = "",
+    ingredientes: Optional[Sequence[str]] = None,
+) -> Optional[Dict[str, float]]:
+    """
+    Si el modelo devuelve P: 0g pero el plato claramente lleva proteínas, o P/C/G y Cal no cierran
+    por Atwater, reequilibra gramos para que la tarjeta no muestre 0g de proteína de forma absurda.
+
+    Caso típico: Cal ≈ 4C + 9G y P omitido/0 con «arroz con pollo» o «sopa de lentejas».
+    """
+    if not parsed:
+        return parsed
+    try:
+        cal = float(parsed.get("calorias") or 0)
+        p = float(parsed.get("proteinas_g") or 0)
+        c = float(parsed.get("carbohidratos_g") or 0)
+        g = float(parsed.get("grasas_g") or 0)
+    except (TypeError, ValueError):
+        return parsed
+    if cal <= 0:
+        return parsed
+
+    atw = 4.0 * p + 4.0 * c + 9.0 * g
+    residual = cal - atw
+    sugiere = _texto_plato_sugiere_proteina(nombre_plato, ingredientes)
+
+    if p < 2.0 and sugiere:
+        # Energía ya «llenada» solo con C y G pero el nombre insiste en proteína: reparto mínimo creíble.
+        if abs(residual) <= max(8.0, cal * 0.06):
+            p_tgt = max(12.0, min(48.0, 0.22 * cal / 4.0))
+            carb_kcal = max(0.0, cal - 4.0 * p_tgt - 9.0 * g)
+            c_adj = max(0.0, carb_kcal / 4.0)
+            p, c = p_tgt, c_adj
+        elif residual > 3.0 * 4.0:
+            p = max(p, residual / 4.0)
+    elif p < 1.0 and residual > 4.0 * 3.0:
+        p = max(p, residual / 4.0)
+
+    return {
+        "proteinas_g": round(p, 1),
+        "carbohidratos_g": round(c, 1),
+        "grasas_g": round(g, 1),
+        "calorias": round(cal, 1),
+    }
 
 
 def calcular_metabolismo_basal(cliente) -> float:
@@ -121,32 +204,29 @@ def calcular_metabolismo_basal(cliente) -> float:
     factor = nivel_map.get(getattr(cliente, 'activity_level', 'Sedentario'), 1.20)
     return tmb * factor
 
-def obtener_macros_desglosados(calorias: float, objetivo: str = "Mantener peso"):
+def obtener_macros_desglosados(
+    calorias: float,
+    objetivo: str = "Mantener peso",
+    peso_kg: float = 70.0,
+):
     """
-    Calcula desglose de macros basado en calorías y objetivo.
-    Sincronizado con CalculadorDietaAutomatica (30/40/30).
+    Desglose P/C/G a partir de calorías diarias y objetivo.
+    Usa la misma regla que IAService.calcular_macros_optimizados (app.core.macros_diarios).
     """
-    # Ajustar según objetivo
-    obj_lower = objetivo.lower()
-    pct_p, pct_c, pct_g = 0.30, 0.40, 0.30
-    
-    if "ganar" in obj_lower: # ganar masa o ganar_leve
-        pct_p, pct_c, pct_g = 0.25, 0.50, 0.25
-    elif "perder" in obj_lower: # perder peso o perder_leve
-        pct_p, pct_c, pct_g = 0.35, 0.35, 0.30
+    from app.core.macros_diarios import (
+        macros_desde_calorias_peso_objetivo,
+        porcentajes_aprox_desde_gramos,
+    )
 
-    proteinas_g = (calorias * pct_p) / 4
-    carbohidratos_g = (calorias * pct_c) / 4
-    grasas_g = (calorias * pct_g) / 9
-    
+    m = macros_desde_calorias_peso_objetivo(calorias, objetivo, peso_kg)
+    cal = m["calorias_totales"]
+    pct = porcentajes_aprox_desde_gramos(
+        cal, m["proteinas_g"], m["carbohidratos_g"], m["grasas_g"]
+    )
     return {
-        "calorias": round(calorias),
-        "proteinas_g": round(proteinas_g, 1),
-        "carbohidratos_g": round(carbohidratos_g, 1),
-        "grasas_g": round(grasas_g, 1),
-        "pct": {
-            "p": int(pct_p * 100),
-            "c": int(pct_c * 100),
-            "g": int(pct_g * 100)
-        }
+        "calorias": int(round(cal)),
+        "proteinas_g": m["proteinas_g"],
+        "carbohidratos_g": m["carbohidratos_g"],
+        "grasas_g": m["grasas_g"],
+        "pct": {"p": pct["p"], "c": pct["c"], "g": pct["g"]},
     }

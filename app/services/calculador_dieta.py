@@ -12,6 +12,8 @@ from datetime import date
 from typing import Dict, Optional
 from dataclasses import dataclass
 
+from app.core.macros_diarios import macros_desde_calorias_pct_clasico
+
 @dataclass
 class RecomendacionDieta:
     """Estructura de recomendaciones de dieta automática"""
@@ -156,12 +158,12 @@ class CalculadorDietaAutomatica:
             calorias = gasto_calorico_diario
             ajuste_objetivo = "Mantenimiento de peso actual"
         
-        # 5. Calcular macronutrientes
-        # Distribución estándar: 30% proteína, 40% carbohidratos, 30% grasas
-        proteinas_g = (calorias * 0.30) / 4  # 4 kcal/g de proteína
-        carbohidratos_g = (calorias * 0.40) / 4  # 4 kcal/g de carbs
-        grasas_g = (calorias * 0.30) / 9  # 9 kcal/g de grasa
-        
+        # 5. Macronutrientes (misma regla % que parsear_macros solo-kcal / utils histórico)
+        m_pct = macros_desde_calorias_pct_clasico(calorias, objetivo)
+        proteinas_g = m_pct["proteinas_g"]
+        carbohidratos_g = m_pct["carbohidratos_g"]
+        grasas_g = m_pct["grasas_g"]
+
         # 6. Determinar alimentos recomendados según categoría IMC
         alimentos_recomendados = CalculadorDietaAutomatica.get_alimentos_recomendados(
             categoria_imc, objetivo

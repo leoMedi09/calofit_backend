@@ -19,6 +19,8 @@ class ClientCreate(BaseModel):
     
     activity_level: Optional[str] = Field(default="Sedentario", description="Nivel de actividad física")
     goal: Optional[str] = Field(default="Mantener peso", description="Objetivo de salud")
+    workout_type: Optional[str] = Field(default=None, description="Tipo de entrenamiento preferido (para ML)")
+    session_duration: Optional[float] = Field(default=None, description="Duración de sesión en horas (para ML)")
     flutter_uid: str = Field(..., min_length=10, description="Firebase UID único del usuario")
     assigned_coach_id: Optional[int] = None
     assigned_nutri_id: Optional[int] = None

@@ -43,48 +43,27 @@ except ImportError:
     ctrl = None
 
 from app.core.config import settings
+from app.core.mets_gym import METS_GYM
 from app.services.nutricion_service import nutricion_service
+
+# Mensaje estable si httpx/Groq corta por tiempo (evitar "[Error: Request timed out.]" en el chat).
+FALLBACK_MSG_IA_TIMEOUT = (
+    "No pudimos completar la respuesta a tiempo. "
+    "Por favor envía tu mensaje otra vez en unos segundos."
+)
+
+# Mensaje cuando Groq alcanza el límite diario de tokens (429)
+FALLBACK_MSG_RATE_LIMIT = (
+    "El asistente está temporalmente ocupado (límite de consultas alcanzado). "
+    "Espera unos minutos y vuelve a intentarlo. "
+    "Si el problema persiste, intenta más tarde."
+)
 
 # Constantes de Salud
 CONDICIONES_CRITICAS = [
     "diabetes", "hipertensión", "hipertension", "renal", "cardíaca",
     "cardiaca", "embarazo", "lactancia", "celiaco", "celíaco"
 ]
-
-# ─────────────────────────────────────────────────────────────────────
-# TABLA MET — Ejercicios de Gimnasio y Rutinas
-# Fuente: Compendium of Physical Activities (Ainsworth et al., 2011)
-# Fórmula: kcal = MET × peso_kg × tiempo_horas
-# ─────────────────────────────────────────────────────────────────────
-METS_GYM = {
-    # Pesas / Fuerza
-    "pesas": 5.0, "pesa": 5.0, "peso libre": 5.0, "mancuernas": 4.5,
-    "barra": 5.0, "sentadilla": 5.5, "squat": 5.5, "press banca": 5.0,
-    "press de banca": 5.0, "bench press": 5.0, "deadlift": 6.0,
-    "peso muerto": 6.0, "dominadas": 5.0, "pull up": 5.0, "jalón": 4.5,
-    "remo": 5.0, "curl biceps": 4.0, "curl de biceps": 4.0,
-    "triceps": 4.0, "hombros": 4.5, "press militar": 4.5,
-    "leg press": 5.0, "prensa": 5.0, "extensión": 4.0, "femoral": 4.5,
-    "hip thrust": 4.5, "glúteos": 4.0, "glúte": 4.0,
-    # Cardio de Gym
-    "caminadora": 4.5, "trotadora": 7.0, "trotar caminadora": 7.0,
-    "elíptica": 5.0, "bicicleta estática": 6.0, "spinning": 8.5,
-    "remo máquina": 7.0, "rowing": 7.0, "escaladora": 8.0, "stepper": 6.0,
-    # Cardio General (gym o fuera)
-    "cardio": 6.0, "hiit": 10.0, "circuito": 7.0, "funcional": 6.5,
-    "trotar": 8.0, "correr": 10.0, "saltar soga": 9.0, "cuerda": 9.0,
-    # Core / Abs
-    "abdominales": 3.8, "abs": 3.8, "plancha": 4.0, "crunch": 3.8,
-    "core": 4.0, "flexiones": 4.0, "push up": 4.0, "burpees": 10.0,
-    # Rutinas completas (aproximado)
-    "rutina de pecho": 5.0, "rutina de espalda": 5.0, "rutina de pierna": 5.5,
-    "rutina de hombros": 4.5, "rutina de brazo": 4.0, "rutina de brazos": 4.0,
-    "día de pierna": 5.5, "día de pecho": 5.0, "día de espalda": 5.0,
-    "entrené": 5.0, "entrene": 5.0, "entrenamiento": 5.0, "gym": 5.0,
-    # Yoga / Pilates / Otros
-    "yoga": 2.5, "pilates": 3.5, "stretching": 2.5, "estiramientos": 2.5,
-    "natación": 7.0, "nadar": 7.0, "boxeo": 9.0, "zumba": 6.5,
-}
 
 # Porciones estándar según hora del día (Perú) y tipo de plato
 PORCIONES_ESTANDAR = {
@@ -101,16 +80,25 @@ PORCIONES_ESTANDAR = {
     "porcion pequeña": 150, "porcion grande": 450,
 }
 
+
 class IAService:
     """Motor de IA de CaloFit — Simplificado para Tesis (Random Forest + KNN + Llama-3)."""
 
     def __init__(self):
         # Groq / Llama-3 (Motor de Lenguaje Natural)
         if AsyncGroq and getattr(settings, "GROQ_API_KEY", None):
-            self.groq_client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+            _t = float(getattr(settings, "GROQ_TIMEOUT_SEC", 180.0) or 180.0)
+            _retries = int(getattr(settings, "GROQ_MAX_RETRIES", 2) or 2)
+            # connect algo generoso en móvil/WiFi inestable; read acorde a prompts grandes.
+            self.groq_client = AsyncGroq(
+                api_key=settings.GROQ_API_KEY,
+                timeout=httpx.Timeout(_t, connect=30.0),
+                max_retries=max(0, _retries),
+            )
         else:
             self.groq_client = None
-            print("⚠️ Groq no inicializado — modo offline activo.")
+            # Evitar emojis aquí: en Windows cp1252 puede lanzar UnicodeEncodeError en tests/CLI.
+            print("Groq no inicializado - modo offline activo.")
 
         # FatSecret (Respaldo de macros)
         self._fs_client_id     = getattr(settings, "FATSECRET_CLIENT_ID", None)
@@ -152,42 +140,25 @@ class IAService:
         self, genero: int, edad: int, peso: float,
         talla: float, nivel_actividad: float, objetivo: str
     ) -> Tuple[float, float, float, float]:
-        """Retorna calorias y desglose de macros inicial."""
+        """Retorna calorías y P/C/G (misma lógica que plan/dashboard: ``macros_desde_calorias_peso_objetivo``)."""
+        from app.core.macros_diarios import macros_desde_calorias_peso_objetivo
+
         calorias = self.calcular_requerimiento(genero, edad, peso, talla, nivel_actividad, objetivo)
-        obj_lower = objetivo.lower()
-        
-        # Distribución estándar clínica 30/40/30 para pérdida, 25/50/25 para ganancia/mantenimiento
-        prot_ratio = 0.30 if "perder" in obj_lower else 0.25
-        carb_ratio = 0.40 if "perder" in obj_lower else 0.50
-        gras_ratio = 1.0 - prot_ratio - carb_ratio
-        
+        m = macros_desde_calorias_peso_objetivo(calorias, objetivo, peso)
         return (
             calorias,
-            round((calorias * prot_ratio) / 4, 1),
-            round((calorias * carb_ratio) / 4, 1),
-            round((calorias * gras_ratio) / 9, 1),
+            m["proteinas_g"],
+            m["carbohidratos_g"],
+            m["grasas_g"],
         )
 
     def calcular_macros_optimizados(
         self, calorias: float, objetivo: str, peso: float = 70.0
     ) -> Dict:
-        """Distribución avanzada de macros basada en el peso del usuario."""
-        obj = objetivo.lower()
-        if "perder" in obj:
-            prot_g, gras_ratio = round(peso * 2.1, 1), 0.25 # Alta proteína para preservar músculo
-        elif "ganar" in obj:
-            prot_g, gras_ratio = round(peso * 1.8, 1), 0.25
-        else:
-            prot_g, gras_ratio = round(peso * 1.6, 1), 0.25
+        """Distribución de macros (g/kg + reparto grasa); ver app.core.macros_diarios."""
+        from app.core.macros_diarios import macros_desde_calorias_peso_objetivo
 
-        cal_gras = calorias * gras_ratio
-        cal_carb = calorias - (prot_g * 4) - cal_gras
-        return {
-            "calorias_totales": round(calorias, 1),
-            "proteinas_g":      prot_g,
-            "carbohidratos_g":  round(cal_carb / 4, 1),
-            "grasas_g":         round(cal_gras / 9, 1),
-        }
+        return macros_desde_calorias_peso_objetivo(calorias, objetivo, peso)
 
     # ══════════════════════════════════════════════════════════════════
     # LÓGICA DIFUSA (Diagnóstico de Adherencia)
@@ -237,6 +208,69 @@ class IAService:
     # PROCESAMIENTO NLP (Llama-3 vía Groq)
     # ══════════════════════════════════════════════════════════════════
 
+    @staticmethod
+    def es_fallo_respuesta_llm(text: Optional[str]) -> bool:
+        t = (text or "").strip()
+        if not t or t == "[Modo Offline]":
+            return True
+        if t.startswith("[Error:"):
+            return True
+        if t.startswith("No pudimos completar la respuesta a tiempo"):
+            return True
+        if t.startswith("El asistente está temporalmente ocupado"):
+            return True
+        return False
+
+    @staticmethod
+    def normalizar_etiqueta_modo_llm(raw: str) -> Optional[str]:
+        """
+        Extrae una etiqueta válida de ``MODOS_ASISTENTE`` desde texto libre del modelo.
+        """
+        from app.services.asistente_modos import MODOS_ASISTENTE
+
+        t = (raw or "").strip().lower()
+        if not t:
+            return None
+        t = re.sub(r"^```[a-z0-9]*\s*", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"\s*```\s*$", "", t).strip()
+        for modo in sorted(MODOS_ASISTENTE, key=len, reverse=True):
+            if re.search(rf"(?<![a-z0-9_]){re.escape(modo)}(?![a-z0-9_])", t, re.IGNORECASE):
+                return modo
+        return None
+
+    async def clasificar_modo_asistente(self, mensaje: str) -> Optional[str]:
+        """
+        Clasificación semántica vía Groq (llamada breve, baja temperatura).
+        Si devuelve ``None`` (sin API, error, respuesta inválida o desactivado por env),
+        ``resolver_modo_funcion`` usa ``detectar_modo_funcion``.
+
+        Desactivar la llamada extra (p. ej. en benchmarks): ``CALOFIT_DISABLE_CLASIFICAR_MODO_LLM=1``.
+        """
+        if getattr(settings, "CALOFIT_DISABLE_CLASIFICAR_MODO_LLM", False):
+            return None
+        if not self.groq_client:
+            return None
+        m = (mensaje or "").strip()
+        if len(m) < 2:
+            return None
+        prompt = (
+            "Clasifica el mensaje del usuario en EXACTAMENTE UNA etiqueta. "
+            "Responde solo con esa etiqueta en minúsculas, sin puntuación ni explicación.\n"
+            "Etiquetas permitidas:\n"
+            "recomendar_nutricion | registrar_nutricion | recomendar_ejercicio | registrar_ejercicio | otro\n\n"
+            "Guía:\n"
+            "- recomendar_nutricion: ideas de comida, recetas, qué comer/cenar, menú.\n"
+            "- registrar_nutricion: ya comió / anotar comida (a veces con cantidad).\n"
+            "- recomendar_ejercicio: rutina, qué ejercicio, zona muscular, gym.\n"
+            "- registrar_ejercicio: ya entrenó, series, minutos de cardio.\n"
+            "- otro: saludo, gracias, duda general, mensaje ambiguo o no encaja en las otras.\n\n"
+            f"Mensaje:\n{m[:600]}"
+        )
+        raw = await self._llamar_groq(prompt, max_tokens=48, temp=0.05)
+        if self.es_fallo_respuesta_llm(raw):
+            return None
+        return IAService.normalizar_etiqueta_modo_llm(raw)
+
     async def _llamar_groq(self, prompt: str, max_tokens: int = 800, temp: float = 0.7) -> str:
         if not self.groq_client: return "[Modo Offline]"
         try:
@@ -247,7 +281,15 @@ class IAService:
                 temperature=temp,
             )
             return r.choices[0].message.content.strip()
-        except Exception as e: return f"[Error: {e}]"
+        except Exception as e:
+            err = str(e).lower()
+            if "timed out" in err or "timeout" in err or isinstance(e, (httpx.ReadTimeout, httpx.ConnectTimeout)):
+                return FALLBACK_MSG_IA_TIMEOUT
+            # Rate limit de Groq (429) — no exponer el error técnico al usuario
+            if "429" in err or "rate_limit" in err or "rate limit" in err or "token" in err and "limit" in err:
+                print(f"[Groq] Rate limit alcanzado: {e}")
+                return FALLBACK_MSG_RATE_LIMIT
+            return f"[Error: {e}]"
 
     async def recomendar_alimentos_con_groq(
         self, perfil_usuario: Dict, comando_texto: str = None,
@@ -432,18 +474,17 @@ Reglas:
                 break
 
         if ejercicio_detectado:
-            # Detectar duración: "30 minutos", "1 hora", "45 min", "1h", etc.
-            duracion_min = 45  # default: sesión estándar de gym
-            match_dur = re.search(
-                r'(\d+)\s*(min(?:utos?)?|h(?:oras?|rs?)?)',
-                texto_lower
-            )
-            if match_dur:
-                valor = int(match_dur.group(1))
-                unidad = match_dur.group(2)
-                duracion_min = valor * 60 if unidad.startswith('h') else valor
+            # Misma duración y fórmula que en tarjetas POWER (ACSM: MET×3.5×kg/200×min).
+            from app.services.asistente_ejercicio import parse_duracion_minutos
+            from app.services.ejercicios_service import ejercicios_service
 
-            calorias = round(met_detectado * peso_usuario_kg * (duracion_min / 60), 1)
+            duracion_min = parse_duracion_minutos(texto_lower, default=45.0)
+            calorias = round(
+                ejercicios_service.calcular_calorias(
+                    met_detectado, peso_usuario_kg, duracion_min
+                ),
+                1,
+            )
             return {
                 "es_ejercicio": True, "es_comida": False,
                 "calorias": calorias, "proteinas_g": 0,
@@ -454,8 +495,17 @@ Reglas:
                 "calidad_nutricional": "Alta",
                 "duracion_min": duracion_min,
                 "met": met_detectado,
-                "origen": "Tabla MET Científica 🏋️"
+                "origen": "Tabla MET Cientifica"
             }
+
+        # PASO 1b: "hice X … min/series" con vocabulario de gimnasio → ejercicio (no CENAN/LLM comida)
+        from app.services.asistente_ejercicio import (
+            extraccion_ejercicio_fallback_fuerza,
+            frase_registro_actividad_fisica,
+            frase_vocabulario_gimnasio,
+        )
+        if frase_registro_actividad_fisica(texto) and frase_vocabulario_gimnasio(texto):
+            return extraccion_ejercicio_fallback_fuerza(texto, texto_lower, peso_usuario_kg)
 
         # ─────────────────────────────────────────────────────────────
         # PASO 2: Detectar porción según hora peruana y texto
@@ -497,12 +547,14 @@ Reglas:
         # ─────────────────────────────────────────────────────────────
         # PASO 3: Buscar en CENAN/INS (fuente de verdad oficial Perú)
         # ─────────────────────────────────────────────────────────────
-        info_db = nutricion_service.obtener_info_alimento(texto)
+        _texto_busqueda = texto.split("(NOTA INTERNA", 1)[0].strip()
+        info_db = nutricion_service.obtener_info_alimento(_texto_busqueda or texto)
         if info_db and float(info_db.get("calorias", 0) or 0) > 0:
             factor = porcion_g / 100.0
-            print(f"✅ [DB-First] '{texto}' → {info_db['nombre']} ({porcion_g}g) = {round(info_db['calorias'] * factor, 1)} kcal [{info_db.get('origen','BD')}]")
+            print(f"[DB-First] '{texto}' -> {info_db['nombre']} ({porcion_g}g) = {round(info_db['calorias'] * factor, 1)} kcal [{info_db.get('origen','BD')}]")
             return {
-                "es_comida": True, "es_ejercicio": False,
+                "es_comida": True,
+                "es_ejercicio": False,
                 "calorias": round(float(info_db["calorias"]) * factor, 1),
                 "proteinas_g": round(float(info_db.get("proteinas", 0) or 0) * factor, 1),
                 "carbohidratos_g": round(float(info_db.get("carbohidratos", 0) or 0) * factor, 1),
@@ -514,22 +566,57 @@ Reglas:
                 "ejercicios_detectados": [],
                 "calidad_nutricional": "Alta",
                 "porcion_g": porcion_g,
-                "origen": info_db.get("origen", "BD Oficial 🇵🇪"),
+                "origen": info_db.get("origen", "BD Oficial"),
             }
+
+        # ─────────────────────────────────────────────────────────────
+        # PASO 3b: FatSecret API (macros estándar) antes del LLM
+        # ─────────────────────────────────────────────────────────────
+        if not getattr(settings, "DISABLE_FATSECRET", False):
+            try:
+                from app.services.fatsecret_client import get_fatsecret_client, simplify_text_for_fatsecret_query
+
+                fs = get_fatsecret_client()
+                if fs:
+                    q = simplify_text_for_fatsecret_query(texto)
+                    if len(q) >= 2:
+                        hit = await asyncio.to_thread(fs.lookup_macros, q, porcion_g)
+                        if hit and float(hit.get("calorias", 0) or 0) > 0:
+                            print(
+                                f"[FatSecret] '{q}' -> {hit.get('nombre')} "
+                                f"= {hit['calorias']} kcal (porción ref. {porcion_g}g)"
+                            )
+                            return {
+                                "es_comida": True,
+                                "es_ejercicio": False,
+                                "calorias": float(hit["calorias"]),
+                                "proteinas_g": float(hit.get("proteinas", 0) or 0),
+                                "carbohidratos_g": float(hit.get("carbohidratos", 0) or 0),
+                                "grasas_g": float(hit.get("grasas", 0) or 0),
+                                "fibra_g": float(hit.get("fibra", 0) or 0),
+                                "azucar_g": float(hit.get("azucares", 0) or 0),
+                                "sodio_mg": float(hit.get("sodio", 0) or 0),
+                                "alimentos_detectados": [hit.get("nombre", q)],
+                                "ejercicios_detectados": [],
+                                "calidad_nutricional": "Alta",
+                                "porcion_g": porcion_g,
+                                "origen": hit.get("origen", "FatSecret API"),
+                            }
+            except Exception as e:
+                print(f"[FatSecret] {e}")
 
         # ─────────────────────────────────────────────────────────────
         # PASO 4: LLM como último recurso (platos compuestos no en BD)
         # El resultado se devuelve; el AsistenteService lo guardará
         # en PreferenciaAlimento para que la próxima vez sea consistente.
         # ─────────────────────────────────────────────────────────────
-        print(f"⚠️ [DB-First] '{texto}' no encontrado en BD → usando LLM (se cacheará)")
-        meal_context = "de desayuno" if 5 <= hora_peru < 10 else "estándar"
+        print(f"[DB-First] '{texto}' no encontrado en BD -> usando LLM (se cacheara)")
+        meal_context = "de desayuno" if 5 <= hora_peru < 10 else "tamaño de porción razonable"
+        qtxt = (texto.split("(NOTA INTERNA", 1)[0] or texto).replace('"', "'").strip()
         prompt = (
-            f'Soy un nutricionista peruano. Dame los macros de "{texto}" '
-            f'para {porcion_g}g (1 porción {meal_context}). '
-            f'Responde SOLO JSON sin texto extra: '
-            f'{{"alimento": "nombre", "calorias": 0, "proteinas_g": 0, "carbohidratos_g": 0, '
-            f'"grasas_g": 0, "es_comida": true}}'
+            f"Eres nutricionista. Estima 1 porción típica ({meal_context}) del alimento: «{qtxt}». "
+            "Responde **solo** JSON: "
+            '{"alimento": "string", "calorias": 0, "proteinas_g": 0, "carbohidratos_g": 0, "grasas_g": 0, "es_comida": true}'
         )
         raw = await self._llamar_groq(prompt, max_tokens=200, temp=0.1)
         try:
@@ -541,7 +628,7 @@ Reglas:
                 parsed.setdefault("alimentos_detectados", [parsed.get("alimento", texto)])
                 parsed.setdefault("ejercicios_detectados", [])
                 parsed.setdefault("calidad_nutricional", "Media")
-                parsed["porcion_g"] = porcion_g
+                parsed["porcion_g"] = float(porcion_g) if porcion_g else 250.0
                 parsed["origen"] = "LLM (Llama-3)"
                 return parsed
         except Exception:
@@ -576,7 +663,7 @@ Reglas:
                 })
             return {"calorias_diarias": calorias, "macros": macros, "dias": dias}
         except Exception as e:
-            print(f"❌ Error plan inicial: {e}")
+            print(f"[Plan inicial] Error: {e}")
             return None
 
 # Instancia exportada

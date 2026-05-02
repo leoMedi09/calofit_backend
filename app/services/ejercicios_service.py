@@ -19,7 +19,7 @@ class EjerciciosService:
             json_path = os.path.join(actual_dir, "..", "data", "ejercicios.json")
             
             if not os.path.exists(json_path):
-                 print(f"❌ EjerciciosService: No se encontró {json_path}")
+                 print(f"[EjerciciosService] No se encontro {json_path}")
                  return
 
             with open(json_path, 'r', encoding='utf-8') as f:
@@ -34,9 +34,9 @@ class EjerciciosService:
                         for alias in item.get("alias", []):
                             self._ejercicios_db[alias.lower()] = item
             
-            print(f"✅ EjerciciosService: Cargados {len(lista_ejercicios)} ejercicios oficiales.")
+            print(f"[EjerciciosService] Cargados {len(lista_ejercicios)} ejercicios oficiales.")
         except Exception as e:
-            print(f"❌ EjerciciosService Error: {e}")
+            print(f"[EjerciciosService] Error: {e}")
 
     def obtener_info_ejercicio(self, consulta: str) -> Optional[dict]:
         """Busca un ejercicio por nombre, id o alias."""

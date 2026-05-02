@@ -31,6 +31,18 @@ class ChatRequest(BaseModel):
     consulta_id: str = None
 
 
+class RegistroManualAlimentoRequest(BaseModel):
+    nombre: str
+    calorias: float
+    proteinas_g: float = 0
+    carbohidratos_g: float = 0
+    grasas_g: float = 0
+    porcion_g: float = 0  # gramos por porción (si lo sabes). si 0, se asume 100g.
+    categoria: str = "manual"
+    unidad: str | None = None  # "botella", "vaso", "taza", "porción"
+    gramos_por_unidad: float | None = None  # si unidad existe, cuantos gramos equivale 1 unidad
+
+
 class ConfirmarRegistroRequest(BaseModel):
     consulta_id: str
 
@@ -95,6 +107,32 @@ async def registro_inteligente_nlp(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         print(f"❌ ERROR EN /log-inteligente: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/log-manual")
+async def registro_manual_alimento(
+    body: RegistroManualAlimentoRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Registro manual (cuando el usuario tiene la etiqueta a mano):
+    - Guarda/actualiza el alimento en BD con categoría
+    - Opcionalmente registra la unidad (botella/vaso/etc) en alimento_unidades
+    - Registra el consumo al progreso del día (como /log-inteligente)
+    """
+    try:
+        return await asistente_service.registrar_manual_alimento(
+            body=body.model_dump(),
+            db=db,
+            current_user=current_user,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        print(f"ERROR EN /log-manual: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

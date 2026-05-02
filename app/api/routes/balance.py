@@ -99,15 +99,37 @@ async def obtener_balance_hoy(
     from app.models.preferencias import PreferenciaAlimento, PreferenciaEjercicio
     from sqlalchemy import func
     
-    alimentos_hoy = db.query(PreferenciaAlimento).filter(
-        PreferenciaAlimento.client_id == cliente.id,
-        func.date(PreferenciaAlimento.ultima_vez) == hoy
-    ).all()
-    
-    ejercicios_hoy = db.query(PreferenciaEjercicio).filter(
-        PreferenciaEjercicio.client_id == cliente.id,
-        func.date(PreferenciaEjercicio.ultima_vez) == hoy
-    ).all()
+    # Importante: en Postgres, timestamptz se normaliza a UTC; si filtramos por date()
+    # sin convertir a Perú, los registros cerca de medianoche se "mueven" de día.
+    # Ajustamos el filtro a fecha Perú para Postgres.
+    dialect = getattr(getattr(db, "bind", None), "dialect", None)
+    dialect_name = getattr(dialect, "name", "") or ""
+
+    if dialect_name == "postgresql":
+        # `ultima_vez` es TIMESTAMP (sin tz). Asumimos que DB lo guarda en UTC (func.now()) y
+        # lo convertimos a hora Perú antes de extraer `date`.
+        def _date_peru(ts_col):
+            # ts (sin tz) -> asumir UTC -> convertir a America/Lima -> date
+            return func.date(func.timezone("America/Lima", func.timezone("UTC", ts_col)))
+
+        alimentos_hoy = db.query(PreferenciaAlimento).filter(
+            PreferenciaAlimento.client_id == cliente.id,
+            _date_peru(PreferenciaAlimento.ultima_vez) == hoy,
+        ).all()
+        ejercicios_hoy = db.query(PreferenciaEjercicio).filter(
+            PreferenciaEjercicio.client_id == cliente.id,
+            _date_peru(PreferenciaEjercicio.ultima_vez) == hoy,
+        ).all()
+    else:
+        # SQLite / otros: date() directo es suficiente.
+        alimentos_hoy = db.query(PreferenciaAlimento).filter(
+            PreferenciaAlimento.client_id == cliente.id,
+            func.date(PreferenciaAlimento.ultima_vez) == hoy,
+        ).all()
+        ejercicios_hoy = db.query(PreferenciaEjercicio).filter(
+            PreferenciaEjercicio.client_id == cliente.id,
+            func.date(PreferenciaEjercicio.ultima_vez) == hoy,
+        ).all()
     
     return {
         "fecha": hoy.isoformat(),
@@ -216,7 +238,8 @@ async def eliminar_registro(
         
         objetivo = 2000
         if plan_activo:
-            dia_semana = datetime.now().isoweekday()
+            from app.core.utils import get_peru_now
+            dia_semana = get_peru_now().isoweekday()
             plan_hoy = db.query(PlanDiario).filter(
                 PlanDiario.plan_id == plan_activo.id,
                 PlanDiario.dia_numero == dia_semana

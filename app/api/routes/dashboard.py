@@ -104,7 +104,8 @@ async def get_daily_summary(
         elif cliente.goal == "Ganar masa":
             calorias_fallback *= 1.1
 
-        macros = obtener_macros_desglosados(calorias_fallback, cliente.goal)
+        peso = float(cliente.weight or 70.0)
+        macros = obtener_macros_desglosados(calorias_fallback, cliente.goal, peso)
         
         es_condicion_critica = False
         condiciones_list = [c.lower() for c in (cliente.medical_conditions or [])]

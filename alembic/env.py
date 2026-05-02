@@ -17,7 +17,7 @@ config = context.config
 
 # Sobrescribir la URL de la base de datos con la de las variables de entorno si existe
 database_url = os.getenv("DATABASE_URL") or settings.DATABASE_URL
-print(f"🔍 DEBUG: Alembic using database_url: {database_url}")
+print(f"DEBUG: Alembic using database_url: {database_url}")
 if database_url:
     # Asegurarse de que use postgresql+psycopg2 si es necesario
     if database_url.startswith("postgres://"):

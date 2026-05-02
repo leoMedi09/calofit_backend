@@ -8212,11 +8212,11 @@
     },
     {
         "alimento": "pimienta negra",
-        "proteina_100g": 11.0,
-        "carbohindratos_100g": 71.0,
-        "grasas_100g": 3.3,
-        "calorias_100g": 255.0,
-        "fuente": "INS/CENAN 2017 (Importado)",
+        "proteina_100g": 0.0,
+        "carbohindratos_100g": 0.0,
+        "grasas_100g": 0.0,
+        "calorias_100g": 0.0,
+        "fuente": "INS/CENAN (ajustado: porción típica condimento, sin aporte relevante)",
         "categoria": "General",
         "fibra_100g": 0.0,
         "azucar_100g": 0.0
@@ -8377,11 +8377,11 @@
     },
     {
         "alimento": "pimienta blanca*",
-        "proteina_100g": 10.4,
-        "carbohindratos_100g": 68.6,
-        "grasas_100g": 2.1,
-        "calorias_100g": 296.0,
-        "fuente": "INS/CENAN 2017 (Importado)",
+        "proteina_100g": 0.0,
+        "carbohindratos_100g": 0.0,
+        "grasas_100g": 0.0,
+        "calorias_100g": 0.0,
+        "fuente": "INS/CENAN (ajustado: porción típica condimento, sin aporte relevante)",
         "categoria": "General",
         "fibra_100g": 0.0,
         "azucar_100g": 0.0
@@ -8451,17 +8451,6 @@
         "categoria": "General",
         "fibra_100g": 2.32,
         "azucar_100g": 3.86
-    },
-    {
-        "alimento": "eledón maternizada",
-        "proteina_100g": 27.9,
-        "carbohindratos_100g": 49.8,
-        "grasas_100g": 12.0,
-        "calorias_100g": 417.0,
-        "fuente": "INS/CENAN 2017 (Importado)",
-        "categoria": "General",
-        "fibra_100g": 0.0,
-        "azucar_100g": 0.0
     },
     {
         "alimento": "nan maternizada",

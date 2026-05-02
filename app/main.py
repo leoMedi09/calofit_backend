@@ -22,6 +22,8 @@ with engine.connect() as connection:
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS workout_type VARCHAR DEFAULT 'Cardio';"))
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS session_duration FLOAT DEFAULT 1.0;"))
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nutri_weekly_note TEXT;"))
+        # Eliminar tabla obsoleta (reemplazada por platos + plato_ingredientes + historial_recomendaciones)
+        connection.execute(text("DROP TABLE IF EXISTS platos_recomendados CASCADE;"))
         connection.commit()
         print("✅ Migraciones manuales aplicadas correctamente.")
     except Exception as e:

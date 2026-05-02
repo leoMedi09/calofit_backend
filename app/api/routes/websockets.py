@@ -180,19 +180,3 @@ async def notifications_websocket(websocket: WebSocket, user_id: int):
     finally:
         if f"notifications_{user_id}" in active_connections:
             del active_connections[f"notifications_{user_id}"]
-
-# Función para enviar notificaciones push (puedes llamarla desde otras partes del código)
-async def send_notification_to_user(user_id: int, notification_data: dict):
-    """
-    Función para enviar notificaciones push a un usuario específico.
-    """
-    connection_key = f"notifications_{user_id}"
-    if connection_key in active_connections:
-        websocket = active_connections[connection_key]
-        try:
-            await websocket.send_json({
-                "type": "push_notification",
-                **notification_data
-            })
-        except Exception as e:
-            print(f"Error enviando notificación a {user_id}: {e}")

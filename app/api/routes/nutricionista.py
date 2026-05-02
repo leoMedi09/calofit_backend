@@ -261,7 +261,10 @@ def get_patient_progress(
     elif client.goal == "Ganar masa":
         calorias_ajustadas *= 1.1
 
-    recomendacion_ia = obtener_macros_desglosados(calorias_ajustadas, client.goal)
+    peso_cliente = float(client.weight or 70.0)
+    recomendacion_ia = obtener_macros_desglosados(
+        calorias_ajustadas, client.goal, peso_cliente
+    )
 
     return {
         "id": client.id,

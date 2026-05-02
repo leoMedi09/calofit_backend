@@ -9,8 +9,13 @@
 """
 
 import os
+import random
 import joblib
 import numpy as np
+from typing import List, Optional
+
+from app.core.alimentos_ux_filters import es_alimento_bloqueado_ia, nombre_coincide_exclusion
+from app.core.utils import get_peru_date
 
 # ─────────────────────────────────────────────────────────────────────
 # RUTAS
@@ -68,12 +73,12 @@ class ClasificadorPerfil:
                     self._features      = data["features"]
                     self._workout_types = data["workout_types"]
                 self._activo = True
-                print("✅ [ML Perfil] perfil_adherencia.pkl cargado — Personalización activa.")
+                print("[ML Perfil] perfil_adherencia.pkl cargado - Personalizacion activa.")
             except Exception as e:
-                print(f"⚠️ [ML Perfil] Error: {e} — usando PERFIL_B por defecto.")
+                print(f"[ML Perfil] Error: {e} - usando PERFIL_B por defecto.")
         else:
             print(
-                "ℹ️ [ML Perfil] .pkl no encontrado.\n"
+                "[ML Perfil] .pkl no encontrado.\n"
                 "   Ejecuta: python scripts/entrenar_perfil_adherencia.py"
             )
 
@@ -133,11 +138,11 @@ class ClasificadorPerfil:
             conf     = round(float(max(proba)) * 100, 1)
             perfil   = self._label_map[pred]
 
-            print(f"🎯 [ML Perfil] → {perfil} ({conf}% confianza)")
+            print(f"[ML Perfil] -> {perfil} ({conf}% confianza)")
             return perfil, conf
 
         except Exception as e:
-            print(f"⚠️ [ML Perfil] Error predicción: {e} — usando PERFIL_B.")
+            print(f"[ML Perfil] Error prediccion: {e} - usando PERFIL_B.")
             return "PERFIL_B", 0.0
 
     def predecir_perfil_desde_progreso(
@@ -203,12 +208,12 @@ class RecomendadorAlimentosKNN:
                 self._scaler = paquete["scaler"]
                 self._df     = paquete["df_alimentos"]
                 self._activo = True
-                print("✅ [ML Recomendador] recomendador_knn.pkl cargado.")
+                print("[ML Recomendador] recomendador_knn.pkl cargado.")
             except Exception as e:
-                print(f"⚠️ [ML Recomendador] Error: {e} — modelo inactivo.")
+                print(f"[ML Recomendador] Error: {e} - modelo inactivo.")
         else:
             print(
-                "ℹ️ [ML Recomendador] .pkl no encontrado.\n"
+                "[ML Recomendador] .pkl no encontrado.\n"
                 "   Ejecuta: python scripts/entrenar_recomendador.py"
             )
 
@@ -221,10 +226,14 @@ class RecomendadorAlimentosKNN:
         carbo_faltante:     float,
         grasa_faltante:     float,
         n_recomendaciones:  int = 3,
+        excluir_nombres:    Optional[List[str]] = None,
     ) -> list:
         """
         Recibe el déficit del día (kcal + macros) y retorna una lista de
         alimentos peruanos óptimos ordenados por similitud coseno.
+
+        Filtra nombres bloqueados (UX), sugerencias recientes del usuario y aplica
+        muestreo estable por día para variar las 3 opciones entre conversaciones.
         """
         if not self._activo:
             return []
@@ -235,29 +244,69 @@ class RecomendadorAlimentosKNN:
         grasa_faltante     = max(0, grasa_faltante)
 
         vector = [calorias_faltantes, prote_faltante, carbo_faltante, grasa_faltante]
+        excluir_nombres = excluir_nombres or []
 
         try:
-            vector_scaled   = self._scaler.transform([vector])
-            distancias, idx = self._knn.kneighbors(vector_scaled, n_neighbors=n_recomendaciones)
+            if self._df is None or len(self._df) == 0:
+                return []
+            vector_scaled = self._scaler.transform([vector])
+            n_pool = min(max(n_recomendaciones * 8, 24), len(self._df))
+            n_pool = max(1, n_pool)
+            distancias, idx = self._knn.kneighbors(vector_scaled, n_neighbors=n_pool)
 
-            resultados = []
+            candidatos = []
             for i, row_idx in enumerate(idx[0]):
-                row      = self._df.iloc[row_idx]
+                row = self._df.iloc[row_idx]
+                nombre = str(row["alimento"])
+                if es_alimento_bloqueado_ia(nombre):
+                    continue
+                if nombre_coincide_exclusion(nombre, excluir_nombres):
+                    continue
                 similitud = round((1 - distancias[0][i]) * 100, 1)
-                resultados.append({
-                    "alimento":           row["alimento"],
-                    "calorias_100g":      row["calorias_100g"],
-                    "proteina_100g":      row["proteina_100g"],
+                candidatos.append({
+                    "alimento":            nombre,
+                    "calorias_100g":       row["calorias_100g"],
+                    "proteina_100g":       row["proteina_100g"],
                     "carbohindratos_100g": row["carbohindratos_100g"],
-                    "grasas_100g":        row["grasas_100g"],
-                    "similitud":          similitud,
+                    "grasas_100g":         row["grasas_100g"],
+                    "similitud":           similitud,
                 })
 
-            print(f"🎯 [ML Recomendador] 1ra opción: {resultados[0]['alimento']} ({resultados[0]['similitud']}%)")
+            if not candidatos:
+                return []
+
+            # Misma semilla por día + vector → reproducible en tests; cambia día a día.
+            seed = (
+                get_peru_date().toordinal() * 10007
+                + int(calorias_faltantes)
+                + int(prote_faltante * 10)
+                + int(carbo_faltante * 10)
+                + int(grasa_faltante * 10)
+                + len(excluir_nombres) * 17
+            ) % (2**31)
+            rng = random.Random(seed)
+            rng.shuffle(candidatos)
+
+            vistos = set()
+            resultados = []
+            for c in candidatos:
+                key = c["alimento"].lower().strip()
+                if key in vistos:
+                    continue
+                vistos.add(key)
+                resultados.append(c)
+                if len(resultados) >= n_recomendaciones:
+                    break
+
+            if resultados:
+                print(
+                    f"[ML Recomendador] 1ra opcion: {resultados[0]['alimento']} "
+                    f"({resultados[0]['similitud']}%)"
+                )
             return resultados
 
         except Exception as e:
-            print(f"⚠️ [ML Recomendador] Error en inferencia: {e}")
+            print(f"[ML Recomendador] Error en inferencia: {e}")
             return []
 
     @property

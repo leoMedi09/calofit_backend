@@ -1,0 +1,20 @@
+# https://docs.astral.sh/ruff/configuration/
+target-version = "py310"
+line-length = 120
+
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "alembic/versions",
+]
+
+[lint]
+# Imports y variables sin uso (expandir a "F", "E", "I" cuando convenga).
+select = ["F401", "F841"]
+
+[lint.per-file-ignores]
+# Reexportaciones típicas en paquetes.
+"**/__init__.py" = ["F401"]
+"alembic/**" = ["F401"]

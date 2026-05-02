@@ -3,6 +3,8 @@ import os
 import sqlite3
 from typing import Dict, Optional
 
+from app.core.alimentos_ux_filters import es_alimento_bloqueado_ia
+
 class NutricionService:
     _instance = None
     _datos_nutricionales: Dict[str, dict] = {}
@@ -26,7 +28,7 @@ class NutricionService:
                     lista_alimentos = json.load(f)
                     for item in lista_alimentos:
                         clave_raw = item.get("alimento") or item.get("nombre")
-                        if clave_raw:
+                        if clave_raw and not es_alimento_bloqueado_ia(clave_raw):
                             self._datos_nutricionales[clave_raw.lower()] = item
                 print(f"[*] NutricionService: Cargados {len(lista_alimentos)} alimentos oficiales del CENAN/INS.")
 
@@ -38,7 +40,7 @@ class NutricionService:
                     lista_off = json.load(f)
                     for item in lista_off:
                         clave_raw = item.get("alimento")
-                        if clave_raw:
+                        if clave_raw and not es_alimento_bloqueado_ia(clave_raw):
                             self._datos_nutricionales[clave_raw.lower()] = item
                 print(f"[*] NutricionService: Cargados {len(lista_off)} productos comerciales de OpenFoodFacts.")
             else:
@@ -76,6 +78,8 @@ class NutricionService:
                     row = cursor.fetchone()
                 
                 if row:
+                    if es_alimento_bloqueado_ia(row[1]):
+                        return None
                     # Mapeo de columnas SQLite (15 Nutrientes) -> Dict del sistema ESTANDARIZADO
                     # Columnas: 
                     # 0: id, 1: nombre, 2: marca, 
@@ -147,12 +151,14 @@ class NutricionService:
                 else: continue
             
             if len(k) < 3: continue
+            if es_alimento_bloqueado_ia(k) or es_alimento_bloqueado_ia(v.get("alimento") or v.get("nombre")):
+                continue
             current_score = (1000 / (pos + 1)) + len(k)
             if current_score > best_score:
                 best = v
                 best_score = current_score
         
-        if best:
+        if best and not es_alimento_bloqueado_ia(best.get("alimento") or best.get("nombre")):
             return self._normalizar_ram(best)
 
         # 3. Búsqueda en SQLite (Mundial - Plan B)
@@ -165,51 +171,6 @@ class NutricionService:
         self._fallos_cache.add(nombre_clean)
         return None
 
-    def obtener_info_alimento_fast(self, nombre: str) -> Optional[dict]:
-        """Búsqueda SOLO en RAM (sin SQLite). Ultra-rápida. Ideal para validar recetas en bulk."""
-        nombre_clean = nombre.lower().strip()
-        if not nombre_clean: return None
-
-        # Sinonimos Regionales
-        sinonimos = {
-            "aguacate": "palta", "jitomate": "tomate", "ejote": "vainita",
-            "cacahuate": "maní", "puerco": "cerdo", "chancho": "cerdo",
-            "vaca": "res", "jengibre": "kion", "soja": "sillao", "soya": "sillao", "calabaza": "zapallo", "lentejas rojas": "lenteja roja", "lenteja roja": "lenteja roja",
-            "betabel": "beterraga", "elote": "choclo", "chicharo": "arveja",
-            "frances": "francés", "platano": "plátano", "brócoli": "brocoli"
-        }
-        for s, r in sinonimos.items():
-            if s in nombre_clean:
-                nombre_clean = nombre_clean.replace(s, r)
-
-        # 1. Exacta (O(1))
-        if nombre_clean in self._datos_nutricionales:
-            return self._normalizar_ram(self._datos_nutricionales[nombre_clean])
-
-        # 2. Parcial (O(N) solo en RAM, sin SQLite)
-        best = None
-        best_score = -1
-        for k, v in self._datos_nutricionales.items():
-            # v44.1: Sistema de puntuación para evitar que condimentos (ej: sillao) desplacen al principal (ej: tofu)
-            pos = nombre_clean.find(k)
-            if pos == -1: 
-                if k in nombre_clean: pos = 0 # Fallback raro
-                elif nombre_clean in k: pos = k.find(nombre_clean)
-                else: continue
-            
-            if len(k) < 3: continue
-            
-            # Score: Más puntos si aparece antes (pos=0 es oro) y si es más largo/específico
-            # len(k) ayuda a diferenciar 'jugo de naranja' de 'naranja'
-            current_score = (1000 / (pos + 1)) + len(k)
-            
-            if current_score > best_score:
-                best = v
-                best_score = current_score
-        if best:
-            return self._normalizar_ram(best)
-
-        return None
 
     def _normalizar_ram(self, item_raw: dict) -> dict:
         """Normaliza los datos crudos del JSON de Perú/INS para coincidir con el esquema SQLite."""
@@ -260,10 +221,6 @@ class NutricionService:
                 "carbohidratos": 0, "grasas": 0, "origen": "Error Parseo"
             }
 
-    def obtener_proteina_100g(self, nombre: str) -> float:
-        """Devuelve la proteína por 100g o 0.0 si no existe."""
-        info = self.obtener_info_alimento(nombre)
-        return info.get("proteinas", 0.0) if info else 0.0
 
 # Instancia global única
 nutricion_service = NutricionService()
