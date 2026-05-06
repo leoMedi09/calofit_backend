@@ -42,6 +42,10 @@ app.add_middleware(
 app.include_router(api_router)
 app.include_router(websocket_router, tags=["WebSockets"])
 
+# Incluir router general de API v1 (PASO 6)
+from app.api.v1 import router as api_v1_router
+app.include_router(api_v1_router)
+
 # Crear directorio de subidas si no existe
 UPLOAD_DIR = "app/uploads"
 if not os.path.exists(UPLOAD_DIR):
@@ -56,6 +60,12 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 @app.get("/")
 def read_root():
     return {"message": "Asistente CaloFit Operativo en Gimnasio World Light"}
+
+
+@app.get("/health")
+def health_check_root():
+    return {"status": "OK", "version": "1.0.0"}
+
 
 @app.get("/test")
 def test_endpoint():

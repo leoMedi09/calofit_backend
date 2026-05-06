@@ -13,3 +13,6 @@ from .meta_usuario import MetaUsuario
 from .plato import Plato, PlatoIngrediente
 from .historial_recomendacion import HistorialRecomendacion
 from .comida_registro import ComidaRegistro
+from .cache_models import AppCacheAlimentos, AppCachePlatos, AppCacheRutinas, AlimentoSinResolver
+from .routine_models import Rutina, RutinaEjercicio
+from .workout_models import WorkoutSession, WorkoutSessionEjercicio

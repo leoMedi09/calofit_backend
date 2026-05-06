@@ -2442,32 +2442,34 @@ async def procesar_secciones_comida(
         _gras_final = round(_gras_final, 1)
 
         # ── Filtro calórico por momento del día ───────────────────────────────
-        _rechazar, _motivo_kcal = _verificar_rango_calorico(
-            _kcal_final, _momento_filtro, _tdee_filtro, _perfil_goal or ""
-        )
-        if _rechazar:
-            logger.warning(
-                "[filtro_kcal] '%s' descartado — %s (tdee=%.0f)",
-                seccion.get("nombre") or "?", _motivo_kcal, _tdee_filtro,
+        _modo = respuesta_estructurada.get("modo_funcion", "")
+        if _modo != "recomendar_nutricion":
+            _rechazar, _motivo_kcal = _verificar_rango_calorico(
+                _kcal_final, _momento_filtro, _tdee_filtro, _perfil_goal or ""
             )
-            _secciones_rechazadas_log.append(seccion.get("nombre") or "?")
-            seccion["_rechazar"] = True
-            continue   # salta cache, DB y macros_normalizados
+            if _rechazar:
+                logger.warning(
+                    "[filtro_kcal] '%s' descartado — %s (tdee=%.0f)",
+                    seccion.get("nombre") or "?", _motivo_kcal, _tdee_filtro,
+                )
+                _secciones_rechazadas_log.append(seccion.get("nombre") or "?")
+                seccion["_rechazar"] = True
+                continue   # salta cache, DB y macros_normalizados
 
-        # ── CAMBIO 4: Filtro semántico por momento del día ────────────────────
-        _nombre_check = _norm(str(seccion.get("nombre") or ""))
-        _rechazar_sem, _motivo_sem_momento = _validar_momento_semantico(
-            _nombre_check, _momento_filtro or ""
-        )
-        if _rechazar_sem:
-            logger.warning(
-                "[filtro_momento] '%s' descartado — %s",
-                seccion.get("nombre") or "?", _motivo_sem_momento,
+            # ── CAMBIO 4: Filtro semántico por momento del día ────────────────────
+            _nombre_check = _norm(str(seccion.get("nombre") or ""))
+            _rechazar_sem, _motivo_sem_momento = _validar_momento_semantico(
+                _nombre_check, _momento_filtro or ""
             )
-            _secciones_rechazadas_log.append(seccion.get("nombre") or "?")
-            seccion["_rechazar"] = True
-            continue   # salta cache, DB y macros_normalizados
-        # ──────────────────────────────────────────────────────────────────────
+            if _rechazar_sem:
+                logger.warning(
+                    "[filtro_momento] '%s' descartado — %s",
+                    seccion.get("nombre") or "?", _motivo_sem_momento,
+                )
+                _secciones_rechazadas_log.append(seccion.get("nombre") or "?")
+                seccion["_rechazar"] = True
+                continue   # salta cache, DB y macros_normalizados
+            # ──────────────────────────────────────────────────────────────────────
 
         consulta_id = str(uuid.uuid4())
         payload = {
@@ -2594,60 +2596,63 @@ async def procesar_secciones_comida(
         )
 
     # ── VALIDACIÓN GLOBAL POR COMIDA (capa de segunda defensa) ───────────────
-    _secciones_validas = [
-        s for s in respuesta_estructurada.get("secciones", [])
-        if s.get("tipo") == "comida" and s.get("macros_normalizados")
-    ]
+    # No aplicar si es recomendación, ya que las secciones son opciones excluyentes.
+    _modo = respuesta_estructurada.get("modo_funcion", "")
+    if _modo != "recomendar_nutricion":
+        _secciones_validas = [
+            s for s in respuesta_estructurada.get("secciones", [])
+            if s.get("tipo") == "comida" and s.get("macros_normalizados")
+        ]
 
-    if len(_secciones_validas) > 1:
-        _pct_map_global = _obtener_pct_por_objetivo(_perfil_goal or "")
-        _pct_max_global = _pct_map_global.get(_momento_filtro, 0.40)
-        _limite_global  = _pct_max_global * _tdee_filtro
-        _total_kcal     = sum(
-            float(s.get("macros_normalizados", {}).get("kcal") or 0)
-            for s in _secciones_validas
-        )
-
-        logger.info(
-            "[filtro_global] momento=%s total=%.0f kcal límite=%.0f kcal "
-            "(%.0f%% TDEE=%.0f) objetivo='%s'",
-            _momento_filtro, _total_kcal, _limite_global,
-            _pct_max_global * 100, _tdee_filtro, _perfil_goal or "mantener",
-        )
-
-        # Cambio 4: eliminar plato más calórico si el total excede el límite
-        if _total_kcal > _limite_global and len(_secciones_validas) > 1:
-            _secciones_validas.sort(
-                key=lambda s: float(s.get("macros_normalizados", {}).get("kcal") or 0),
-                reverse=True,
+        if len(_secciones_validas) > 1:
+            _pct_map_global = _obtener_pct_por_objetivo(_perfil_goal or "")
+            _pct_max_global = _pct_map_global.get(_momento_filtro, 0.40)
+            _limite_global  = _pct_max_global * _tdee_filtro
+            _total_kcal     = sum(
+                float(s.get("macros_normalizados", {}).get("kcal") or 0)
+                for s in _secciones_validas
             )
-            _elim = _secciones_validas.pop(0)
-            _kcal_elim = float(_elim.get("macros_normalizados", {}).get("kcal") or 0)
-            logger.warning(
-                "[filtro_global] total %.0f kcal > límite %.0f → eliminado '%s' "
-                "(%.0f kcal, %.0f%% del total, momento=%s)",
-                _total_kcal, _limite_global,
-                _elim.get("nombre") or "?",
-                _kcal_elim,
-                (_kcal_elim / _total_kcal * 100) if _total_kcal > 0 else 0,
-                _momento_filtro,
-            )
-            _total_kcal -= _kcal_elim
-            respuesta_estructurada["secciones"] = _secciones_validas
 
-        # Cambio 5: regla de dominancia — plato >70% del total con múltiples secciones
-        if len(_secciones_validas) > 1 and _total_kcal > 0:
-            for _s in list(_secciones_validas):
-                _kcal_s = float(_s.get("macros_normalizados", {}).get("kcal") or 0)
-                if _kcal_s / _total_kcal > 0.70:
-                    logger.warning(
-                        "[filtro_dominancia] '%s' (%.0f kcal = %.0f%% del total %.0f) "
-                        "eliminado por dominancia (momento=%s)",
-                        _s.get("nombre") or "?",
-                        _kcal_s,
-                        _kcal_s / _total_kcal * 100,
-                        _total_kcal,
-                        _momento_filtro,
+            logger.info(
+                "[filtro_global] momento=%s total=%.0f kcal límite=%.0f kcal "
+                "(%.0f%% TDEE=%.0f) objetivo='%s'",
+                _momento_filtro, _total_kcal, _limite_global,
+                _pct_max_global * 100, _tdee_filtro, _perfil_goal or "mantener",
+            )
+
+            # Cambio 4: eliminar plato más calórico si el total excede el límite
+            if _total_kcal > _limite_global and len(_secciones_validas) > 1:
+                _secciones_validas.sort(
+                    key=lambda s: float(s.get("macros_normalizados", {}).get("kcal") or 0),
+                    reverse=True,
+                )
+                _elim = _secciones_validas.pop(0)
+                _kcal_elim = float(_elim.get("macros_normalizados", {}).get("kcal") or 0)
+                logger.warning(
+                    "[filtro_global] total %.0f kcal > límite %.0f → eliminado '%s' "
+                    "(%.0f kcal, %.0f%% del total, momento=%s)",
+                    _total_kcal, _limite_global,
+                    _elim.get("nombre") or "?",
+                    _kcal_elim,
+                    (_kcal_elim / _total_kcal * 100) if _total_kcal > 0 else 0,
+                    _momento_filtro,
+                )
+                _total_kcal -= _kcal_elim
+                respuesta_estructurada["secciones"] = _secciones_validas
+
+            # Cambio 5: regla de dominancia — plato >70% del total con múltiples secciones
+            if len(_secciones_validas) > 1 and _total_kcal > 0:
+                for _s in list(_secciones_validas):
+                    _kcal_s = float(_s.get("macros_normalizados", {}).get("kcal") or 0)
+                    if _kcal_s / _total_kcal > 0.70:
+                        logger.warning(
+                            "[filtro_dominancia] '%s' (%.0f kcal = %.0f%% del total %.0f) "
+                            "eliminado por dominancia (momento=%s)",
+                            _s.get("nombre") or "?",
+                            _kcal_s,
+                            _kcal_s / _total_kcal * 100,
+                            _total_kcal,
+                            _momento_filtro,
                     )
                     _secciones_validas.remove(_s)
                     break  # solo eliminar el dominante más calórico por llamada

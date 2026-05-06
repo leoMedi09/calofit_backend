@@ -1,0 +1,3 @@
+"""
+Mocks adicionales para pruebas.
+"""

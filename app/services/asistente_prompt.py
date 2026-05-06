@@ -178,37 +178,88 @@ def construir_prompt_cliente(
     except Exception:
         pass
 
-    # ── Recomendaciones KNN ──
+    # ── Recomendaciones Completas (Reemplaza al KNN crudo) ──
     bloque_reco_ml = ""
-    if restantes > 100:
+    if restantes > 100 and modo_funcion == "recomendar_nutricion":
         try:
+            from app.services.recomendador_platos import RecomendadorPlatosConfiables
+            from app.services.nutrition.plate.plate_builder import PlatoBuilder
+            from app.services.nutrition.food.resolver.cache_manager import CacheManager
+            from app.services.nutrition.food.resolver.source_resolver import FoodSourceResolver
+
+            # Inicializar motor de recomendación con capacidad de generar nuevos (fallback IA)
+            cache = CacheManager(db)
+            resolver = FoodSourceResolver(db, cache)
+            pb = PlatoBuilder(db, resolver, cache)
+            rec = RecomendadorPlatosConfiables(db, plate_builder=pb)
+
             pct_c      = (consumo_real / calorias_meta) if calorias_meta > 0 else 0
             prot_meta  = plan_hoy_data.get("proteinas_g", 0)
             carbo_meta = plan_hoy_data.get("carbohidratos_g", 0)
             grasa_meta = plan_hoy_data.get("grasas_g", 0)
-            excluir    = [
+            
+            excluir = [
                 m.get("nombre") for m in (get_user_recent_meals(perfil.id) or [])
                 if isinstance(m.get("nombre"), str) and m.get("nombre", "").strip()
             ]
-            recos = ml_recomendador.obtener_recomendaciones(
-                calorias_faltantes=restantes,
-                prote_faltante=max(0, prot_meta  - prot_meta  * pct_c),
-                carbo_faltante=max(0, carbo_meta - carbo_meta * pct_c),
-                grasa_faltante=max(0, grasa_meta - grasa_meta * pct_c),
-                n_recomendaciones=3, excluir_nombres=excluir,
+            
+            # Escalar el objetivo al tamaño de la comida actual (hi_i) en lugar de usar todo el restante del día
+            escala = (hi_i / restantes) if restantes > 0 else 1.0
+            
+            d_prot = max(0, prot_meta - prot_meta * pct_c) * escala
+            d_carb = max(0, carbo_meta - carbo_meta * pct_c) * escala
+            d_gras = max(0, grasa_meta - grasa_meta * pct_c) * escala
+
+            msg_low = mensaje_fuzzy.lower() if mensaje_fuzzy else ""
+            
+            if any(w in msg_low for w in ["proteina", "proteína", "musculo", "músculo", "proteico"]):
+                d_prot = max(35.0, d_prot * 2.0)
+            if any(w in msg_low for w in ["carbohidrato", "carbohidratos", "carbo", "carbos", "energia", "energía"]):
+                d_carb = max(50.0, d_carb * 2.0)
+            if any(w in msg_low for w in ["grasa", "grasas", "lipid", "lípid", "keto", "cetogenico", "cetogénico"]):
+                d_gras = max(20.0, d_gras * 2.0)
+                
+            # Detección de ingrediente específico
+            ingrediente_clave = None
+            for ing in ["pescado", "pollo", "huevo", "atun", "atún", "res", "carne", "cerdo", "palta", "aguacate", "avena", "platano", "plátano", "arroz", "lenteja", "quinua", "ensalada", "verdura", "queso", "yogur"]:
+                if ing in msg_low:
+                    ingrediente_clave = "atun" if ing == "atún" else "platano" if ing == "plátano" else ing
+                    break
+                
+            platos = rec.recomendar(
+                client_id=perfil.id,
+                deficit_kcal=hi_i,
+                deficit_proteina=d_prot,
+                deficit_carb=d_carb,
+                deficit_grasas=d_gras,
+                momento_dia=momento_comida.lower(),
+                n=3,
+                excluir_nombres=excluir,
+                ingrediente_clave=ingrediente_clave,
             )
-            if recos:
-                lista = "".join(
-                    f"{i+1}. {r['alimento']} ({r['calorias_100g']} kcal, {r['proteina_100g']}g prot/100g) [{r['similitud']}%]\n"
-                    for i, r in enumerate(recos)
-                )
+
+            if platos:
+                lista_platos = ""
+                for i, p in enumerate(platos):
+                    m = p['macros']
+                    ings = p.get('ingredientes_str', '')
+                    lista_platos += (
+                        f"{i+1}. {p['nombre']}\n"
+                        f"   Macros: Kcal: {m['calorias']:.0f}, P: {m['proteinas_g']:.1f}g, C: {m['carbohidratos_g']:.1f}g, G: {m['grasas_g']:.1f}g\n"
+                        f"   Ingredientes exactos: {ings}\n"
+                    )
                 bloque_reco_ml = (
-                    f"\n\nSUGERENCIAS KNN (déficit actual {restantes:.0f} kcal):\n{lista}"
-                    "Úsalos como guía nutricional, no como menú fijo. "
-                    "Propón platos peruanos variados que incorporen 0–2 de estos ingredientes."
+                    f"\n\nSUGERENCIAS DE PLATOS CONFIABLES (OBLIGATORIO SUGERIR ESTOS):\n{lista_platos}"
+                    "Debes sugerir EXACTAMENTE estos platos en tu respuesta. "
+                    "Usa los nombres provistos como títulos de las opciones, respeta sus macros, y copia "
+                    "los ingredientes exactos proporcionados. "
+                    "NOTA PROFESIONAL: Si el cliente pide explícitamente algo que contradiga su meta (ej. 'alto en grasa' o 'puros carbohidratos' "
+                    "mientras busca perder peso), actúa como un coach profesional: edúcalo amablemente sobre por qué no es lo ideal "
+                    "para su objetivo actual, y luego preséntale estas 3 opciones como alternativas saludables y balanceadas que SÍ "
+                    "le ayudarán a llegar a su meta."
                 )
         except Exception as e:
-            print(f"[Prompt] KNN error: {e}")
+            print(f"[Prompt] Error RecomendadorPlatosConfiables: {e}")
 
     # ── Bloque Nutricionista (máxima prioridad) ──
     nota = getattr(perfil, "nutri_weekly_note", None)
