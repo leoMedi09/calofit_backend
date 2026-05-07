@@ -639,7 +639,8 @@ def check_checkin_status(
     first_of_month = now.replace(day=1).date()
 
     # 🆕 REGLA PARA USUARIOS NUEVOS: No pedir check-in hasta después de 30 días
-    days_since_creation = (now - current_user.created_at).days if current_user.created_at else 31
+    now_naive = now.replace(tzinfo=None)
+    days_since_creation = (now_naive - current_user.created_at).days if current_user.created_at else 31
     is_new_user = days_since_creation < 30
 
     # 🔍 Verificar si ya registró peso este mes

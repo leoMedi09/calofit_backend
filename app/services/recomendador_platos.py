@@ -495,6 +495,10 @@ class RecomendadorPlatosConfiables:
                         d_carb=deficit_carb, d_gras=deficit_grasas,
                     )
 
+                    if score < 40:
+                        logger.warning(f"Plato LLM '{resultado.nombre}' descartado por bajo score ({score}) respecto al objetivo.")
+                        continue
+
                     ing_str_list = []
                     for i in resultado.ingredientes:
                         _kcal_i = i.macros_totales.get('calorias', 0) if i.macros_totales else 0

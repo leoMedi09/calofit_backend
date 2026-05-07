@@ -110,15 +110,23 @@ class FoodSourceResolver:
         if self.usda_client:
             resultado_usda = self._buscar_usda(nombre_norm)
             if resultado_usda:
-                logger.info(f"✅ USDA: {nombre_norm}")
+                logger.info(f"✅ USDA: {nombre_norm} — guardando en BD")
+                alimento_id = self._persistir_en_bd(
+                    nombre=nombre_ingrediente,
+                    nombre_norm=nombre_norm,
+                    macros=resultado_usda,
+                    source='USDA',
+                )
                 self.cache_manager.guardar_en_cache(
                     food_normalized=nombre_norm,
                     user_id=user_id,
                     macros=resultado_usda,
                     source='USDA',
+                    alimento_id=alimento_id,
                 )
                 return self._construir_resultado(
                     nombre=nombre_ingrediente,
+                    alimento_id=alimento_id,
                     macros_100g=resultado_usda,
                     gramos=gramos,
                     source='USDA',
@@ -129,15 +137,23 @@ class FoodSourceResolver:
         if self.fatsecret_client:
             resultado_fs = self._buscar_fatsecret(nombre_norm)
             if resultado_fs:
-                logger.info(f"✅ FatSecret: {nombre_norm}")
+                logger.info(f"✅ FatSecret: {nombre_norm} — guardando en BD")
+                alimento_id = self._persistir_en_bd(
+                    nombre=nombre_ingrediente,
+                    nombre_norm=nombre_norm,
+                    macros=resultado_fs,
+                    source='FatSecret',
+                )
                 self.cache_manager.guardar_en_cache(
                     food_normalized=nombre_norm,
                     user_id=user_id,
                     macros=resultado_fs,
                     source='FatSecret',
+                    alimento_id=alimento_id,
                 )
                 return self._construir_resultado(
                     nombre=nombre_ingrediente,
+                    alimento_id=alimento_id,
                     macros_100g=resultado_fs,
                     gramos=gramos,
                     source='FatSecret',

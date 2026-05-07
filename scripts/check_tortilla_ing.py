@@ -1,9 +1,10 @@
 import sys
 import os
-sys.path.append(os.path.dirname(__file__))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.database import SessionLocal
 from sqlalchemy import text
 db = SessionLocal()
-res = db.execute(text("SELECT a.nombre FROM plato_ingredientes pi JOIN alimentos a ON pi.alimento_id = a.id WHERE pi.plato_id = 385")).fetchall()
-print([r[0] for r in res])
+res = db.execute(text("SELECT id, nombre, proteina_100g FROM alimentos WHERE nombre ILIKE '%avena%' LIMIT 10")).fetchall()
+for r in res:
+    print(f"{r[0]}: {r[1]} -> P: {r[2]}g")
