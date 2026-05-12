@@ -151,6 +151,7 @@ async def obtener_balance_hoy(
                 "nombre": alimento.alimento.capitalize(),
                 "frecuencia_total": alimento.frecuencia,
                 "puntuacion": round(alimento.puntuacion, 2),
+                "es_favorito": bool(alimento.es_favorito),
                 "hora_registro": alimento.ultima_vez.strftime("%H:%M:%S"),
                 "macros": {
                     "calorias": alimento.calorias or 0,
@@ -172,6 +173,64 @@ async def obtener_balance_hoy(
             for ejercicio in ejercicios_hoy
         ]
     }
+
+
+@router.post("/favorito/{registro_id}")
+async def toggle_favorito(
+    registro_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """Marca o desmarca un alimento como favorito (toggle)."""
+    from app.models.preferencias import PreferenciaAlimento
+
+    cliente = db.query(Client).filter(Client.email == current_user.email).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    registro = db.query(PreferenciaAlimento).filter(
+        PreferenciaAlimento.id == registro_id,
+        PreferenciaAlimento.client_id == cliente.id,
+    ).first()
+    if not registro:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+
+    registro.es_favorito = 0 if registro.es_favorito else 1
+    db.commit()
+    return {"es_favorito": bool(registro.es_favorito), "id": registro_id}
+
+
+@router.get("/favoritos")
+async def listar_favoritos(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """Devuelve todos los alimentos marcados como favoritos del usuario."""
+    from app.models.preferencias import PreferenciaAlimento
+
+    cliente = db.query(Client).filter(Client.email == current_user.email).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    favs = db.query(PreferenciaAlimento).filter(
+        PreferenciaAlimento.client_id == cliente.id,
+        PreferenciaAlimento.es_favorito == 1,
+    ).order_by(PreferenciaAlimento.frecuencia.desc()).all()
+
+    return [
+        {
+            "id": f.id,
+            "nombre": f.alimento.capitalize(),
+            "frecuencia_total": f.frecuencia,
+            "macros": {
+                "calorias": f.calorias or 0,
+                "proteinas": f.proteinas or 0,
+                "carbohidratos": f.carbohidratos or 0,
+                "grasas": f.grasas or 0,
+            },
+        }
+        for f in favs
+    ]
 
 
 @router.delete("/registro/{registro_id}")

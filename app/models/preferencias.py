@@ -22,7 +22,9 @@ class PreferenciaAlimento(Base):
     proteinas = Column(Float, nullable=True, default=0.0)
     carbohidratos = Column(Float, nullable=True, default=0.0)
     grasas = Column(Float, nullable=True, default=0.0)
-    
+
+    es_favorito = Column(Integer, nullable=False, default=0)
+
     ultima_vez = Column(TIMESTAMP, server_default=func.now())
     created_at = Column(TIMESTAMP, server_default=func.now())
 

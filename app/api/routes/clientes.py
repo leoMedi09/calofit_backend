@@ -364,7 +364,8 @@ def actualizar_perfil_cliente(
             print(f"✅ {field}: {old_value} → {value}")
     
     # Fields that invalidate the current daily plan macros when changed
-    _PLAN_TRIGGER_FIELDS = {"activity_level", "goal"}
+    # weight/height affect Mifflin-St Jeor; activity_level/goal affect the multiplier
+    _PLAN_TRIGGER_FIELDS = {"activity_level", "goal", "weight", "height"}
 
     try:
         db.commit()
