@@ -38,6 +38,61 @@ _HISTORIAL_DIAS = 3
 # Número de candidatos a generar antes de filtrar
 _POOL_SIZE = 30
 
+# ─── Rangos calóricos por momento del día ────────────────────────────────────
+# (kcal_min, kcal_max) — platos fuera de rango son penalizados o descartados
+_RANGOS_MOMENTO: dict[str, tuple[float, float]] = {
+    "desayuno":   (150.0,  500.0),
+    "almuerzo":   (400.0,  950.0),
+    "cena":       (120.0,  520.0),
+    "snack":      ( 60.0,  300.0),
+    "merienda":   ( 60.0,  300.0),
+    "cualquiera": (  0.0, 1200.0),
+}
+
+# ─── Platos típicamente pesados → solo almuerzo ───────────────────────────────
+# Si el nombre normalizado del plato contiene alguna de estas palabras,
+# se excluye automáticamente de cena, desayuno y snack.
+_KEYWORDS_SOLO_ALMUERZO = frozenset({
+    "arroz con pato", "arroz con cabrito", "lomo saltado", "seco de res",
+    "seco de cabrito", "jalea", "pollo a la brasa", "chicharron de cerdo",
+    "aji de gallina", "causa ferreñafana", "tallarin saltado", "sopa seca",
+    "sudado de pescado", "caldo de gallina", "arroz con pollo",
+})
+
+# ─── Platos ligeros → válidos para cena/desayuno/snack pero NO almuerzo ──────
+_KEYWORDS_LIGEROS = frozenset({
+    "sopa", "crema de", "caldo", "ensalada", "tostada", "batido",
+    "fruta", "yogurt", "avena", "granola",
+})
+
+
+def _es_plato_apto_para_momento(nombre: str, kcal: float, momento: str) -> bool:
+    """
+    Devuelve True si el plato es apropiado para el momento del día dado.
+    Combina rangos calóricos + keywords de nombre.
+    """
+    nombre_n = nombre.lower().strip()
+    momento_n = (momento or "cualquiera").lower()
+
+    # 1) Platos muy pesados → solo almuerzo
+    es_solo_almuerzo = any(kw in nombre_n for kw in _KEYWORDS_SOLO_ALMUERZO)
+    if es_solo_almuerzo and momento_n not in ("almuerzo", "cualquiera"):
+        return False
+
+    # 2) Platos ligeros → no los recomendamos como almuerzo principal
+    es_ligero = any(kw in nombre_n for kw in _KEYWORDS_LIGEROS)
+    if es_ligero and momento_n == "almuerzo" and kcal < 300:
+        return False  # una sopita sola no cubre el almuerzo
+
+    # 3) Rango calórico duro por momento
+    kcal_min, kcal_max = _RANGOS_MOMENTO.get(momento_n, (0.0, 1200.0))
+    if kcal > kcal_max * 1.15:   # tolerancia 15% hacia arriba
+        return False
+    if kcal < kcal_min * 0.5:    # muy por debajo del mínimo
+        return False
+
+    return True
+
 
 class RecomendadorPlatosConfiables:
     """
@@ -208,7 +263,7 @@ class RecomendadorPlatosConfiables:
             nombre = row[1]
             if nombre.lower().strip() in excluir:
                 continue
-                
+
             ingredientes_str = (row[9] or "").lower()
             if ing_clave_norm:
                 if ing_clave_norm not in nombre.lower() and ing_clave_norm not in ingredientes_str:
@@ -219,11 +274,24 @@ class RecomendadorPlatosConfiables:
             carb = float(row[5] or 0)
             gras = float(row[6] or 0)
 
+            # ── NUEVO: Filtro por momento del día ─────────────────────────────
+            # Descarta platos que no son aptos para el horario pedido.
+            # Ej: "Arroz con Pollo" (524 kcal) no aparece en cena (máx 520 kcal).
+            if momento_dia != "cualquiera" and not _es_plato_apto_para_momento(
+                nombre, kcal, momento_dia
+            ):
+                logger.debug(
+                    "[Momento] Plato '%s' (%.0f kcal) descartado para '%s'",
+                    nombre, kcal, momento_dia,
+                )
+                continue
+
             # Score: qué tan bien cubre el déficit (similitud coseno simplificada)
             score = self._calcular_score(
                 kcal=kcal, prot=prot, carb=carb, gras=gras,
                 d_kcal=deficit_kcal, d_prot=deficit_proteina,
                 d_carb=deficit_carb, d_gras=deficit_grasas,
+                momento_dia=momento_dia,
             )
 
             if score < _MIN_CONFIANZA:
@@ -242,7 +310,7 @@ class RecomendadorPlatosConfiables:
                 "n_ingredientes": int(row[7]),
                 "ingredientes_str": row[9] or "",
                 "fuente": "BD_Verificado",
-                "confianza": 95,  # macros calculadas desde ingredientes reales
+                "confianza": 95,
                 "score": score,
             })
 
@@ -255,6 +323,7 @@ class RecomendadorPlatosConfiables:
         kcal: float, prot: float, carb: float, gras: float,
         d_kcal: float, d_prot: float,
         d_carb: float, d_gras: float,
+        momento_dia: str = "cualquiera",
     ) -> float:
         """
         Score 0–100 que mide cuánto se ajusta el plato al déficit.
@@ -315,10 +384,25 @@ class RecomendadorPlatosConfiables:
                 score -= 40
 
         # Penalizar platos con macros extremas solo si no las pidieron
-        if gras > kcal * 0.6 and d_gras < 20:  # más del 60% de kcal de grasas y NO pidió grasas extra
+        if gras > kcal * 0.6 and d_gras < 20:
             score -= 40
         if carb < 2 and prot < 5 and d_carb < 20:
             score -= 40
+
+        # ── Penalización extra por exceso calórico para el momento ────────────
+        # Aunque el plato cubra bien el déficit acumulado del día,
+        # si excede el techo del horario (ej. 524 kcal en cena → máx 520),
+        # lo penalizamos fuertemente para que no gane el ranking.
+        if momento_dia and momento_dia != "cualquiera":
+            _, kcal_max_momento = _RANGOS_MOMENTO.get(momento_dia.lower(), (0.0, 1200.0))
+            if kcal > kcal_max_momento:
+                exceso_pct = (kcal - kcal_max_momento) / kcal_max_momento
+                penalizacion = min(50.0, exceso_pct * 120)  # hasta -50 pts
+                score -= penalizacion
+                logger.debug(
+                    "[Score] '%s' penalizado %.1f pts por exceso calórico para %s (%.0f > %.0f kcal)",
+                    "plato", penalizacion, momento_dia, kcal, kcal_max_momento,
+                )
 
         return max(0.0, min(100.0, score))
 

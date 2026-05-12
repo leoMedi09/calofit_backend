@@ -61,10 +61,11 @@ _RE_VERBO_COMIDA = re.compile(
 )
 _RE_LEX_GYM = re.compile(
     r"(?i)(pierna|brazos?|pecho|espalda|core|abdom|press|curl|remo|sentad|extens|elev|femoral|"
-    r"cu[aá]driceps|gemelo|gl[uú]te|hiit|cardio|trot|corr|plancha|burpee|flexi|dominad|"
+    r"cu[aá]driceps|gemelo|gl[uú]te|hiit|cardio|trot|corr|burpee|flexi|dominad|"
     r"jal[oó]n|pesas|mancuern|barra|gym|m[aá]quina|bici|el[ií]ptic|soga|saltos?|zancad|"
     r"rowing|adduct|abd\w*|bis\w*|tris\w*|hip\s*thrust|kettle|snatch|clean|thruster|"
     r"ejercicio|entreno|fuerza|aer[óo]bic)"
+    r"|(?<!a la )(?<!la )\bplancha\b"  # 'plancha' solo si NO es 'a la plancha' (cocción)
 )
 
 

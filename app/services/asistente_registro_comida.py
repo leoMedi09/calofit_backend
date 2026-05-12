@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import difflib
+import unicodedata
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -79,7 +80,9 @@ def _msg_tiene_porcion_lata(msg: str) -> bool:
 
 
 def _norm_plato(s: str) -> str:
-    s = (s or "").strip().lower()
+    # NFC: normaliza tildes para que 'plátano' (NFD del teclado móvil)
+    # coincida con 'plátano' (NFC guardado en BD).
+    s = unicodedata.normalize("NFC", (s or "")).strip().lower()
     s = re.sub(r"\[.*?\]", "", s).split("[")[0].strip()
     s = re.sub(r"[^a-z0-9áéíóúüñ\s]", " ", s, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", s).strip()
@@ -426,10 +429,28 @@ class RegistroComidaHandler:
                 or _capa0_bajo_rango_plato(msg_lower, _kcal_c0)
             )
             if _kcal_c0 > 0 and not _bajo_rango:
-                # Platos multi-palabra (≥2 tokens): CAPA 0 NO tiene autoridad final.
-                # Se defiere a CAPA 1/1.5 que consulta ingredientes reales en BD.
-                # CAPA 0 queda como fallback por si el catálogo tampoco lo encuentra.
-                if len((_nombre_c0 or "").split()) >= 2:
+                # ── GUARD DE COHERENCIA: si el mensaje tiene ≥4 palabras (plato complejo)
+                # pero CAPA 0 devolvió un nombre con MENOS palabras que el mensaje,
+                # es señal de que la IA simplificó/perdió ingredientes.
+                # En ese caso: forzar Capa 1.5 (plato_constructor) como autoridad.
+                _palabras_msg = len([w for w in msg_lower.split() if len(w) > 2])
+                _palabras_c0  = len((_nombre_c0 or "").split())
+                _es_simplificacion_peligrosa = (
+                    _palabras_msg >= 4
+                    and _palabras_c0 <= 3
+                    and _palabras_c0 < (_palabras_msg // 2)
+                )
+                if _es_simplificacion_peligrosa:
+                    # Guardar como fallback de último recurso pero preferir Capa 1.5
+                    _capa0_fallback = capa0_result
+                    logger.info(
+                        "CAPA 0 simplificó '%s' → '%s' (%d→%d palabras): cediendo a Capa 1.5",
+                        msg_lower[:60], _nombre_c0, _palabras_msg, _palabras_c0,
+                    )
+                elif len((_nombre_c0 or "").split()) >= 2:
+                    # Platos multi-palabra (≥2 tokens): CAPA 0 NO tiene autoridad final.
+                    # Se defiere a CAPA 1/1.5 que consulta ingredientes reales en BD.
+                    # CAPA 0 queda como fallback por si el catálogo tampoco lo encuentra.
                     _capa0_fallback = capa0_result
                 else:
                     # Alimento de una sola palabra: CAPA 0 es suficientemente precisa
@@ -740,6 +761,65 @@ class RegistroComidaHandler:
             " GROUP BY p.id, p.nombre LIMIT 1"
         )
 
+        # ── Fast-path: buscar en historial_recomendaciones reciente (últimas 24h) ──
+        # Cuando el sistema recomienda "Crema de Verduras con Plátano" y el usuario
+        # escribe "comí crema de verduras con plátano", buscamos primero en su historial
+        # reciente para evitar que el NLP falle al re-identificar el plato recomendado.
+        try:
+            from app.models.historial_recomendacion import HistorialRecomendacion
+            from datetime import timedelta
+            _msg_clean_hist = _RE_PREFIJO_IMPERATIVO.sub("", mensaje.lower()).strip()
+            _msg_clean_hist = unicodedata.normalize("NFC", _msg_clean_hist)
+            _desde = datetime.now() - timedelta(hours=24)
+            _historial_rows = (
+                db.query(HistorialRecomendacion)
+                .filter(
+                    HistorialRecomendacion.client_id == perfil.id,
+                    HistorialRecomendacion.created_at >= _desde,
+                    HistorialRecomendacion.plato_id.isnot(None),
+                )
+                .order_by(HistorialRecomendacion.created_at.desc())
+                .limit(15)
+                .all()
+            )
+            for _hr in _historial_rows:
+                _nn_hist = unicodedata.normalize("NFC", (_hr.nombre_plato or "").lower().strip())
+                _score_hist = difflib.SequenceMatcher(a=_msg_clean_hist, b=_nn_hist).ratio()
+                if _score_hist >= 0.80:
+                    # Match fuerte con un plato recomendado → buscar sus macros reales en BD
+                    from sqlalchemy import text as _sql_t
+                    _row_hist = db.execute(_sql_t(
+                        "SELECT p.id, p.nombre,"
+                        " SUM(a.calorias_100g * pi2.gramos / 100.0),"
+                        " SUM(a.proteina_100g * pi2.gramos / 100.0),"
+                        " SUM(a.carbohidratos_100g * pi2.gramos / 100.0),"
+                        " SUM(a.grasas_100g * pi2.gramos / 100.0)"
+                        " FROM platos p"
+                        " JOIN plato_ingredientes pi2 ON pi2.plato_id = p.id"
+                        " JOIN alimentos a ON a.id = pi2.alimento_id"
+                        " WHERE p.id = :pid GROUP BY p.id, p.nombre"
+                    ), {"pid": _hr.plato_id}).fetchone()
+                    if _row_hist:
+                        logger.info(
+                            "Fast-path historial: '%s' → plato id=%s '%s' (score=%.2f)",
+                            _msg_clean_hist, _hr.plato_id, _hr.nombre_plato, _score_hist,
+                        )
+                        return {
+                            "calorias":        round(float(_row_hist[2] or 0), 1),
+                            "proteinas_g":     round(float(_row_hist[3] or 0), 1),
+                            "carbohidratos_g": round(float(_row_hist[4] or 0), 1),
+                            "grasas_g":        round(float(_row_hist[5] or 0), 1),
+                            "fibra_g": 0, "azucar_g": 0, "sodio_mg": 0,
+                            "es_comida": True, "es_ejercicio": False,
+                            "alimentos_detectados": [_row_hist[1]],
+                            "ejercicios_detectados": [],
+                            "calidad_nutricional": "Alta",
+                            "origen": "historial_recomendacion",
+                        }
+        except Exception as _eh:
+            logger.debug("Fast-path historial error (no crítico): %s", _eh)
+
+
         matched: List[tuple] = []
         # REGLA 1: trackear ítems que CAPA 1 no pudo resolver (evita pérdida silenciosa)
         _no_resueltos_c1: List[str] = []
@@ -795,6 +875,41 @@ class RegistroComidaHandler:
 
         if not matched:
             # ── Capa 1.5: construcción dinámica de platos ──────────────────────
+            # Caso A0 (NUEVO): si hay múltiples items pero el texto completo parece
+            # un ÚNICO plato compuesto (ej: "ensalada de plátano con aceite de oliva"),
+            # intentar construirlo como plato único ANTES de dividir por items.
+            # Esto previene que "aceite de oliva" se trate como plato separado.
+            if len(items) > 1:
+                # Reconstruir el nombre del plato completo desde el mensaje original
+                _msg_clean = _RE_PREFIJO_IMPERATIVO.sub("", mensaje.lower()).strip()
+                _msg_clean = _RE_CANTIDAD_INICIO.sub("", _msg_clean).strip()
+                _msg_clean = re.sub(r"\s+", " ", _msg_clean).strip()
+                # Solo intentar si el texto limpio tiene >= 3 palabras y contiene "con"
+                if " con " in _msg_clean and len(_msg_clean.split()) >= 3:
+                    try:
+                        from app.services.plato_constructor import crear_plato_dinamico
+                        _plato_full = await crear_plato_dinamico(db, _msg_clean)
+                        if _plato_full:
+                            _mf = _plato_full.calcular_macros()
+                            logger.info(
+                                "Capa1.5 A0: texto completo '%s' → plato '%s' (%.0f kcal)",
+                                _msg_clean, _plato_full.nombre, _mf["calorias"],
+                            )
+                            return {
+                                "calorias":        _mf["calorias"],
+                                "proteinas_g":     _mf["proteinas_g"],
+                                "carbohidratos_g": _mf["carbohidratos_g"],
+                                "grasas_g":        _mf["grasas_g"],
+                                "fibra_g": 0, "azucar_g": 0, "sodio_mg": 0,
+                                "es_comida": True, "es_ejercicio": False,
+                                "alimentos_detectados": [_plato_full.nombre],
+                                "ejercicios_detectados": [],
+                                "calidad_nutricional": "Alta",
+                                "origen": "plato_dinamico",
+                            }
+                    except Exception as _eA0:
+                        logger.debug("Capa1.5 A0: no construido '%s': %s", _msg_clean, _eA0)
+
             # Caso A: query de un solo item que parece un plato completo
             if len(items) == 1 and _es_candidato_plato_capa15(items[0]):
                 try:

@@ -31,8 +31,9 @@ _REGEX_EJERCICIO = re.compile(
     r"\b(ejercicio|rutina|entrenamiento|serie|repetición|repeticion|rep|"
     r"gimnasio|workout|cardio|fuerza|HIIT|estiram|calentamiento|músculo|musculo|"
     r"levantar|pesa|corr[ei]|bicicleta|natación|nadar|"
-    r"sentadilla|plancha|dominada|flexion|press|curl|remo|peso muerto|"
-    r"entrené|entrenaste|hice|hiciste)\b",
+    r"sentadilla|dominada|flexion|press|curl|remo|peso muerto|"
+    r"entrené|entrenaste|hice|hiciste)\b"
+    r"|(?<!a la )(?<!la )\bplancha\b",  # 'plancha' solo si NO es 'a la plancha' (cocción)
     re.IGNORECASE,
 )
 _REGEX_PLAN = re.compile(
