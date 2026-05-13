@@ -49,6 +49,58 @@ _RANGOS_MOMENTO: dict[str, tuple[float, float]] = {
     "cualquiera": (  0.0, 1200.0),
 }
 
+# ─── Expansión semántica de ingredientes ─────────────────────────────────────
+# Cuando el usuario pide "mariscos", hay que buscar también "camaron", "pulpo", etc.
+# en nombre e ingredientes. Clave = valor normalizado de ingrediente_clave.
+_INGREDIENTE_SINONIMOS: dict[str, list[str]] = {
+    # Mariscos: término genérico + todas las especies comunes
+    "mariscos":   ["mariscos", "camaron", "camarón", "langostino", "langosta",
+                   "pulpo", "calamar", "almeja", "mejillon", "choro", "cangrejo", "concha"],
+    # Pescados con nombre propio
+    "salmon":     ["salmon", "salmón"],
+    "atun":       ["atun", "atún"],
+    "trucha":     ["trucha"],
+    "caballa":    ["caballa"],
+    "corvina":    ["corvina"],
+    # Carnes con sinónimos regionales
+    "cerdo":      ["cerdo", "chancho", "porcino", "chicharron"],
+    "res":        ["res", "ternera", "bistec", "lomo fino", "carne de res"],
+    "cabrito":    ["cabrito", "cabrilla"],
+    "pato":       ["pato", "pato seco"],
+    # Frutas con nombres alternativos
+    "palta":      ["palta", "aguacate"],
+    "platano":    ["platano", "plátano"],
+    "lucuma":     ["lucuma", "lúcuma"],
+    # Legumbres
+    "frejol":     ["frejol", "frijol", "frejoles", "frijoles"],
+    "lenteja":    ["lenteja", "lentejas", "lentejón"],
+    "arveja":     ["arveja", "arvejas", "alverjita"],
+    "garbanzo":   ["garbanzo", "garbanzos"],
+    "haba":       ["haba", "habas"],
+    # Cereales y granos
+    "quinua":     ["quinua", "quinoa"],
+    "pasta":      ["pasta", "fideos", "spaghetti", "tallarín", "tallarin", "tallarines"],
+    # Tubérculos
+    "camote":     ["camote", "boniato"],
+    "choclo":     ["choclo", "maiz", "maíz", "elote"],
+    # Frutos secos
+    "mani":       ["mani", "maní", "mani pelado"],
+    "fruto_seco": ["almendra", "nuez", "pecana", "pecanas"],
+    # Semillas
+    "semilla":    ["chia", "chía", "linaza", "ajonjoli"],
+    # Lácteos
+    "lacteos":    ["mantequilla", "mantequilla sin sal", "crema de leche"],
+    "yogur":      ["yogur", "yogurt", "yoghurt"],
+}
+
+
+def _tiene_ingrediente(nombre: str, ingredientes_str: str, ing_clave: str) -> bool:
+    """Devuelve True si el plato contiene el ingrediente (con expansión semántica)."""
+    sinonimos = _INGREDIENTE_SINONIMOS.get(ing_clave, [ing_clave])
+    texto = (nombre + " " + ingredientes_str).lower()
+    return any(s in texto for s in sinonimos)
+
+
 # ─── Platos típicamente pesados → solo almuerzo ───────────────────────────────
 # Si el nombre normalizado del plato contiene alguna de estas palabras,
 # se excluye automáticamente de cena, desayuno y snack.
@@ -266,7 +318,7 @@ class RecomendadorPlatosConfiables:
 
             ingredientes_str = (row[9] or "").lower()
             if ing_clave_norm:
-                if ing_clave_norm not in nombre.lower() and ing_clave_norm not in ingredientes_str:
+                if not _tiene_ingrediente(nombre, ingredientes_str, ing_clave_norm):
                     continue
 
             kcal = float(row[3] or 0)
@@ -499,12 +551,19 @@ class RecomendadorPlatosConfiables:
                 extra_ingrediente = f"\nOBLIGATORIO: Todas las recetas DEBEN contener el ingrediente '{ingrediente_clave}' (como ingrediente principal o base)."
 
             prompt = (
-                f"Actúa como chef nutricionista. Crea {n_faltantes + 2} platos distintos para '{momento_dia}'.\n"
-                f"Deben sumar aproximadamente: {deficit_kcal:.0f} kcal, {deficit_proteina:.0f}g proteína, "
+                f"Actúa como nutricionista de un gimnasio en Lambayeque, Perú. "
+                f"Crea {n_faltantes + 2} platos distintos típicos de la cocina peruana norteña para '{momento_dia}'.\n"
+                f"Deben tener aproximadamente: {deficit_kcal:.0f} kcal, {deficit_proteina:.0f}g proteína, "
                 f"{deficit_carb:.0f}g carbohidratos, {deficit_grasas:.0f}g grasas.{extra_ingrediente}\n"
-                "Usa ingredientes reales y comunes en Perú. No uses medidas como 'tazas' ni 'cucharadas', "
-                "USA SOLO GRAMOS EXACTOS (ej. '150').\n\n"
-                "Responde ÚNICAMENTE con un arreglo JSON válido con esta estructura:\n"
+                "REGLAS OBLIGATORIAS:\n"
+                "1. Nombres en español, usando preparaciones peruanas conocidas: "
+                "'a la plancha', 'al vapor', 'estofado', 'guisado', 'sudado', 'sancochado', "
+                "'salteado', 'a la parrilla', 'con arroz', 'ensalada de', 'sopa de', etc.\n"
+                "2. PROHIBIDO usar nombres de platos extranjeros: fideuá, ratatouille, stir-fry, "
+                "curry, risotto, pad thai, wok, etc.\n"
+                "3. Ingredientes comunes en mercados peruanos (no ingredientes importados raros).\n"
+                "4. USA SOLO GRAMOS EXACTOS, sin 'tazas', 'cucharadas' ni unidades.\n\n"
+                "Responde ÚNICAMENTE con un arreglo JSON válido:\n"
                 "[\n"
                 "  {\n"
                 "    \"nombre_plato\": \"Pollo a la Plancha con Arroz y Ensalada\",\n"
@@ -542,13 +601,8 @@ class RecomendadorPlatosConfiables:
                 
                 if ingrediente_clave:
                     ing_clave_norm = ingrediente_clave.lower().strip()
-                    has_ingredient = ing_clave_norm in nombre.lower()
-                    if not has_ingredient:
-                        for ing in ings:
-                            if ing_clave_norm in ing.get("nombre", "").lower():
-                                has_ingredient = True
-                                break
-                    if not has_ingredient:
+                    ings_str_llm = " ".join(i.get("nombre", "") for i in ings)
+                    if not _tiene_ingrediente(nombre, ings_str_llm, ing_clave_norm):
                         logger.warning(f"Plato LLM '{nombre}' descartado por no contener '{ingrediente_clave}'.")
                         continue
                 

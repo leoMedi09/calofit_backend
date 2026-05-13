@@ -15,6 +15,26 @@ def get_peru_date() -> date:
     return get_peru_now().date()
 
 
+def inferir_momento_dia_peru() -> str:
+    """
+    Devuelve el momento del día según la hora actual en Perú (UTC-5).
+    Fuente canónica usada por todos los módulos del backend.
+
+    Rangos:
+      05–09 → desayuno
+      10–14 → almuerzo
+      15–17 → merienda
+      18–21 → cena
+      22–04 → snack
+    """
+    hora = get_peru_now().hour
+    if  5 <= hora <=  9: return "desayuno"
+    if 10 <= hora <= 14: return "almuerzo"
+    if 15 <= hora <= 17: return "merienda"
+    if 18 <= hora <= 21: return "cena"
+    return "snack"
+
+
 def parsear_macros_de_texto(
     macros_str: str,
     objetivo_plato: Optional[str] = None,

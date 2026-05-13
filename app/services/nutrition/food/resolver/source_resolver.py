@@ -77,14 +77,23 @@ class FoodSourceResolver:
         # 1. Caché
         resultado_cache = self._buscar_cache(nombre_norm, user_id)
         if resultado_cache:
-            logger.info(f"✅ Cache: {nombre_norm}")
-            return self._construir_resultado(
-                nombre=nombre_ingrediente,
-                macros_100g=resultado_cache,
-                gramos=gramos,
-                source='Cache',
-                confianza=90,
-            )
+            # resultado_cache es {"macros": {...}, "alimento_id": N} o macros directo (compat.)
+            if isinstance(resultado_cache, dict) and "macros" in resultado_cache:
+                cached_macros = resultado_cache["macros"]
+                cached_alimento_id = resultado_cache.get("alimento_id")
+            else:
+                cached_macros = resultado_cache
+                cached_alimento_id = None
+            if cached_macros:
+                logger.info(f"✅ Cache: {nombre_norm}")
+                return self._construir_resultado(
+                    nombre=nombre_ingrediente,
+                    macros_100g=cached_macros,
+                    gramos=gramos,
+                    source='Cache',
+                    confianza=90,
+                    alimento_id=cached_alimento_id,
+                )
 
         # 2. BD local
         resultado_bd = self._buscar_bd_local(nombre_norm)
@@ -404,8 +413,8 @@ class FoodSourceResolver:
                 grasas_100g=macros['grasas_100g'],
                 fibra_100g=macros.get('fibra_100g', 0.0),
                 azucar_100g=macros.get('azucar_100g', 0.0),
-                fuente=source,           # 'LLM_Estimado'
-                es_verificado=False,
+                fuente=source,
+                es_confiable=False,
             )
             self.db.add(nuevo)
             self.db.commit()
@@ -445,53 +454,72 @@ class FoodSourceResolver:
         return self.cache_manager.obtener_del_cache(nombre_norm, user_id)
 
     def _buscar_bd_local(self, nombre_norm: str) -> Optional[Dict]:
-        """Busca en BD local (alimentos + alias) con búsqueda fuzzy básica."""
+        """
+        Busca en BD local (alimentos + alias) con búsqueda por límite de palabra
+        e insensible a acentos.
+
+        Usa PostgreSQL unaccent() + regex de límite de palabra para que:
+        - "ají amarillo" encuentre "aji amarillo fresco"
+        - "sal" NO coincida con "ensalada de mariscos"
+        """
+        from sqlalchemy import text as sql_text
+
+        def _row_to_dict(row) -> Dict:
+            return {
+                'id': row[0],
+                'nombre': row[1],
+                'macros': {
+                    'calorias_100g':      float(row[2] or 0),
+                    'proteina_100g':      float(row[3] or 0),
+                    'carbohidratos_100g': float(row[4] or 0),
+                    'grasas_100g':        float(row[5] or 0),
+                    'fibra_100g':         float(row[6] or 0),
+                    'azucar_100g':        float(row[7] or 0),
+                },
+            }
+
+        _SELECT = (
+            "SELECT id, nombre, calorias_100g, proteina_100g, "
+            "carbohidratos_100g, grasas_100g, fibra_100g, azucar_100g "
+            "FROM alimentos"
+        )
+
         try:
-            # Exacto
-            alimento = self.db.query(Alimento).filter(
-                Alimento.nombre_normalizado == nombre_norm
-            ).first()
+            tokens = (nombre_norm or "").strip().split()
+            if not tokens:
+                return None
 
-            # Si no exacto → buscar por LIKE (contiene)
-            if not alimento:
-                alimento = self.db.query(Alimento).filter(
-                    Alimento.nombre_normalizado.ilike(f'%{nombre_norm}%')
-                ).first()
+            # Cada token debe aparecer como palabra completa (límite de palabra),
+            # insensible a acentos vía unaccent().
+            conds = " AND ".join([
+                f"unaccent(lower(nombre_normalizado)) ~* "
+                f"('(^| )' || unaccent(lower(:t{i})) || '( |$)')"
+                for i in range(len(tokens))
+            ])
+            params = {f't{i}': tok for i, tok in enumerate(tokens)}
 
-            if alimento:
-                return {
-                    'id': alimento.id,
-                    'nombre': alimento.nombre,
-                    'macros': {
-                        'calorias_100g': float(alimento.calorias_100g or 0),
-                        'proteina_100g': float(alimento.proteina_100g or 0),
-                        'carbohidratos_100g': float(alimento.carbohidratos_100g or 0),
-                        'grasas_100g': float(alimento.grasas_100g or 0),
-                        'fibra_100g': float(alimento.fibra_100g or 0),
-                        'azucar_100g': float(alimento.azucar_100g or 0),
-                    }
-                }
+            row = self.db.execute(
+                sql_text(
+                    f"{_SELECT} WHERE {conds} "
+                    "ORDER BY length(nombre_normalizado) ASC LIMIT 1"
+                ),
+                params,
+            ).fetchone()
+
+            if row:
+                return _row_to_dict(row)
 
             # Buscar en alias
             alias = self.db.query(AlimentoAlias).filter(
                 AlimentoAlias.alias == nombre_norm
             ).first()
-
             if alias:
-                a = self.db.query(Alimento).filter(Alimento.id == alias.alimento_id).first()
-                if a:
-                    return {
-                        'id': a.id,
-                        'nombre': a.nombre,
-                        'macros': {
-                            'calorias_100g': float(a.calorias_100g or 0),
-                            'proteina_100g': float(a.proteina_100g or 0),
-                            'carbohidratos_100g': float(a.carbohidratos_100g or 0),
-                            'grasas_100g': float(a.grasas_100g or 0),
-                            'fibra_100g': float(a.fibra_100g or 0),
-                            'azucar_100g': float(a.azucar_100g or 0),
-                        }
-                    }
+                row = self.db.execute(
+                    sql_text(f"{_SELECT} WHERE id = :aid LIMIT 1"),
+                    {"aid": alias.alimento_id},
+                ).fetchone()
+                if row:
+                    return _row_to_dict(row)
 
             return None
 

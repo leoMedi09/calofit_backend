@@ -198,17 +198,8 @@ def _validar_gramaje_extraccion(extraccion: dict) -> Optional[str]:
 
 
 def _inferir_momento_dia_por_hora() -> Optional[str]:
-    """
-    Mapea la hora actual del servidor (Perú, UTC-5) al momento del día.
-    Usado para validar conflictos entre lo que el usuario dice y la hora real.
-    """
-    import datetime
-    hora = (datetime.datetime.utcnow() - datetime.timedelta(hours=5)).hour
-    if  5 <= hora <=  9: return "desayuno"
-    if 10 <= hora <= 14: return "almuerzo"
-    if 15 <= hora <= 17: return "merienda"
-    if 18 <= hora <= 21: return "cena"
-    return "snack"  # 22:00-04:59 → snack nocturno
+    from app.core.utils import inferir_momento_dia_peru
+    return inferir_momento_dia_peru()
 
 
 def _inferir_momento_dia(mensaje: str) -> Optional[str]:
@@ -347,14 +338,33 @@ def _expandir_compuestos_con(items: List[str], db: Session) -> List[str]:
         if " con " not in item:
             resultado.append(item)
             continue
-        # No segmentar si el nombre completo ya existe como plato propio en BD
+        # No segmentar si el nombre completo ya existe como plato propio en BD.
+        # Usa exact match primero; si falla, fuzzy ≥ 0.88 para tolerar artículos
+        # ("con la ensalada" vs "con ensalada") y tildes variables.
         norm_full = _norm_plato(item)
-        if db.execute(
+        _exact = db.execute(
             _sql_t("SELECT 1 FROM platos WHERE nombre_normalizado = :n LIMIT 1"),
             {"n": norm_full},
-        ).fetchone():
+        ).fetchone()
+        if _exact:
             resultado.append(item)
             continue
+        # Fuzzy: buscar candidatos con la misma primera palabra, comparar similitud
+        _fw = norm_full.split()[0] if norm_full else ""
+        if _fw:
+            _cands = db.execute(
+                _sql_t("SELECT nombre_normalizado FROM platos "
+                       "WHERE nombre_normalizado LIKE :p LIMIT 60"),
+                {"p": _fw + "%"},
+            ).fetchall()
+            _best_score = max(
+                (difflib.SequenceMatcher(None, norm_full, (r[0] or "")).ratio()
+                 for r in _cands),
+                default=0.0,
+            )
+            if _best_score >= 0.88:
+                resultado.append(item)
+                continue
         last_con = item.rfind(" con ")
         if last_con <= 0:
             resultado.append(item)

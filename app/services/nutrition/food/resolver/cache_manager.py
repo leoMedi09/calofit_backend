@@ -58,7 +58,11 @@ class CacheManager:
                 return None
 
             data = json.loads(entry.raw_response)
-            return data.get("macros")
+            macros = data.get("macros")
+            if macros is None:
+                return None
+            # Incluir alimento_id del registro DB (funciona con entradas antiguas sin JSON alimento_id)
+            return {"macros": macros, "alimento_id": entry.alimento_id}
 
         except Exception as exc:
             logger.error("CacheManager.obtener_del_cache error: %s", exc)

@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.core.cache import add_user_recent_meal, get_user_recent_meals, set_consulta_cached
 from app.core.logging_config import get_logger
 from app.core.macros_diarios import macros_desde_calorias_pct_clasico
-from app.core.utils import parsear_macros_de_texto
+from app.core.utils import parsear_macros_de_texto, inferir_momento_dia_peru
 from app.models.preferencias import PreferenciaAlimento
 from app.models.alimento import Alimento
 from app.services.nutricional_result import validar_macros_atwater
@@ -1354,27 +1354,20 @@ _TDEE_FALLBACK_KCAL: float = 2000.0
 
 
 def _inferir_momento_actual() -> str:
-    hora = datetime.now().hour
-    if hora < 11:
-        return "desayuno"
-    elif hora < 16:
-        return "almuerzo"
-    elif hora < 20:
-        return "cena"
-    return "snack"
+    return inferir_momento_dia_peru()
 
 
 def _obtener_pct_por_objetivo(goal: str) -> dict:
     """Devuelve el mapa de % TDEE máximo por momento según el objetivo del usuario."""
     g = (goal or "").lower()
     if "agresivo" in g:
-        return {"desayuno": 0.25, "almuerzo": 0.40, "cena": 0.25, "snack": 0.10}
+        return {"desayuno": 0.25, "almuerzo": 0.40, "cena": 0.25, "merienda": 0.10, "snack": 0.10}
     elif "definicion" in g or "definición" in g:
-        return {"desayuno": 0.30, "almuerzo": 0.40, "cena": 0.30, "snack": 0.10}
+        return {"desayuno": 0.30, "almuerzo": 0.40, "cena": 0.30, "merienda": 0.10, "snack": 0.10}
     elif "volumen" in g or "masa" in g:
-        return {"desayuno": 0.35, "almuerzo": 0.40, "cena": 0.35, "snack": 0.15}
+        return {"desayuno": 0.35, "almuerzo": 0.40, "cena": 0.35, "merienda": 0.15, "snack": 0.15}
     else:
-        return {"desayuno": 0.30, "almuerzo": 0.40, "cena": 0.30, "snack": 0.15}
+        return {"desayuno": 0.30, "almuerzo": 0.40, "cena": 0.30, "merienda": 0.12, "snack": 0.15}
 
 
 def _calcular_tdee_perfil(perfil: Any) -> float:

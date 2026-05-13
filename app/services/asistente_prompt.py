@@ -37,6 +37,7 @@ def construir_prompt_cliente(
     es_saludo: bool = False,
     db: Optional[Session] = None,
     modo_funcion: Optional[str] = None,
+    mensaje_usuario: str = "",
 ) -> str:
     """Construye el prompt del Coach Personal del Cliente."""
     from datetime import datetime
@@ -210,7 +211,7 @@ def construir_prompt_cliente(
             d_carb = max(0, carbo_meta - carbo_meta * pct_c) * escala
             d_gras = max(0, grasa_meta - grasa_meta * pct_c) * escala
 
-            msg_low = mensaje_fuzzy.lower() if mensaje_fuzzy else ""
+            msg_low = mensaje_usuario.lower() if mensaje_usuario else (mensaje_fuzzy.lower() if mensaje_fuzzy else "")
             
             if any(w in msg_low for w in ["proteina", "proteína", "musculo", "músculo", "proteico"]):
                 d_prot = max(35.0, d_prot * 2.0)
@@ -219,11 +220,152 @@ def construir_prompt_cliente(
             if any(w in msg_low for w in ["grasa", "grasas", "lipid", "lípid", "keto", "cetogenico", "cetogénico"]):
                 d_gras = max(20.0, d_gras * 2.0)
                 
-            # Detección de ingrediente específico
+            # Detección de ingrediente específico desde el mensaje del usuario.
+            # Orden: términos más específicos/largos primero para evitar falsos positivos.
+            # Todas las variantes (con/sin tilde, sinónimos regionales peruanos)
+            # se normalizan a un valor canónico usado como clave de búsqueda en BD.
+            _ING_MAP = {
+                # ── Mariscos (Lambayeque costero) ────────────────────────────
+                "langostino": "mariscos",
+                "langosta":  "mariscos",
+                "mariscos":  "mariscos",
+                "camarón":   "mariscos",
+                "camaron":   "mariscos",
+                "calamar":   "mariscos",
+                "mejillon":  "mariscos",
+                "mejillón":  "mariscos",
+                "almeja":    "mariscos",
+                "pulpo":     "mariscos",
+                "choro":     "mariscos",
+                "concha":    "mariscos",
+                "cangrejo":  "mariscos",
+                # ── Pescados ────────────────────────────────────────────────
+                "anchoveta": "pescado",
+                "caballa":   "pescado",
+                "cachema":   "pescado",
+                "corvina":   "pescado",
+                "merluza":   "pescado",
+                "tilapia":   "pescado",
+                "sardina":   "pescado",
+                "jurel":     "pescado",
+                "tollo":     "pescado",
+                "mero":      "pescado",
+                "cabrilla":  "pescado",
+                "lisa":      "pescado",
+                "salmón":    "salmon",
+                "salmon":    "salmon",
+                "trucha":    "trucha",
+                "atún":      "atun",
+                "atun":      "atun",
+                "pescado":   "pescado",
+                # ── Carnes rojas ─────────────────────────────────────────────
+                "cabrito":   "cabrito",
+                "cordero":   "cordero",
+                "cuy":       "cuy",
+                "conejo":    "conejo",
+                "pato":      "pato",
+                "pavo":      "pavo",
+                "chancho":   "cerdo",
+                "cerdo":     "cerdo",
+                "ternera":   "res",
+                "bistec":    "res",
+                "lomo":      "res",
+                "res":       "res",
+                "carne":     "carne",
+                # ── Aves ────────────────────────────────────────────────────
+                "pechuga":   "pollo",
+                "pollo":     "pollo",
+                # ── Huevo y lácteos ──────────────────────────────────────────
+                "huevo":     "huevo",
+                "yogurt":    "yogur",
+                "yogur":     "yogur",
+                "queso":     "queso",
+                "leche":     "leche",
+                "mantequilla": "lacteos",
+                # ── Legumbres (menestras peruanas) ───────────────────────────
+                "garbanzo":  "garbanzo",
+                "pallares":  "pallares",
+                "menestra":  "menestra",
+                "arveja":    "arveja",
+                "haba":      "haba",
+                "frijol":    "frejol",
+                "frejol":    "frejol",
+                "lentejón":  "lenteja",
+                "lenteja":   "lenteja",
+                # ── Cereales y granos ────────────────────────────────────────
+                "spaghetti": "pasta",
+                "tallarín":  "pasta",
+                "tallarin":  "pasta",
+                "fideos":    "pasta",
+                "pasta":     "pasta",
+                "cebada":    "cebada",
+                "trigo":     "trigo",
+                "quinoa":    "quinua",
+                "quinua":    "quinua",
+                "avena":     "avena",
+                "arroz":     "arroz",
+                # ── Tubérculos y raíces ──────────────────────────────────────
+                "boniato":   "camote",
+                "camote":    "camote",
+                "yuca":      "yuca",
+                "papa":      "papa",
+                # ── Otros vegetales ──────────────────────────────────────────
+                "choclo":    "choclo",
+                "maíz":      "choclo",
+                "maiz":      "choclo",
+                "brócoli":   "verdura",
+                "brocoli":   "verdura",
+                "espinaca":  "verdura",
+                "zanahoria": "verdura",
+                "pepino":    "verdura",
+                "lechuga":   "verdura",
+                "tomate":    "verdura",
+                "acelga":    "verdura",
+                "ensalada":  "ensalada",
+                "vegetal":   "verdura",
+                "verdura":   "verdura",
+                # ── Frutas ───────────────────────────────────────────────────
+                "aguacate":  "palta",
+                "palta":     "palta",
+                "plátano":   "platano",
+                "platano":   "platano",
+                "lúcuma":    "lucuma",
+                "lucuma":    "lucuma",
+                "maracuyá":  "fruta",
+                "maracuya":  "fruta",
+                "papaya":    "fruta",
+                "mango":     "mango",
+                "sandía":    "fruta",
+                "sandia":    "fruta",
+                "melón":     "fruta",
+                "melon":     "fruta",
+                "piña":      "fruta",
+                "pina":      "fruta",
+                "fresa":     "fruta",
+                "manzana":   "fruta",
+                "naranja":   "fruta",
+                "uva":       "fruta",
+                "pera":      "fruta",
+                # ── Frutos secos y semillas ──────────────────────────────────
+                "almendra":  "fruto_seco",
+                "pecana":    "fruto_seco",
+                "nuez":      "fruto_seco",
+                "maní":      "mani",
+                "mani":      "mani",
+                "linaza":    "semilla",
+                "chía":      "semilla",
+                "chia":      "semilla",
+                # ── Proteína vegetal ─────────────────────────────────────────
+                "soya":      "soya",
+                "tofu":      "tofu",
+                # ── Pan y derivados ──────────────────────────────────────────
+                "tostada":   "pan",
+                "pan":       "pan",
+            }
             ingrediente_clave = None
-            for ing in ["pescado", "pollo", "huevo", "atun", "atún", "res", "carne", "cerdo", "palta", "aguacate", "avena", "platano", "plátano", "arroz", "lenteja", "quinua", "ensalada", "verdura", "queso", "yogur"]:
-                if ing in msg_low:
-                    ingrediente_clave = "atun" if ing == "atún" else "platano" if ing == "plátano" else ing
+            for kw, valor in _ING_MAP.items():
+                if kw in msg_low:
+                    ingrediente_clave = valor
                     break
                 
             platos = rec.recomendar(

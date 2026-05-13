@@ -934,6 +934,14 @@ def _validar_preparacion_vs_tipo(nombre_norm: str, preparacion: list[str]) -> No
         )
 
 
+def _token_en_texto(token: str, texto: str) -> bool:
+    """Verifica que `token` aparezca como palabra completa en `texto` (no substring)."""
+    return bool(re.search(
+        r'(?<![a-záéíóúüñ])' + re.escape(token) + r'(?![a-záéíóúüñ])',
+        texto,
+    ))
+
+
 def _validar_coherencia_nombre_ingredientes(
     nombre_norm: str,
     resueltos: list[tuple],
@@ -968,10 +976,12 @@ def _validar_coherencia_nombre_ingredientes(
                     f"resuelto lo confirma (ings: {', '.join(ings_norms[:4])})"
                 )
 
-        # No debe haber proteínas contradictorias
+        # No debe haber proteínas contradictorias.
+        # Usar word-boundary (_token_en_texto) para evitar falsos positivos:
+        # "res" no debe detectarse en "fresco", "tomate fresco", "perejil", etc.
         if kws_prohibidos:
             for prohibido in kws_prohibidos:
-                if any(prohibido in ing_n for ing_n in ings_norms):
+                if any(_token_en_texto(prohibido, ing_n) for ing_n in ings_norms):
                     return False, (
                         f"nombre='{kws_nombre[0]}' pero ingrediente '{prohibido}' "
                         f"es incompatible — proteínas cruzadas"

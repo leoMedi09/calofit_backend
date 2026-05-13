@@ -138,6 +138,7 @@ class AsistenteService:
             perfil, edad, plan_hoy_data, calorias_meta,
             consumo_real, quemadas_real, adherencia_pct, progreso_pct,
             mensaje_fuzzy, es_saludo=es_saludo, db=db, modo_funcion=modo_funcion,
+            mensaje_usuario=mensaje,
         )
 
         # Llamar IA
