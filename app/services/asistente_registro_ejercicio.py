@@ -361,6 +361,7 @@ class RegistroEjercicioHandler:
             met=met,
             db=db,
         )
+        self._sumar_calorias_progreso(client_id, cal, db)
         return {
             "success": True,
             "mensaje": f"Log guardado: {ejercicio} — {series}×{reps}"

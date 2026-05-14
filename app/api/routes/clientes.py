@@ -192,7 +192,6 @@ def registrar_cliente(cliente_data: ClientCreate, db: Session = Depends(get_db))
 @router.get("/perfil")
 def obtener_perfil_cliente(
     current_user = Depends(get_current_user),
-    db: Session = Depends(get_db)
 ):
     """Obtiene el perfil del cliente autenticado"""
     
@@ -223,8 +222,11 @@ def obtener_perfil_cliente(
         birth_date=current_user.birth_date,
         weight=current_user.weight or 0.0,
         height=current_user.height or 0.0,
+        gender=current_user.gender or "M",
         activity_level=current_user.activity_level or "Sedentario",
         goal=current_user.goal or "Mantener peso",
+        workout_type=current_user.workout_type or "Cardio",
+        session_duration=current_user.session_duration or 1.0,
         medical_conditions=current_user.medical_conditions or [],
         assigned_coach_id=current_user.assigned_coach_id,
         assigned_nutri_id=current_user.assigned_nutri_id,
@@ -662,11 +664,18 @@ def obtener_perfil_por_uid(
         birth_date=cliente.birth_date,
         weight=cliente.weight or 0.0,
         height=cliente.height or 0.0,
+        gender=cliente.gender or "M",
+        activity_level=cliente.activity_level or "Sedentario",
+        goal=cliente.goal or "Mantener peso",
+        workout_type=cliente.workout_type or "Cardio",
+        session_duration=cliente.session_duration or 1.0,
+        medical_conditions=cliente.medical_conditions or [],
         assigned_coach_id=cliente.assigned_coach_id,
         assigned_nutri_id=cliente.assigned_nutri_id,
-        profile_picture_url=cliente.profile_picture_url
+        profile_picture_url=cliente.profile_picture_url,
+        is_profile_complete=cliente.is_profile_complete
     )
-    
+
     return perfil_response
 
 

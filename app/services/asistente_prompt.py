@@ -418,6 +418,8 @@ def construir_prompt_cliente(
         bloque_nutri
         + f"Eres el coach personal de {perfil.first_name}. "
         f"PERFIL: {perfil.weight}kg, {perfil.height}cm, {edad} años, {perfil.gender}. "
+        f"Entrenamiento preferido: {getattr(perfil, 'workout_type', None) or 'No especificado'} · "
+        f"Sesión habitual: {int((getattr(perfil, 'session_duration', 1.0) or 1.0) * 60)} min. "
         f"ALERGIAS: {texto_alergias}. DIETA: {texto_dieta}. CONDICIONES: {texto_condiciones}."
         f"{bloque_hora}{bloque_rango_kcal}{bloque_anti_repetir}{bloque_favoritos}"
         f"{bloque_perfil_ml}{bloque_reco_ml}"

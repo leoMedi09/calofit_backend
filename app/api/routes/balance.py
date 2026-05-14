@@ -92,7 +92,23 @@ async def obtener_balance_hoy(
     ).first()
     
     calorias_consumidas = progreso_hoy.calorias_consumidas if progreso_hoy else 0
-    calorias_quemadas = progreso_hoy.calorias_quemadas if progreso_hoy else 0
+
+    # Calorías quemadas: fuente autoritativa = workout_logs (cubre todos los paths de registro)
+    from sqlalchemy import text as _sql_wl
+    _dialect = getattr(getattr(db, "bind", None), "dialect", None)
+    _dname = getattr(_dialect, "name", "") or ""
+    if _dname == "postgresql":
+        calorias_quemadas = float(db.execute(_sql_wl(
+            "SELECT COALESCE(SUM(calorias_quemadas), 0) FROM workout_logs "
+            "WHERE client_id = :cid "
+            "  AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Lima')::date = :hoy"
+        ), {"cid": cliente.id, "hoy": hoy}).scalar() or 0)
+    else:
+        calorias_quemadas = float(db.execute(_sql_wl(
+            "SELECT COALESCE(SUM(calorias_quemadas), 0) FROM workout_logs "
+            "WHERE client_id = :cid AND date(created_at) = :hoy"
+        ), {"cid": cliente.id, "hoy": hoy}).scalar() or 0)
+
     calorias_restantes = objetivo_diario - calorias_consumidas + calorias_quemadas
     
     # Obtener preferencias de alimentos registrados hoy (como proxy de registros)
@@ -105,6 +121,8 @@ async def obtener_balance_hoy(
     dialect = getattr(getattr(db, "bind", None), "dialect", None)
     dialect_name = getattr(dialect, "name", "") or ""
 
+    from sqlalchemy import text as _text
+
     if dialect_name == "postgresql":
         # `ultima_vez` es TIMESTAMP (sin tz). Asumimos que DB lo guarda en UTC (func.now()) y
         # lo convertimos a hora Perú antes de extraer `date`.
@@ -116,20 +134,27 @@ async def obtener_balance_hoy(
             PreferenciaAlimento.client_id == cliente.id,
             _date_peru(PreferenciaAlimento.ultima_vez) == hoy,
         ).all()
-        ejercicios_hoy = db.query(PreferenciaEjercicio).filter(
-            PreferenciaEjercicio.client_id == cliente.id,
-            _date_peru(PreferenciaEjercicio.ultima_vez) == hoy,
-        ).all()
+
+        # Ejercicios: leer desde workout_logs (fuente única que escriben TODAS las rutas de registro)
+        ejercicios_hoy_rows = db.execute(_text(
+            "SELECT id, ejercicio, series, reps, peso_kg, calorias_quemadas, session_duration_min, intensity, "
+            "  created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Lima' AS hora_lima "
+            "FROM workout_logs "
+            "WHERE client_id = :cid "
+            "  AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Lima')::date = :hoy "
+            "ORDER BY created_at DESC"
+        ), {"cid": cliente.id, "hoy": hoy}).fetchall()
     else:
         # SQLite / otros: date() directo es suficiente.
         alimentos_hoy = db.query(PreferenciaAlimento).filter(
             PreferenciaAlimento.client_id == cliente.id,
             func.date(PreferenciaAlimento.ultima_vez) == hoy,
         ).all()
-        ejercicios_hoy = db.query(PreferenciaEjercicio).filter(
-            PreferenciaEjercicio.client_id == cliente.id,
-            func.date(PreferenciaEjercicio.ultima_vez) == hoy,
-        ).all()
+
+        ejercicios_hoy_rows = db.execute(_text(
+            "SELECT id, ejercicio, series, reps, peso_kg, calorias_quemadas, session_duration_min, intensity, created_at AS hora_lima "
+            "FROM workout_logs WHERE client_id = :cid AND date(created_at) = :hoy ORDER BY created_at DESC"
+        ), {"cid": cliente.id, "hoy": hoy}).fetchall()
     
     return {
         "fecha": hoy.isoformat(),
@@ -164,13 +189,17 @@ async def obtener_balance_hoy(
         ],
         "ejercicios_registrados": [
             {
-                "id": ejercicio.id,
-                "nombre": ejercicio.ejercicio.capitalize(),
-                "frecuencia_total": ejercicio.frecuencia,
-                "hora_registro": ejercicio.ultima_vez.strftime("%H:%M:%S"),
-                "calorias_quemadas": ejercicio.calorias_quemadas or 0
+                "id": row.id,
+                "nombre": (row.ejercicio or "").capitalize(),
+                "series": row.series or 0,
+                "reps": row.reps or 0,
+                "peso_kg": row.peso_kg,
+                "calorias_quemadas": float(row.calorias_quemadas or 0),
+                "duracion_min": float(row.session_duration_min or 0),
+                "intensidad": row.intensity or "",
+                "hora_registro": row.hora_lima.strftime("%H:%M") if row.hora_lima else "",
             }
-            for ejercicio in ejercicios_hoy
+            for row in ejercicios_hoy_rows
         ]
     }
 
@@ -254,30 +283,63 @@ async def eliminar_registro(
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     
-    from app.models.preferencias import PreferenciaAlimento, PreferenciaEjercicio
-    
+    from app.models.preferencias import PreferenciaAlimento
+    from sqlalchemy import text as _text2
+
     if tipo == "alimento":
         registro = db.query(PreferenciaAlimento).filter(
             PreferenciaAlimento.id == registro_id,
             PreferenciaAlimento.client_id == cliente.id
         ).first()
+        if not registro:
+            raise HTTPException(status_code=404, detail="Registro no encontrado")
+        nombre_registro = registro.alimento
+        # Guardar macros antes de borrar para restar del progreso
+        cal_alim  = float(registro.calorias or 0)
+        prot_alim = float(registro.proteinas or 0)
+        carb_alim = float(registro.carbohidratos or 0)
+        gras_alim = float(registro.grasas or 0)
+        # Determinar qué día afecta (ultima_vez es UTC sin tz)
+        from app.core.utils import get_peru_date as _gpd2
+        fecha_alim = _gpd2()
+        if registro.ultima_vez:
+            try:
+                from zoneinfo import ZoneInfo
+                from datetime import timezone as _tz
+                fecha_alim = registro.ultima_vez.replace(tzinfo=_tz.utc).astimezone(ZoneInfo("America/Lima")).date()
+            except Exception:
+                pass
+        db.delete(registro)
+        db.execute(_text2(
+            "UPDATE progreso_calorias SET "
+            "  calorias_consumidas      = GREATEST(0, calorias_consumidas      - :cal), "
+            "  proteinas_consumidas     = GREATEST(0, proteinas_consumidas     - :prot), "
+            "  carbohidratos_consumidos = GREATEST(0, carbohidratos_consumidos - :carb), "
+            "  grasas_consumidas        = GREATEST(0, grasas_consumidas        - :gras) "
+            "WHERE client_id = :cid AND fecha = :fecha"
+        ), {"cal": cal_alim, "prot": prot_alim, "carb": carb_alim,
+            "gras": gras_alim, "cid": cliente.id, "fecha": fecha_alim})
+        db.commit()
     elif tipo == "ejercicio":
-        registro = db.query(PreferenciaEjercicio).filter(
-            PreferenciaEjercicio.id == registro_id,
-            PreferenciaEjercicio.client_id == cliente.id
-        ).first()
+        # Ejercicios viven en workout_logs
+        row = db.execute(_text2(
+            "SELECT id, ejercicio, calorias_quemadas FROM workout_logs "
+            "WHERE id = :rid AND client_id = :cid"
+        ), {"rid": registro_id, "cid": cliente.id}).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Registro no encontrado")
+        nombre_registro = row.ejercicio
+        cal_a_restar = float(row.calorias_quemadas or 0)
+        db.execute(_text2("DELETE FROM workout_logs WHERE id = :rid"), {"rid": registro_id})
+        # Restar calorías del progreso del día
+        from app.core.utils import get_peru_date as _gpd
+        db.execute(_text2(
+            "UPDATE progreso_calorias SET calorias_quemadas = GREATEST(0, calorias_quemadas - :cal) "
+            "WHERE client_id = :cid AND fecha = :hoy"
+        ), {"cal": cal_a_restar, "cid": cliente.id, "hoy": _gpd()})
+        db.commit()
     else:
         raise HTTPException(status_code=400, detail="Tipo debe ser 'alimento' o 'ejercicio'")
-    
-    if not registro:
-        raise HTTPException(status_code=404, detail="Registro no encontrado")
-    
-    # Guardar nombre para el mensaje
-    nombre_registro = registro.alimento if tipo == "alimento" else registro.ejercicio
-    
-    # Eliminar registro
-    db.delete(registro)
-    db.commit()
     
     # Recalcular balance
     

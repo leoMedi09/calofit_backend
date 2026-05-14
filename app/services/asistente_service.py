@@ -11,6 +11,7 @@ Todos los bloques de lógica de dominio viven en módulos especializados:
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -57,6 +58,89 @@ from app.services.missing_data_guard import (
 )
 from app.services.response_parser import parsear_respuesta_para_frontend
 
+
+# ── Helpers auto-rutina ────────────────────────────────────────────────────────
+
+def _extraer_minutos(texto: str) -> int:
+    """Extrae minutos de '45 min', '1 hora', etc. Devuelve 0 si no encuentra."""
+    m = re.search(r"(\d+)\s*(h|hr|hora|horas)", texto)
+    if m:
+        return int(m.group(1)) * 60
+    m = re.search(r"(\d+)\s*(min|mins|minutos)", texto)
+    return int(m.group(1)) if m else 0
+
+
+def _rutina_a_texto(zonas: list, rutina: dict) -> str:
+    """
+    Genera UNA card por ejercicio con el protocolo CALOFIT.
+    El parser divide en secciones al encontrar cada [CALOFIT_HEADER].
+    """
+    nombre_rutina = rutina.get("nombre_rutina", "Rutina Personalizada")
+    intensidad    = rutina.get("intensidad", "Media")
+    series        = rutina.get("series", 3)
+    reps          = rutina.get("reps", 12)
+    descanso      = rutina.get("descanso_seg", 90)
+    ejercs        = rutina.get("ejercicios", [])
+    tiempo        = rutina.get("tiempo_estimado_min", 60)
+    adv           = rutina.get("advertencias", [])
+
+    adv_txt = f"\n⚠️ {' | '.join(adv)}" if adv else ""
+
+    # Zonas con "y" antes de la última para sonar más natural
+    if len(zonas) == 1:
+        zonas_txt = zonas[0]
+    elif len(zonas) == 2:
+        zonas_txt = f"{zonas[0]} y {zonas[1]}"
+    else:
+        zonas_txt = ", ".join(zonas[:-1]) + f" y {zonas[-1]}"
+
+    intro = (
+        f"[CALOFIT_INTENT:POWER]\n"
+        f"Tu entrenamiento de hoy está listo: **{nombre_rutina}**, {tiempo} min "
+        f"de {intensidad.lower()} intensidad enfocados en {zonas_txt}.{adv_txt}\n"
+    )
+
+    dur_x_ejerc = round(tiempo / max(len(ejercs), 1))
+
+    bloques = []
+    for e in ejercs:
+        musculo = e.get("musculo_principal") or e.get("grupo_padre") or ""
+        lista_items = [
+            f"- {series} series × {reps} repeticiones",
+            f"- Descanso: {descanso} segundos",
+        ]
+        if musculo:
+            lista_items.append(f"- Músculo: {musculo}")
+
+        # Construir bloque de técnica en [CALOFIT_ACTION] para que el parser lo asigne
+        # a seccion["tecnica"] y Flutter muestre los pasos numerados.
+        instrucciones = (e.get("instrucciones") or "").strip()
+        accion_block = ""
+        if instrucciones:
+            if re.match(r"^\d+\.", instrucciones):
+                # Pre-numerado ("1. Paso uno. 2. Paso dos.") → separar cada número en su propia línea
+                partes = [p.strip() for p in re.split(r"\s+(?=\d+\.\s)", instrucciones) if p.strip()]
+            else:
+                # Texto plano → dividir en oraciones y numerar
+                oraciones = [s.strip() for s in re.split(r"(?<=[.!?])\s+", instrucciones) if s.strip()]
+                partes = [f"{i+1}. {s}" for i, s in enumerate(oraciones[:5])]
+            pasos_txt = "\n".join(partes[:5])
+            accion_block = f"[CALOFIT_ACTION]\n{pasos_txt}\n[/CALOFIT_ACTION]\n"
+
+        bloque = (
+            f"[CALOFIT_HEADER]{e['nombre']}[/CALOFIT_HEADER]\n"
+            f"[CALOFIT_LIST]\n"
+            + "\n".join(lista_items)
+            + f"\n[/CALOFIT_LIST]\n"
+            + accion_block
+            + f"[CALOFIT_STATS]Intensidad: {intensidad} | {dur_x_ejerc} min[/CALOFIT_STATS]"
+        )
+        bloques.append(bloque)
+
+    return intro + "\n".join(bloques)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 
 class AsistenteService:
     """Punto de entrada único del asistente del cliente (< 300 líneas)."""
@@ -132,6 +216,20 @@ class AsistenteService:
             falt_ex = detectar_faltantes_recomendar_ejercicio(mensaje)
             if falt_ex:
                 return respuesta_info_faltante(perfil, modo_funcion, falt_ex)
+
+        # ── Auto-rutina desde perfil cuando el usuario no especifica zona ─────
+        if not override_ia and not es_saludo and modo_funcion == RECOMENDAR_EJERCICIO:
+            from app.services.missing_data_guard import _RX_FOCO_MUSCULAR, _RX_DURACION
+            from app.services.rutina_service import (
+                generar_rutina_inteligente, zonas_desde_workout_type,
+            )
+            if not _RX_FOCO_MUSCULAR.search(msg_limpio):
+                _zonas_auto = zonas_desde_workout_type(getattr(perfil, "workout_type", None))
+                _mins_msg   = _extraer_minutos(msg_limpio) if _RX_DURACION.search(msg_limpio) else 0
+                _mins_auto  = _mins_msg or int((getattr(perfil, "session_duration", 1.0) or 1.0) * 60)
+                _rutina     = await generar_rutina_inteligente(perfil.id, _zonas_auto, _mins_auto, db)
+                override_ia = _rutina_a_texto(_zonas_auto, _rutina)
+        # ─────────────────────────────────────────────────────────────────────
 
         # Construir prompt
         ctx = construir_prompt_cliente(

@@ -91,6 +91,31 @@ _CONFIG_PERFIL: Dict[str, Dict[str, Any]] = {
     },
 }
 
+# ── Mapeo workout_type → zonas musculares ──────────────────────────────────────
+# Claves: primera palabra del campo workout_type en minúsculas.
+# "Fuerza (Pesas, Gym)" → "fuerza" → zonas de fuerza.
+_WORKOUT_TYPE_TO_ZONES: Dict[str, List[str]] = {
+    # Español (valores del dropdown Flutter)
+    "fuerza":    ["Pecho", "Espalda", "Hombros", "Piernas"],
+    "cardio":    ["Cardio"],
+    "hiit":      ["Cardio", "Core", "Piernas"],
+    "funcional": ["Cardio", "Core", "Piernas"],
+    "yoga":      ["Core", "Glúteos", "Piernas"],
+    "pilates":   ["Core", "Glúteos", "Piernas"],
+    "mixto":     ["Pecho", "Espalda", "Cardio", "Core"],
+    # Inglés (valores guardados por el pipeline ML — _WT_MAP en asistente_recomendaciones.py)
+    "strength":  ["Pecho", "Espalda", "Hombros", "Piernas"],
+}
+
+
+def zonas_desde_workout_type(workout_type: Optional[str]) -> List[str]:
+    """Mapea workout_type del perfil a zonas para generar_rutina_inteligente()."""
+    if not workout_type:
+        return ["Cuerpo Completo"]
+    primera = workout_type.strip().lower().split()[0]
+    return _WORKOUT_TYPE_TO_ZONES.get(primera, ["Cuerpo Completo"])
+
+
 # ── Calculadora de ejercicios por tiempo ──────────────────────────────────────
 
 def _ejercicios_por_tiempo(tiempo_min: int, series: int, reps: int, descanso_seg: int) -> int:
@@ -142,16 +167,39 @@ def _sustituir_ejercicio(
     return nuevo_id, nuevo_nombre, just
 
 
-def _consultar_ejercicios(zonas: List[str], nivel_filtro: List[str], n: int, db: Session) -> List[Dict]:
-    """Consulta ejercicios de la BD filtrando por grupo_padre y nivel."""
+# Tipos que NO pertenecen a una rutina de gym/pesas — siempre excluidos.
+_TIPOS_EXCLUIDOS_BASE: List[str] = ["Strongman", "Cardio Ligero"]
+
+# Tipos extra excluidos según el workout_type del perfil.
+_TIPOS_EXCLUIDOS_POR_WORKOUT: Dict[str, List[str]] = {
+    "fuerza":    ["Cardio", "Metabólico/HIIT"],
+    "strength":  ["Cardio", "Metabólico/HIIT"],
+    "cardio":    ["Halterofilia", "Powerlifting"],
+    "hiit":      ["Powerlifting"],
+    "funcional": ["Powerlifting"],
+}
+
+
+def _consultar_ejercicios(
+    zonas: List[str],
+    nivel_filtro: List[str],
+    n: int,
+    db: Session,
+    tipos_excluidos: Optional[List[str]] = None,
+) -> List[Dict]:
+    """Consulta ejercicios filtrando por grupo_padre, nivel y tipos inapropiados."""
     if not zonas:
         return []
 
-    placeholders_zonas  = ", ".join(f":z{i}" for i in range(len(zonas)))
+    todos_excluidos = list(_TIPOS_EXCLUIDOS_BASE) + list(tipos_excluidos or [])
+
+    placeholders_zonas   = ", ".join(f":z{i}" for i in range(len(zonas)))
     placeholders_niveles = ", ".join(f":n{i}" for i in range(len(nivel_filtro)))
+    placeholders_excl    = ", ".join(f":x{i}" for i in range(len(todos_excluidos)))
 
     params = {f"z{i}": z for i, z in enumerate(zonas)}
     params.update({f"n{i}": nv for i, nv in enumerate(nivel_filtro)})
+    params.update({f"x{i}": t  for i, t  in enumerate(todos_excluidos)})
     params["lim"] = n
 
     rows = db.execute(_sql(f"""
@@ -159,6 +207,7 @@ def _consultar_ejercicios(zonas: List[str], nivel_filtro: List[str], n: int, db:
         FROM ejercicios
         WHERE grupo_padre IN ({placeholders_zonas})
           AND nivel       IN ({placeholders_niveles})
+          AND tipo        NOT IN ({placeholders_excl})
         ORDER BY RANDOM()
         LIMIT :lim
     """), params).fetchall()
@@ -232,17 +281,21 @@ async def generar_rutina_inteligente(
 
     n_ejercicios = _ejercicios_por_tiempo(tiempo_min, cfg["series"], cfg["reps"], cfg["descanso_seg"])
 
+    # Tipos excluidos según el workout_type del perfil
+    _wt_primera  = (perfil_obj.workout_type or "").strip().lower().split()[0] if perfil_obj.workout_type else ""
+    _tipos_extra = _TIPOS_EXCLUIDOS_POR_WORKOUT.get(_wt_primera, [])
+
     # Distribuir ejercicios entre zonas seguras
     if zonas_seguras:
         n_por_zona = max(1, n_ejercicios // len(zonas_seguras))
         ejercicios_raw = []
         for zona in zonas_seguras:
             ejercicios_raw.extend(
-                _consultar_ejercicios([zona], cfg["nivel_filtro"], n_por_zona, db)
+                _consultar_ejercicios([zona], cfg["nivel_filtro"], n_por_zona, db, tipos_excluidos=_tipos_extra)
             )
     else:
         # Todas las zonas tienen lesión → dar rutina de core o upper-body seguro
-        ejercicios_raw = _consultar_ejercicios(["Core"], cfg["nivel_filtro"], n_ejercicios, db)
+        ejercicios_raw = _consultar_ejercicios(["Core"], cfg["nivel_filtro"], n_ejercicios, db, tipos_excluidos=_tipos_extra)
 
     # Aplicar sustituciones para zonas restringidas
     advertencias = []
