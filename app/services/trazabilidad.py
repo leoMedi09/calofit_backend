@@ -93,35 +93,55 @@ def crear_comida_registros(
     confianza = _CONFIANZA_MAP.get(tipo_resolucion, 1.0)
 
     nombres = extraccion.get("alimentos_detectados") or []
-    kcal_t = float(extraccion.get("calorias", 0) or 0)
-    prot_t = float(extraccion.get("proteinas_g", 0) or 0)
-    carb_t = float(extraccion.get("carbohidratos_g", 0) or 0)
-    gras_t = float(extraccion.get("grasas_g", 0) or 0)
-
     if not nombres:
         logger.warning("crear_comida_registros: sin alimentos_detectados — omitido")
         return []
 
-    n = len(nombres)
     texto_trunc = (texto_original or "")[:500] or None
     registros: list[ComidaRegistro] = []
 
-    for nombre in nombres:
-        reg = ComidaRegistro(
-            client_id=client_id,
-            fecha=fecha,
-            nombre_alimento=nombre[:255],
-            kcal=round(kcal_t / n, 2),
-            proteina_g=round(prot_t / n, 2),
-            carbohidratos_g=round(carb_t / n, 2),
-            grasas_g=round(gras_t / n, 2),
-            tipo_resolucion=tipo_resolucion,
-            confianza=confianza,
-            texto_original=texto_trunc,
-            momento=momento,
-        )
-        db.add(reg)
-        registros.append(reg)
+    # Usar macros individuales cuando están disponibles (plato + extras)
+    alimentos_con_macros = extraccion.get("alimentos_con_macros")
+    if alimentos_con_macros:
+        for item in alimentos_con_macros:
+            reg = ComidaRegistro(
+                client_id=client_id,
+                fecha=fecha,
+                nombre_alimento=item["nombre"][:255],
+                kcal=round(float(item.get("kcal", 0)), 2),
+                proteina_g=round(float(item.get("prot_g", 0)), 2),
+                carbohidratos_g=round(float(item.get("carb_g", 0)), 2),
+                grasas_g=round(float(item.get("gras_g", 0)), 2),
+                tipo_resolucion=tipo_resolucion,
+                confianza=confianza,
+                texto_original=texto_trunc,
+                momento=momento,
+            )
+            db.add(reg)
+            registros.append(reg)
+    else:
+        # Fallback: distribución equitativa para alimentos simples (1 solo alimento)
+        kcal_t = float(extraccion.get("calorias", 0) or 0)
+        prot_t = float(extraccion.get("proteinas_g", 0) or 0)
+        carb_t = float(extraccion.get("carbohidratos_g", 0) or 0)
+        gras_t = float(extraccion.get("grasas_g", 0) or 0)
+        n = len(nombres)
+        for nombre in nombres:
+            reg = ComidaRegistro(
+                client_id=client_id,
+                fecha=fecha,
+                nombre_alimento=nombre[:255],
+                kcal=round(kcal_t / n, 2),
+                proteina_g=round(prot_t / n, 2),
+                carbohidratos_g=round(carb_t / n, 2),
+                grasas_g=round(gras_t / n, 2),
+                tipo_resolucion=tipo_resolucion,
+                confianza=confianza,
+                texto_original=texto_trunc,
+                momento=momento,
+            )
+            db.add(reg)
+            registros.append(reg)
 
     logger.info(
         "Creados %d ComidaRegistro para client=%d fecha=%s (tipo=%s confianza=%.2f)",

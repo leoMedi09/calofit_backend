@@ -168,6 +168,7 @@ async def get_daily_summary(
         "plan_nutricional": plan_objetivo,
         "ai_insight": ai_insight,
         "ai_strategic_focus": cliente.ai_strategic_focus,
+        "nutri_weekly_note": cliente.nutri_weekly_note,
         "is_strategy_validated": cliente.is_strategic_guide_validated
     }
 

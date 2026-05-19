@@ -7,10 +7,52 @@ en el catálogo local y la consulta parece un plato completo (≥2 palabras).
 """
 from __future__ import annotations
 
+import difflib
 import json
 import re
 import unicodedata
 from typing import List, Optional
+
+
+def _sufijos_con_compat(a: str, b: str) -> bool:
+    """Guard 'con X': rechaza el match si los modificadores después de 'con' no comparten
+    ninguna palabra. Evita que 'tortilla de huevo con pan' → 'Tortilla de Huevo con Espinacas'."""
+    def _suf(s: str) -> list[str]:
+        idx = s.rfind(" con ")
+        return s[idx + 5:].split() if idx >= 0 else []
+    s1, s2 = _suf(a), _suf(b)
+    if not s1 or not s2:
+        return True
+    return bool(set(s1) & set(s2))
+
+
+# Verbos y frases de apertura que el LLM añade al inicio del nombre sugerido
+# pero no forman parte del nombre real del plato.
+_RE_PREFIJO_VERBAL = re.compile(
+    r"^(?:"
+    # Verbos de inicio: pueden ir seguidos de artículo + sustantivo temporal + "con"
+    r"(?:comienza|empieza|inicia)\s+"
+    r"(?:(?:la|el|los|las)\s+)?"
+    r"(?:(?:semana|dia|día|mañana|tarde|noche)\s+(?:con\s+)?)?"
+    r"(?:de\s+|con\s+)?"
+    r"|prueba\s+(?:la\s+|el\s+|un\s+|una\s+)?"
+    r"|toma\s+(?:un\s+|una\s+)?"
+    r"|consume\s+(?:el\s+|la\s+)?"
+    r"|te\s+recomiendo\s+(?:el\s+|la\s+|un\s+|una\s+)?"
+    r"|disfruta\s+(?:de\s+)?(?:el\s+|la\s+|un\s+|una\s+)?"
+    # Etiquetas de categoría que el LLM antepone al nombre real
+    r"|(?:comida|plato|bebida|snack|postre|entrada|merienda|desayuno|almuerzo|cena)\s+"
+    r")",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _sanitizar_nombre_plato(nombre: str) -> str:
+    """Elimina prefijos verbales/categoría que el LLM antepone al nombre real del plato.
+    Ej: 'Comida ensalada de lechuga' → 'Ensalada de lechuga'
+        'Comienza la de plátano con aceite de oliva' → 'Plátano con aceite de oliva'."""
+    limpio = _RE_PREFIJO_VERBAL.sub("", (nombre or "").strip()).strip()
+    return limpio if len(limpio) >= 3 else nombre.strip()
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -1449,6 +1491,7 @@ async def crear_plato_dinamico(
     from app.services.asistente_nutricion import _buscar_o_crear_alimento_async
     import difflib
 
+    nombre_plato = _sanitizar_nombre_plato(nombre_plato)
     nombre_norm = _norm(nombre_plato)
     if not nombre_norm or len(nombre_norm) < 3:
         return None
@@ -1485,8 +1528,9 @@ async def crear_plato_dinamico(
         .all()
     )
     for p in existing:
-        sim = difflib.SequenceMatcher(None, nombre_norm, p.nombre_normalizado or "").ratio()
-        if sim >= 0.80:
+        _pnn = p.nombre_normalizado or ""
+        sim = difflib.SequenceMatcher(None, nombre_norm, _pnn).ratio()
+        if sim >= 0.80 and _sufijos_con_compat(nombre_norm, _pnn):
             logger.info("Plato similar encontrado (REGLA 5): '%s' (sim=%.2f)", p.nombre, sim)
             return p
 

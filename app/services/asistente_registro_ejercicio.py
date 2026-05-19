@@ -31,6 +31,35 @@ from app.services.ejercicios_service import ejercicios_service
 
 # ── Regexes de extracción ─────────────────────────────────────────────────────
 
+# Números en palabras → dígitos (para normalizar antes de los regex)
+_NUMEROS_PALABRAS: dict[str, str] = {
+    "uno": "1", "una": "1",
+    "dos": "2",
+    "tres": "3",
+    "cuatro": "4",
+    "cinco": "5",
+    "seis": "6",
+    "siete": "7",
+    "ocho": "8",
+    "nueve": "9",
+    "diez": "10",
+    "once": "11",
+    "doce": "12",
+    "quince": "15",
+    "veinte": "20",
+}
+_RE_NUMERO_PALABRA = re.compile(
+    r"\b(" + "|".join(_NUMEROS_PALABRAS.keys()) + r")\b", re.IGNORECASE
+)
+
+
+def _normalizar_numeros(texto: str) -> str:
+    """Convierte números en palabras a dígitos: 'cuatro series' → '4 series'."""
+    return _RE_NUMERO_PALABRA.sub(
+        lambda m: _NUMEROS_PALABRAS[m.group(1).lower()], texto
+    )
+
+
 # "3 series de 10 reps de Press de Banca con 50 kg"
 _RE_SERIES_REPS = re.compile(
     r"(?i)(\d+)\s*(?:series?|sets?)\s*(?:de\s*)?(\d+)\s*(?:reps?|repeticiones?)",
@@ -48,6 +77,12 @@ _RE_RUTINA_REF = re.compile(
 
 # "hice la rutina …"
 _RE_MENCIONA_RUTINA = re.compile(r"(?i)\b(?:hice|realicé|realice|terminé|termine)\b.{0,40}\brutina\b")
+
+# "por 20 min", "durante 45 minutos", "por 1 hora", "por 30 segundos"
+_RE_DURACION = re.compile(
+    r"(?i)\b(?:por|durante)\s+(\d+(?:[.,]\d+)?)\s*"
+    r"(min(?:utos?)?|h(?:oras?)?|seg(?:undos?)?)\b"
+)
 
 # Intensidad por MET
 def _met_a_intensity(met: float) -> str:
@@ -74,7 +109,7 @@ class RegistroEjercicioHandler:
         Detecta ejercicio en el mensaje y registra en progreso_calorias.
         Fórmula: MET × peso_kg × 3.5 / 200 × minutos
         """
-        msg_lower = (mensaje or "").lower().strip()
+        msg_lower = _normalizar_numeros((mensaje or "").lower().strip())
         peso_kg   = float(getattr(perfil, "weight", None) or 70.0)
 
         # ── 1. Referencia a rutina nombrada ───────────────────────────────────
@@ -175,22 +210,24 @@ class RegistroEjercicioHandler:
         if not clave:
             clave = ejercicio_nombre or "ejercicio de fuerza"
 
-        # Preguntar peso si se trata de ejercicio con peso y falta el dato
-        es_fuerza = any(t in msg_lower for t in [
-            "press", "curl", "remo", "sentad", "peso muerto", "jalón", "extensi"
-        ])
-        if es_fuerza and peso_kg is None:
-            return self._pregunta_faltante(
-                campo="peso",
-                ejercicio=ejercicio_nombre or clave,
-                series=series,
-                reps=reps,
-                contexto=msg_lower,
-            )
+        # Calcular duración: usar tiempo real del texto si está disponible
+        _dur_match = _RE_DURACION.search(msg_lower)
+        if _dur_match:
+            _val = float(_dur_match.group(1).replace(",", "."))
+            _u   = _dur_match.group(2).lower()
+            dur_min      = _val * 60 if _u.startswith("h") else (_val / 60 if _u.startswith("seg") else _val)
+            _dur_es_real = True
+        else:
+            # Fallback estimado con parámetros realistas por tipo de ejercicio
+            _es_fuerza_est = any(t in msg_lower for t in [
+                "press", "curl", "remo", "sentad", "peso muerto", "jalon",
+                "jalón", "extensi", "dominad", "fondos", "hip thrust",
+            ])
+            _seg_rep  = 4 if _es_fuerza_est else 3   # 4 seg/rep fuerza, 3 funcional/cardio
+            _seg_desc = 90 if _es_fuerza_est else 60  # 90 seg descanso fuerza, 60 resto
+            dur_min      = series * (reps * _seg_rep + _seg_desc) / 60
+            _dur_es_real = False
 
-        # Calcular calorías: usar tiempo estimado (series × reps × 3 seg + descanso)
-        seg_totales  = series * (reps * 3 + 60)
-        dur_min      = seg_totales / 60
         peso_corporal = float(getattr(perfil, "weight", None) or 70.0)
         cal = round(ejercicios_service.calcular_calorias(met, peso_corporal, dur_min), 1)
 
@@ -206,7 +243,15 @@ class RegistroEjercicioHandler:
         )
         self._sumar_calorias_progreso(perfil.id, cal, db)
 
+        # Re-leer progreso actualizado para balance_actualizado
+        _hoy = get_peru_date()
+        _prog = db.query(ProgresoCalorias).filter(
+            ProgresoCalorias.client_id == perfil.id,
+            ProgresoCalorias.fecha == _hoy,
+        ).first()
+
         detalle_peso = f" con {peso_kg} kg" if peso_kg else ""
+        _origen_dur  = "del tiempo que indicaste" if _dur_es_real else "estimado por series/reps"
         return {
             "success": True,
             "tipo_detectado": "ejercicio_series",
@@ -214,10 +259,16 @@ class RegistroEjercicioHandler:
             "datos": {
                 "series": series, "reps": reps, "peso_kg": peso_kg,
                 "calorias": cal, "duracion_min": round(dur_min, 1), "met": met,
+                "duracion_origen": _origen_dur,
+            },
+            "balance_actualizado": {
+                "consumido": _prog.calorias_consumidas if _prog else 0,
+                "quemado":   _prog.calorias_quemadas   if _prog else cal,
             },
             "mensaje": (
                 f"✅ Registré: {ejercicio_nombre or clave} — "
-                f"{series}×{reps}{detalle_peso} → {cal:.0f} kcal quemadas."
+                f"{series}×{reps}{detalle_peso} | {dur_min:.0f} min ({_origen_dur})"
+                f" → {cal:.0f} kcal quemadas."
             ),
         }
 
@@ -253,6 +304,12 @@ class RegistroEjercicioHandler:
         )
         self._sumar_calorias_progreso(perfil.id, cal, db)
 
+        _hoy = get_peru_date()
+        _prog = db.query(ProgresoCalorias).filter(
+            ProgresoCalorias.client_id == perfil.id,
+            ProgresoCalorias.fecha == _hoy,
+        ).first()
+
         return {
             "success": True,
             "tipo_detectado": "rutina_referencia",
@@ -261,6 +318,10 @@ class RegistroEjercicioHandler:
                 "calorias": cal,
                 "duracion_min": dur_min,
                 "met": met_rutina,
+            },
+            "balance_actualizado": {
+                "consumido": _prog.calorias_consumidas if _prog else 0,
+                "quemado":   _prog.calorias_quemadas   if _prog else cal,
             },
             "mensaje": (
                 f"🏋️ ¡Excelente! Registré la rutina «{rutina_nombre}» — "
@@ -393,9 +454,11 @@ class RegistroEjercicioHandler:
     # ── Helpers privados ─────────────────────────────────────────────────────
 
     def _extraer_nombre_ejercicio(self, msg_lower: str, series_match: re.Match) -> str:
-        """Extrae el nombre del ejercicio después de 'reps de X'."""
+        """Extrae el nombre del ejercicio después de 'reps de X', sin incluir duración."""
         despues = msg_lower[series_match.end():]
-        m = re.search(r"(?i)(?:de\s+)(.+?)(?:\s+con\s+|\s+a\s+\d|\s*$)", despues)
+        # Quitar "por X min/horas/seg" para evitar que el tiempo contamine el nombre
+        despues_limpio = _RE_DURACION.sub("", despues).strip()
+        m = re.search(r"(?i)(?:de\s+)(.+?)(?:\s+con\s+|\s+a\s+\d|\s*$)", despues_limpio)
         if m:
             return m.group(1).strip().title()[:80]
         return ""

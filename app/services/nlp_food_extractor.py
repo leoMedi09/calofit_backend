@@ -24,6 +24,17 @@ import unicodedata
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+
+
+def _sufijos_con_compat(a: str, b: str) -> bool:
+    """Guard 'con X': evita que 'tortilla con pan' matchee 'tortilla con atún'."""
+    def _suf(s: str) -> list[str]:
+        idx = s.rfind(" con ")
+        return s[idx + 5:].split() if idx >= 0 else []
+    s1, s2 = _suf(a), _suf(b)
+    if not s1 or not s2:
+        return True
+    return bool(set(s1) & set(s2))
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -45,6 +56,10 @@ KCAL_ITEM_WARN = 1500.0
 EXTRACTION_PROMPT = """Eres un extractor de datos nutricionales. Tu ÚNICA tarea es analizar el texto del usuario y devolver un JSON array.
 
 REGLAS ESTRICTAS:
+- Si el texto NO menciona ningún alimento real (comida o bebida), devuelve EXACTAMENTE: []
+  Ejemplos de cosas que NO son alimentos: juegos, ropa, libros, música, objetos, emociones,
+  materiales (hierro, madera, plástico), actividades (deporte, trabajo, estudio).
+  Si el usuario dice "comi juegos frito" → [] porque "juegos" no es comida.
 - NO calcules calorías. NO sumes nada. SOLO extrae lo que el usuario mencionó.
 - Extrae EXACTAMENTE lo que dijo el usuario, sin agregar ingredientes ni complementos que NO mencionó.
   Si el usuario dijo "pollo al horno", extrae "pollo al horno" — no añadas arroz, verduras ni nada más.
@@ -112,6 +127,10 @@ PRE_NORM_PATRONES = [
     (r"(?i)\b(y\s+)?despu[eé]s\s+(com[ií]|tom[eé]|beb[ií])\b", " y "),
     (r"(?i)\b(y\s+)?luego\s+(com[ií]|tom[eé]|beb[ií])\b",     " y "),
     (r"(?i)\btambi[eé]n\s+(com[ií]|tom[eé]|beb[ií])\b",        " y "),
+    # Separador implícito por unidad: "arroz con huevo una taza de avena"
+    # → "arroz con huevo y una taza de avena"
+    # Lookbehind fijo (?<!con) evita romper "arroz con una taza de leche".
+    (r"(?i)(?<![cC][oO][nN])\s+(?=un[ao]?\s+(?:taza|vaso|copa|plato|porci[oó]n)\s+de\s+)", " y "),
     # Redundancias comunes
     (r"(?i)\bun\s+poco\s+de\b",   "medio "),
     (r"\s{2,}",                    " "),
@@ -128,9 +147,35 @@ NEGACION_PATRONES = [
 ]
 
 # Palabras que claramente NO son alimentos → nunca consultar USDA con ellas
+# Incluye ficción, objetos, materiales, actividades y conceptos abstractos.
 NO_ALIMENTOS: frozenset[str] = frozenset({
+    # Ficción / mitología
     "unicornio", "dragon", "flobonix", "zombie", "alien", "cripton",
     "monstruo", "magico", "invisible", "virtual", "digital", "fake",
+    # Materiales y objetos inorgánicos
+    "hierro", "acero", "madera", "plastico", "vidrio", "metal", "piedra",
+    "cemento", "carbon", "petroleo", "gasolina", "tierra", "arena", "barro",
+    "clavo", "tornillo", "alambre", "cable", "tubo", "pintura",
+    # Ropa y accesorios
+    "ropa", "camisa", "pantalon", "zapato", "calcetines", "vestido",
+    "chaqueta", "abrigo", "sombrero", "corbata", "guantes", "bolso",
+    # Muebles y utensilios del hogar
+    "mesa", "silla", "cama", "sofa", "lampara", "television", "espejo",
+    "ventana", "puerta", "piso", "techo", "pared",
+    # Tecnología
+    "computadora", "telefono", "celular", "tableta", "computador",
+    "pantalla", "teclado", "mouse", "auricular",
+    # Útiles / papelería
+    "libro", "cuaderno", "lapiz", "boligrafo", "papel", "tijeras",
+    "regla", "borrador", "mochila", "cartera",
+    # Actividades y conceptos abstractos
+    "juego", "juegos", "deporte", "deportes", "ejercicio", "musica",
+    "trabajo", "tarea", "reunion", "clase", "estudio", "examen",
+    "dinero", "plata", "billete", "moneda", "tarjeta", "cheque",
+    "amor", "odio", "tristeza", "alegria", "miedo", "felicidad",
+    "idea", "pensamiento", "sueno", "silencio", "ruido",
+    # Partes del cuerpo (no comestibles en contexto culinario)
+    "pelo", "cabello", "unas", "piel", "sudor",
 })
 
 # Modificadores ficticios: si acompañan a cualquier sustantivo, el ítem es ficticio.
@@ -146,6 +191,27 @@ def contiene_modificador_ficticio(mensaje: str) -> bool:
     """Devuelve True si el mensaje contiene algún modificador de ingrediente ficticio."""
     tokens = set(_norm(mensaje).split())
     return bool(tokens & _MODIFICADORES_FICTICIOS)
+
+
+def _nombre_es_no_alimento(nombre: str) -> bool:
+    """
+    True si el nombre extraído por el LLM es claramente no-comestible.
+    Verifica si TODAS las palabras significativas (>3 letras) están en NO_ALIMENTOS.
+    Excepción: palabras de método de cocción ('frito', 'cocido', 'asado', etc.)
+    no cuentan como 'palabras base' del alimento.
+    """
+    _METODOS_COCCION = frozenset({
+        "frito", "fritos", "frita", "fritas", "cocido", "cocida", "asado", "asada",
+        "hervido", "hervida", "horneado", "horneada", "a", "al", "la", "el", "de",
+        "con", "sin", "en", "y", "o",
+    })
+    palabras_base = [
+        w for w in _norm(nombre).split()
+        if len(w) > 3 and w not in _METODOS_COCCION
+    ]
+    if not palabras_base:
+        return False
+    return all(w in NO_ALIMENTOS for w in palabras_base)
 
 
 # Números en texto → float (para detectar cantidades extremas)
@@ -403,7 +469,18 @@ class NLPFoodExtractor:
     def _resolver_gramos(self, alimento: Alimento, unidad: str, cantidad: float) -> float:
         u = _norm(unidad)
 
-        # 1. Buscar en alimento_unidades de la BD
+        # Para unidades de peso/volumen universales (g, kg, ml…) ir directo a la
+        # tabla UNIDADES_GLOBALES — nunca buscar en alimento_unidades porque
+        # ilike('%g%') matchea strings como "unidad grande" causando ×60 erróneo.
+        _PESOS_UNIVERSALES = {
+            "g", "gr", "gramo", "gramos",
+            "kg", "kilo", "kilogramo", "kilogramos",
+            "ml", "cc", "l", "litro", "litros",
+        }
+        if u in _PESOS_UNIVERSALES:
+            return UNIDADES_GLOBALES.get(u, 1.0) * cantidad
+
+        # 1. Buscar en alimento_unidades de la BD (porciones específicas: rebanada, taza…)
         row = (
             self.db.query(AlimentoUnidad)
             .filter(
@@ -788,7 +865,7 @@ class NLPFoodExtractor:
                             self.db.query(_Plato0.id, _Plato0.nombre_normalizado)
                             .order_by(_Plato0.id.desc()).limit(300).all()
                         )
-                        _bid0, _bsc0 = None, 0.0
+                        _bid0, _bsc0, _bpnn0 = None, 0.0, ""
                         for _pid0, _pnn0 in _cands0:
                             if not _pnn0:
                                 continue
@@ -798,7 +875,8 @@ class NLPFoodExtractor:
                             if _sc0 > _bsc0:
                                 _bsc0 = _sc0
                                 _bid0 = _pid0
-                        if _bid0 and _bsc0 >= 0.88:
+                                _bpnn0 = str(_pnn0)
+                        if _bid0 and _bsc0 >= 0.88 and _sufijos_con_compat(_q_pre, _bpnn0):
                             _pre_row = self.db.execute(_text0(
                                 "SELECT p.id, p.nombre,"
                                 " SUM(a.calorias_100g*pi2.gramos/100.0),"
@@ -865,6 +943,11 @@ class NLPFoodExtractor:
             if not nombre or cantidad <= 0:
                 continue
 
+            # Guard: rechazar nombres que son claramente no-alimentos
+            if _nombre_es_no_alimento(nombre):
+                logger.warning("[NLPExtractor] '%s' bloqueado: no es un alimento", nombre)
+                continue
+
             # PASO 2: Buscar en catálogo platos (macros desde ingredientes reales)
             alimento_bd = None
             origen = "bd"
@@ -885,6 +968,14 @@ class NLPFoodExtractor:
                 continue
 
             # ── Buscar en platos (catálogo con ingredientes reales) ────────────
+            # Cuando la unidad ya es un peso explícito (g/kg) el usuario especificó
+            # gramos exactos → escalar desde alimento, no desde plato de porción.
+            # Usar platos solo cuando la unidad es "porcion", "unidad", "vaso", etc.
+            _unidad_es_peso = unidad in (
+                "g", "gr", "gramo", "gramos", "kg", "kilo", "kilogramo",
+                "ml", "cc", "l", "litro",
+            )
+
             # 1) Exact match. 2) Si falla, similarity ≥ 0.83 sobre top-300.
             _SQL_PLATO = (
                 "SELECT p.id, p.nombre,"
@@ -899,12 +990,12 @@ class NLPFoodExtractor:
                 " GROUP BY p.id, p.nombre"
                 " LIMIT 1"
             )
-            plato_row = self.db.execute(_text(_SQL_PLATO), {"q": q_norm}).fetchone()
+            plato_row = None if _unidad_es_peso else self.db.execute(_text(_SQL_PLATO), {"q": q_norm}).fetchone()
 
             # Fallback similaridad: si no hay exact match, buscar plato con mayor
             # similitud (≥0.83) para rescatar renombrados del LLM (ej: "huevo entero cocido"
             # cuando el usuario dijo "tortilla de huevo con pan tostado ligero").
-            if not plato_row:
+            if not plato_row and not _unidad_es_peso:
                 import difflib as _diff
                 from app.models.plato import Plato as _Plato
                 _cands = (
@@ -913,7 +1004,7 @@ class NLPFoodExtractor:
                     .limit(300)
                     .all()
                 )
-                _best_id, _best_score = None, 0.0
+                _best_id, _best_score, _best_pnn = None, 0.0, ""
                 for _pid, _pnn in _cands:
                     if not _pnn:
                         continue
@@ -923,7 +1014,8 @@ class NLPFoodExtractor:
                     if _sc > _best_score:
                         _best_score = _sc
                         _best_id = _pid
-                if _best_id and _best_score >= 0.83:
+                        _best_pnn = str(_pnn)
+                if _best_id and _best_score >= 0.83 and _sufijos_con_compat(q_norm, _best_pnn):
                     plato_row = self.db.execute(_text(
                         "SELECT p.id, p.nombre,"
                         " SUM(a.calorias_100g*pi2.gramos/100.0),"

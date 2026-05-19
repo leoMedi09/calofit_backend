@@ -120,6 +120,14 @@ def coherencia_proteina_platos(nombre_query_norm: str, nombre_candidato_norm: st
 _ING_STOPWORDS = {"blanco", "fresco", "fresca", "cocido", "cocida", "natural",
                   "ligero", "ligera", "variado", "variada", "mixta", "integral"}
 
+# Si el primer token del candidato ES una de estas categorías pero NO aparece en el query,
+# el usuario está buscando otra cosa → exigir similitud ≥ 0.85 para no devolver falsos positivos.
+_PRIMERAS_PALABRAS_CATEGORIA = frozenset({
+    "pan", "sopa", "caldo", "crema", "ensalada", "torta", "bizcocho",
+    "tamal", "empanada", "chicha", "jugo", "nectar", "bebida", "refresco",
+    "postre", "helado", "arroz", "pollo", "leche",
+})
+
 _GRAMOS_POR_UNIDAD = {
     "cucharada": 15.0, "cucharadita": 5.0, "taza": 240.0,
     "vaso": 250.0, "rebanada": 35.0, "loncha": 25.0,
@@ -246,7 +254,18 @@ def _resolver_alimento_en_bd(db: Session, nombre_norm: str):
                     None, nombre_norm, c.nombre_normalizado or ""
                 ).ratio(),
             )
-            return best
+            _ratio_best = difflib.SequenceMatcher(
+                None, nombre_norm, best.nombre_normalizado or ""
+            ).ratio()
+            _first_cand = (best.nombre_normalizado or "").split()[0] if best.nombre_normalizado else ""
+            _umbral_best = (
+                0.85
+                if _first_cand in _PRIMERAS_PALABRAS_CATEGORIA
+                and _first_cand not in nombre_norm.split()
+                else 0.75
+            )
+            if _ratio_best >= _umbral_best:
+                return best
         alias_candidates = (
             db.query(AlimentoAlias)
             .filter(AlimentoAlias.alias_normalizado.like(f"%{w}%"))
@@ -260,7 +279,18 @@ def _resolver_alimento_en_bd(db: Session, nombre_norm: str):
                     None, nombre_norm, al.alias_normalizado or ""
                 ).ratio(),
             )
-            return db.query(Alimento).filter(Alimento.id == best_alias.alimento_id).first()
+            _ratio_alias = difflib.SequenceMatcher(
+                None, nombre_norm, best_alias.alias_normalizado or ""
+            ).ratio()
+            _first_alias = (best_alias.alias_normalizado or "").split()[0] if best_alias.alias_normalizado else ""
+            _umbral_alias = (
+                0.85
+                if _first_alias in _PRIMERAS_PALABRAS_CATEGORIA
+                and _first_alias not in nombre_norm.split()
+                else 0.75
+            )
+            if _ratio_alias >= _umbral_alias:
+                return db.query(Alimento).filter(Alimento.id == best_alias.alimento_id).first()
     return None
 
 
@@ -2844,7 +2874,7 @@ def registrar_comida_desde_payload_tarjeta(
         db.query(PreferenciaAlimento)
         .filter(
             PreferenciaAlimento.client_id == perfil.id,
-            sql_func.lower(PreferenciaAlimento.alimento) == nombre.lower(),
+            sql_func.lower(PreferenciaAlimento.alimento) == _limpiar_nombre_alimento(nombre.lower()),
         )
         .first()
     )
@@ -2859,7 +2889,7 @@ def registrar_comida_desde_payload_tarjeta(
         db.add(
             PreferenciaAlimento(
                 client_id=perfil.id,
-                alimento=nombre.lower(),
+                alimento=_limpiar_nombre_alimento(nombre.lower()),
                 frecuencia=1,
                 puntuacion=1.0,
                 ultima_vez=datetime.now(),
@@ -2895,6 +2925,20 @@ def aplicar_extraccion_nlp_comida_a_progreso(extraccion: Dict[str, Any], progres
     progreso.grasas_consumidas = (progreso.grasas_consumidas or 0) + (extraccion.get("grasas_g", 0) or 0)
 
 
+_RE_VERBO_INGESTA = re.compile(
+    r"^(?:me\s+)?"
+    r"(?:tomé|comi|comí|bebí|bebi|consumí|consumi|cené|cene|almorcé|almorce"
+    r"|desayuné|desayune|probé|probe|ingerí|ingeri|tuve|agarré|agarre)\s+"
+    r"(?:un(?:a)?\s+|el\s+|la\s+|los\s+|las\s+|unos?\s+|unas?\s+)?",
+    re.IGNORECASE | re.UNICODE,
+)
+
+def _limpiar_nombre_alimento(nombre: str) -> str:
+    """Elimina verbos de ingesta al inicio: 'tomé un jugo' → 'jugo'."""
+    limpio = _RE_VERBO_INGESTA.sub("", nombre.strip()).strip()
+    return limpio if limpio else nombre.strip()
+
+
 def registrar_preferencias_alimentos(extraccion: Dict[str, Any], perfil: Any, db: Session) -> None:
     """Auto-aprendizaje: frecuencia, puntuación y última vez; macros de la fila = último registro."""
     alimentos_raw = extraccion.get("alimentos_detectados", [])
@@ -2913,7 +2957,7 @@ def registrar_preferencias_alimentos(extraccion: Dict[str, Any], perfil: Any, db
     ahora = datetime.now()
 
     for alimento in alimentos:
-        a_low = (alimento or "comida").lower().strip()[:200]
+        a_low = _limpiar_nombre_alimento((alimento or "comida").lower().strip())[:200]
         pref = (
             db.query(PreferenciaAlimento)
             .filter(

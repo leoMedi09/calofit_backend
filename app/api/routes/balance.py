@@ -1,13 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.routes.auth import get_current_user
 from app.models.client import Client
 from app.models.historial import ProgresoCalorias
 from app.models.nutricion import PlanNutricional, PlanDiario
-from datetime import datetime, date
-from typing import List, Dict, Any, Optional
-from fastapi import Query
+from datetime import datetime, date, timezone as _tz
+from typing import Optional
+from zoneinfo import ZoneInfo
+
+_LIMA = ZoneInfo("America/Lima")
+
+def _utc_naive_to_lima(dt: datetime) -> datetime:
+    """Convierte un datetime naive almacenado como UTC a hora Lima."""
+    if dt is None:
+        return datetime.now(_LIMA)
+    return dt.replace(tzinfo=_tz.utc).astimezone(_LIMA)
 
 router = APIRouter()
 
@@ -115,27 +123,21 @@ async def obtener_balance_hoy(
     from app.models.preferencias import PreferenciaAlimento, PreferenciaEjercicio
     from sqlalchemy import func
     
-    # Importante: en Postgres, timestamptz se normaliza a UTC; si filtramos por date()
-    # sin convertir a Perú, los registros cerca de medianoche se "mueven" de día.
-    # Ajustamos el filtro a fecha Perú para Postgres.
+    from sqlalchemy import text as _text
+    from app.models.comida_registro import ComidaRegistro
+
     dialect = getattr(getattr(db, "bind", None), "dialect", None)
     dialect_name = getattr(dialect, "name", "") or ""
 
-    from sqlalchemy import text as _text
-
+    # Fuente de verdad: comida_registros (macros correctos por ítem, ordenados por hora)
     if dialect_name == "postgresql":
-        # `ultima_vez` es TIMESTAMP (sin tz). Asumimos que DB lo guarda en UTC (func.now()) y
-        # lo convertimos a hora Perú antes de extraer `date`.
-        def _date_peru(ts_col):
-            # ts (sin tz) -> asumir UTC -> convertir a America/Lima -> date
-            return func.date(func.timezone("America/Lima", func.timezone("UTC", ts_col)))
+        registros_hoy = db.query(ComidaRegistro).filter(
+            ComidaRegistro.client_id == cliente.id,
+            func.date(
+                func.timezone("America/Lima", func.timezone("UTC", ComidaRegistro.created_at))
+            ) == hoy,
+        ).order_by(ComidaRegistro.created_at.desc()).all()
 
-        alimentos_hoy = db.query(PreferenciaAlimento).filter(
-            PreferenciaAlimento.client_id == cliente.id,
-            _date_peru(PreferenciaAlimento.ultima_vez) == hoy,
-        ).all()
-
-        # Ejercicios: leer desde workout_logs (fuente única que escriben TODAS las rutas de registro)
         ejercicios_hoy_rows = db.execute(_text(
             "SELECT id, ejercicio, series, reps, peso_kg, calorias_quemadas, session_duration_min, intensity, "
             "  created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Lima' AS hora_lima "
@@ -145,17 +147,42 @@ async def obtener_balance_hoy(
             "ORDER BY created_at DESC"
         ), {"cid": cliente.id, "hoy": hoy}).fetchall()
     else:
-        # SQLite / otros: date() directo es suficiente.
-        alimentos_hoy = db.query(PreferenciaAlimento).filter(
-            PreferenciaAlimento.client_id == cliente.id,
-            func.date(PreferenciaAlimento.ultima_vez) == hoy,
-        ).all()
+        registros_hoy = db.query(ComidaRegistro).filter(
+            ComidaRegistro.client_id == cliente.id,
+            ComidaRegistro.fecha == hoy,
+        ).order_by(ComidaRegistro.created_at.desc()).all()
 
         ejercicios_hoy_rows = db.execute(_text(
             "SELECT id, ejercicio, series, reps, peso_kg, calorias_quemadas, session_duration_min, intensity, created_at AS hora_lima "
             "FROM workout_logs WHERE client_id = :cid AND date(created_at) = :hoy ORDER BY created_at DESC"
         ), {"cid": cliente.id, "hoy": hoy}).fetchall()
-    
+
+    # Preferencias para es_favorito / puntuacion
+    prefs_idx: dict[str, PreferenciaAlimento] = {
+        p.alimento.lower(): p
+        for p in db.query(PreferenciaAlimento).filter(
+            PreferenciaAlimento.client_id == cliente.id
+        ).all()
+    }
+
+    # Agrupar registros por nombre (mismo alimento registrado varias veces → sumar macros, mostrar ×N)
+    _grupos: dict[str, dict] = {}
+    for reg in registros_hoy:  # ya ordenados DESC por created_at
+        _key = reg.nombre_alimento.lower()
+        if _key not in _grupos:
+            _grupos[_key] = {
+                "id":     reg.id,
+                "nombre": reg.nombre_alimento,
+                "hora":   reg.created_at,
+                "kcal": 0.0, "prot": 0.0, "carb": 0.0, "gras": 0.0,
+                "cantidad": 0,
+            }
+        _grupos[_key]["kcal"]     += float(reg.kcal or 0)
+        _grupos[_key]["prot"]     += float(reg.proteina_g or 0)
+        _grupos[_key]["carb"]     += float(reg.carbohidratos_g or 0)
+        _grupos[_key]["gras"]     += float(reg.grasas_g or 0)
+        _grupos[_key]["cantidad"] += 1
+
     return {
         "fecha": hoy.isoformat(),
         "resumen": {
@@ -172,20 +199,21 @@ async def obtener_balance_hoy(
         },
         "alimentos_registrados": [
             {
-                "id": alimento.id,
-                "nombre": alimento.alimento.capitalize(),
-                "frecuencia_total": alimento.frecuencia,
-                "puntuacion": round(alimento.puntuacion, 2),
-                "es_favorito": bool(alimento.es_favorito),
-                "hora_registro": alimento.ultima_vez.strftime("%H:%M:%S"),
+                "id":       g["id"],
+                "nombre":   g["nombre"].capitalize(),
+                "cantidad": g["cantidad"],
+                "frecuencia_total": prefs_idx[_k].frecuencia if _k in prefs_idx else g["cantidad"],
+                "puntuacion":       round(prefs_idx[_k].puntuacion, 2) if _k in prefs_idx else 1.0,
+                "es_favorito":      bool(prefs_idx[_k].es_favorito) if _k in prefs_idx else False,
+                "hora_registro":    _utc_naive_to_lima(g["hora"]).strftime("%H:%M"),
                 "macros": {
-                    "calorias": alimento.calorias or 0,
-                    "proteinas": alimento.proteinas or 0,
-                    "carbohidratos": alimento.carbohidratos or 0,
-                    "grasas": alimento.grasas or 0
-                }
+                    "calorias":      round(g["kcal"], 1),
+                    "proteinas":     round(g["prot"], 1),
+                    "carbohidratos": round(g["carb"], 1),
+                    "grasas":        round(g["gras"], 1),
+                },
             }
-            for alimento in alimentos_hoy
+            for _k, g in _grupos.items()
         ],
         "ejercicios_registrados": [
             {
@@ -283,42 +311,22 @@ async def eliminar_registro(
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     
-    from app.models.preferencias import PreferenciaAlimento
+    from app.models.comida_registro import ComidaRegistro
+    from app.services.trazabilidad import recalcular_progreso_diario
     from sqlalchemy import text as _text2
 
     if tipo == "alimento":
-        registro = db.query(PreferenciaAlimento).filter(
-            PreferenciaAlimento.id == registro_id,
-            PreferenciaAlimento.client_id == cliente.id
+        registro = db.query(ComidaRegistro).filter(
+            ComidaRegistro.id == registro_id,
+            ComidaRegistro.client_id == cliente.id
         ).first()
         if not registro:
             raise HTTPException(status_code=404, detail="Registro no encontrado")
-        nombre_registro = registro.alimento
-        # Guardar macros antes de borrar para restar del progreso
-        cal_alim  = float(registro.calorias or 0)
-        prot_alim = float(registro.proteinas or 0)
-        carb_alim = float(registro.carbohidratos or 0)
-        gras_alim = float(registro.grasas or 0)
-        # Determinar qué día afecta (ultima_vez es UTC sin tz)
-        from app.core.utils import get_peru_date as _gpd2
-        fecha_alim = _gpd2()
-        if registro.ultima_vez:
-            try:
-                from zoneinfo import ZoneInfo
-                from datetime import timezone as _tz
-                fecha_alim = registro.ultima_vez.replace(tzinfo=_tz.utc).astimezone(ZoneInfo("America/Lima")).date()
-            except Exception:
-                pass
+        nombre_registro = registro.nombre_alimento
+        fecha_alim = registro.fecha
         db.delete(registro)
-        db.execute(_text2(
-            "UPDATE progreso_calorias SET "
-            "  calorias_consumidas      = GREATEST(0, calorias_consumidas      - :cal), "
-            "  proteinas_consumidas     = GREATEST(0, proteinas_consumidas     - :prot), "
-            "  carbohidratos_consumidos = GREATEST(0, carbohidratos_consumidos - :carb), "
-            "  grasas_consumidas        = GREATEST(0, grasas_consumidas        - :gras) "
-            "WHERE client_id = :cid AND fecha = :fecha"
-        ), {"cal": cal_alim, "prot": prot_alim, "carb": carb_alim,
-            "gras": gras_alim, "cid": cliente.id, "fecha": fecha_alim})
+        db.flush()
+        recalcular_progreso_diario(cliente.id, fecha_alim, db)
         db.commit()
     elif tipo == "ejercicio":
         # Ejercicios viven en workout_logs

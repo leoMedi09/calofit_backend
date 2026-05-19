@@ -223,7 +223,11 @@ def registrar_preferencias_ejercicios(extraccion: Dict[str, Any], perfil: Any, d
             pref_existente.frecuencia += 1
             pref_existente.ultima_vez = ahora
             pref_existente.puntuacion = min(5.0, pref_existente.puntuacion + 0.1)
-            pref_existente.calorias_quemadas = sc
+            try:
+                if hasattr(pref_existente, "calorias_quemadas"):
+                    pref_existente.calorias_quemadas = sc
+            except Exception:
+                pass
         else:
             db.add(
                 PreferenciaEjercicio(

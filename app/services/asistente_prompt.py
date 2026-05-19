@@ -601,18 +601,29 @@ def clasificar_intencion_respuesta(respuesta_estructurada: dict, mensaje: str) -
 
 def limpiar_tags_calofit(respuesta_estructurada: dict) -> None:
     """Elimina residuos de tags CALOFIT del texto y secciones."""
+    # Con corchetes: [CALOFIT_INTENT:LOG] / [/CALOFIT_HEADER]
     _re = re.compile(r'\[/?CALOFIT_[A-Z_:]*.*?\]', re.IGNORECASE)
+    # Sin corchetes: cuando el LLM filtra el texto dentro de un HEADER
+    _re_bare = re.compile(
+        r'\bCALOFIT_(?:INTENT|HEADER|LIST|ACTION|STATS|QUESTION_TYPE)'
+        r'(?:\s*[:/]\s*\w+)?\b',
+        re.IGNORECASE,
+    )
+
+    def _limpiar(t: str) -> str:
+        return _re_bare.sub("", _re.sub("", t)).strip()
+
     texto = respuesta_estructurada.get("texto_conversacional", "")
     respuesta_estructurada["texto_conversacional"] = sanear_texto_conversacional_recipe(
-        _re.sub("", texto).strip()
+        _limpiar(texto)
     )
     for s in respuesta_estructurada.get("secciones", []):
         for k in ["nombre", "macros", "gasto_calorico_estimado", "nota"]:
             if s.get(k):
-                s[k] = _re.sub("", str(s[k])).strip()
+                s[k] = _limpiar(str(s[k]))
         for k in ["ingredientes", "ejercicios", "preparacion", "tecnica", "instrucciones"]:
             if s.get(k) and isinstance(s[k], list):
-                s[k] = [_re.sub("", str(item)).strip() for item in s[k]]
+                s[k] = [_limpiar(str(item)) for item in s[k]]
 
 
 def detectar_intencion_principal(respuesta_estructurada: dict, mensaje: str) -> str:

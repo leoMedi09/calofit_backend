@@ -20,7 +20,7 @@ from app.core.utils import get_peru_date
 from app.models.alimento import Alimento
 from app.models.alimento_unidad import AlimentoUnidad  # noqa: F401 (used in _get_porcion_estandar)
 from app.models.historial import ProgresoCalorias
-from app.models.preferencias import PreferenciaAlimento
+
 from app.core.logging_config import get_logger
 from app.services.alimentos_db_service import AlimentosDBService, _norm as _norm_al
 from app.services.asistente_nutricion import (
@@ -80,12 +80,27 @@ def _msg_tiene_porcion_lata(msg: str) -> bool:
 
 
 def _norm_plato(s: str) -> str:
-    # NFC: normaliza tildes para que 'plátano' (NFD del teclado móvil)
-    # coincida con 'plátano' (NFC guardado en BD).
-    s = unicodedata.normalize("NFC", (s or "")).strip().lower()
+    # Normaliza para comparar con nombre_normalizado en BD (= unaccent(lower(nombre))).
+    # NFD descompone tildes; el filtro combining las elimina → "ají" → "aji".
+    s = unicodedata.normalize("NFD", (s or "").strip().lower())
+    s = "".join(c for c in s if not unicodedata.combining(c))
     s = re.sub(r"\[.*?\]", "", s).split("[")[0].strip()
-    s = re.sub(r"[^a-z0-9áéíóúüñ\s]", " ", s, flags=re.IGNORECASE)
+    s = re.sub(r"[^a-z0-9\s]", " ", s, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", s).strip()
+
+
+def _sufijos_con_compatibles(a_norm: str, b_norm: str) -> bool:
+    """Guard 'con X': verifica que los modificadores de ambos textos compartan
+    al least una palabra. Evita que 'tortilla de huevo con pan' matchee
+    'tortilla de huevo con atún' por alta similitud de la raíz común.
+    Si alguno no tiene sufijo 'con', permite el match (no aplica el guard)."""
+    def _sufijo(s: str) -> list[str]:
+        idx = s.rfind(" con ")
+        return s[idx + 5:].split() if idx >= 0 else []
+    s1, s2 = _sufijo(a_norm), _sufijo(b_norm)
+    if not s1 or not s2:
+        return True          # sin sufijo → no hay conflicto
+    return bool(set(s1) & set(s2))   # al menos 1 palabra en común
 
 
 def _parse_qty(prefix: str) -> float:
@@ -288,6 +303,7 @@ def _get_porcion_estandar(alimento_nombre: str, db: Session) -> tuple[float, str
 _CAPA15_SKIP_RE = re.compile(
     r'^\d+(?:[.,]\d+)?\s*(?:g|gr|kg|ml|l|litros?|vasos?|tazas?|copas?)\b'
     r'|^(?:un|una|medio|media)\s+(?:vaso|taza|copa|botella|lata|plato)\b'
+    r'|^(?:vaso|taza|copa|botella|jarra|lata)\s+de\b'
     r'|^(?:un\s+poco\s+de|un\s+poquito\s+de|algo\s+de|medio\s+plato\s+de|media\s+porci[oó]n\s+de)\b',
     re.IGNORECASE,
 )
@@ -319,10 +335,24 @@ def _split_items_from_message(msg: str) -> List[str]:
     t = _RE_PREFIJO_IMPERATIVO.sub("", t).strip()
     # Segunda pasada: residuo "comí una/un" o artículos indefinidos
     t = _RE_PREFIJO_IMPERATIVO.sub("", t).strip()
+    # Strip leading "de " antes de artículos: "comi de un X" → "de un X" → "un X" → "X"
+    t = re.sub(r"(?i)^de\s+", "", t)
     t = _RE_CANTIDAD_INICIO.sub("", t).strip()
     t = re.sub(r"(?i)\b(otra\s+vez|de\s+nuevo|nuevamente)\b", "", t)
     t = re.sub(r"\s+", " ", t).strip()
-    return [p.strip() for p in re.split(r"\s+y\s+|,|;", t) if p.strip()]
+    # Separadores: "y", "más"/"mas", "además de", "junto con", coma, punto y coma
+    _SEP = re.compile(
+        r"\s+y\s+|\s+m[aá]s\s+(?:un\s+|una\s+)?|\s+adem[aá]s\s+de\s+|\s+junto\s+con\s+|,|;",
+        re.IGNORECASE,
+    )
+    # Verbos de ingesta al inicio de sub-ítems (ej: "tome leche", "bebí agua")
+    _RE_VERBO_SUBITEM = re.compile(
+        r"^(?:tom[eé]|beb[íi]|com[íi]|almorc[eé]|cen[eé]|desayun[eé]|meriend[eé]|prob[eé])"
+        r"\s+(?:un[ao]?\s+|medio\s+|media\s+)?",
+        re.IGNORECASE,
+    )
+    partes = [p.strip() for p in _SEP.split(t) if p.strip()]
+    return [_RE_VERBO_SUBITEM.sub("", p).strip() or p for p in partes]
 
 
 def _expandir_compuestos_con(items: List[str], db: Session) -> List[str]:
@@ -357,12 +387,12 @@ def _expandir_compuestos_con(items: List[str], db: Session) -> List[str]:
                        "WHERE nombre_normalizado LIKE :p LIMIT 60"),
                 {"p": _fw + "%"},
             ).fetchall()
-            _best_score = max(
-                (difflib.SequenceMatcher(None, norm_full, (r[0] or "")).ratio()
-                 for r in _cands),
-                default=0.0,
-            )
-            if _best_score >= 0.88:
+            _best_score, _best_cand_norm = 0.0, ""
+            for _r in _cands:
+                _s = difflib.SequenceMatcher(None, norm_full, (_r[0] or "")).ratio()
+                if _s > _best_score:
+                    _best_score, _best_cand_norm = _s, (_r[0] or "")
+            if _best_score >= 0.88 and _sufijos_con_compatibles(norm_full, _best_cand_norm):
                 resultado.append(item)
                 continue
         last_con = item.rfind(" con ")
@@ -375,13 +405,20 @@ def _expandir_compuestos_con(items: List[str], db: Session) -> List[str]:
             resultado.append(item)
             continue
         norm_prefijo = _norm_plato(prefijo)
+        norm_sufijo  = _norm_plato(sufijo)
         existe = db.execute(
             _sql_t("SELECT 1 FROM platos WHERE nombre_normalizado = :n LIMIT 1"),
             {"n": norm_prefijo},
         ).fetchone()
-        if existe:
+        if existe and len(norm_sufijo) >= 4:
+            # Sufijo suficientemente largo → split en plato + acompañamiento
             logger.info("Segmentación plato+acompañamiento: '%s' → ['%s', '%s']", item, prefijo, sufijo)
             resultado.extend([prefijo, sufijo])
+        elif existe:
+            # Sufijo corto (ej. 'pan', 'aji') → dejar completo para que CAPA 1.5
+            # construya el plato con todos los ingredientes correctos
+            logger.info("Segmentación omitida (sufijo corto '%s'): '%s' → CAPA 1.5", sufijo, item)
+            resultado.append(item)
         else:
             resultado.append(item)
     return resultado
@@ -474,28 +511,231 @@ class RegistroComidaHandler:
         if not pre_extraccion:
             intento_platos = await self._capa1_platos(mensaje, perfil, db)
             if intento_platos:
-                if intento_platos.get("skip_duplicate"):
-                    return {
-                        "success": True,
-                        "tipo_detectado": "comida",
-                        "alimentos": [intento_platos.get("nombre")],
-                        "advertencia_prohibido": None,
-                        "alerta_macros": None,
-                        "balance_actualizado": {},
-                        "datos": {},
-                        "mensaje": (
-                            f"🧾 Parece que ya registré \"{intento_platos.get('nombre')}\" hace poco. "
-                            "Si fue otra porción, dime por ejemplo: \"comí 2\"."
-                        ),
-                    }
                 pre_extraccion = intento_platos
             elif _capa0_fallback:
-                # CAPA 1 no encontró el plato multi-palabra → usar estimación CAPA 0
-                logger.info(
-                    "CAPA 1 no resolvió '%s' — usando estimación CAPA 0 como fallback",
-                    _nombre_c0,
-                )
-                pre_extraccion = _capa0_fallback
+                # CAPA 1 no encontró el plato → intentar AlimentosDB con el nombre de CAPA 0
+                # Guard de name drift: si Groq añadió palabras de categoría que el usuario
+                # NO mencionó (ej. "chicharrón de chancho" → "Pan De Chicharrón De Chiclayo"),
+                # usar el texto original del usuario para la búsqueda en BD/APIs.
+                _input_limpio = _RE_PREFIJO_IMPERATIVO.sub("", msg_lower).strip()
+                _PALABRAS_CATEGORIA = frozenset({
+                    "pan", "caldo", "sopa", "estofado", "guiso", "crema", "ensalada",
+                    "jugo", "nectar", "bebida", "postre", "torta", "bizcocho",
+                    "tamal", "humita", "empanada", "chicha", "refresco",
+                })
+                _c0_words   = set(_norm_al(_nombre_c0).split())
+                _user_words = set(_norm_al(_input_limpio).split())
+                _tipo_drift = bool(_PALABRAS_CATEGORIA & (_c0_words - _user_words))
+                _char_drift = difflib.SequenceMatcher(
+                    None, _norm_al(_nombre_c0), _norm_al(_input_limpio)
+                ).ratio() < 0.55
+                _es_drift = _tipo_drift or _char_drift
+                _nombre_lookup = _input_limpio if _es_drift else _nombre_c0
+                if _es_drift:
+                    logger.info(
+                        "Name drift detectado: CAPA 0 extrajo '%s' → usando texto original '%s' (tipo_drift=%s)",
+                        _nombre_c0, _input_limpio[:40], _tipo_drift,
+                    )
+                _al_srv = AlimentosDBService(db)
+                _al_id_fb = _al_srv.resolver_alimento_id(_nombre_lookup)
+                if _al_id_fb:
+                    _al_obj_fb = db.query(Alimento).filter(Alimento.id == _al_id_fb).first()
+                    if _al_obj_fb:
+                        # Extraer cantidad del mensaje (ml, g, o recipiente estándar)
+                        _gramos_fb = 100.0
+                        _m_ml_fb = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:ml|cc)", msg_lower)
+                        _m_g_fb  = re.search(r"(\d+(?:[.,]\d+)?)\s*g\b", msg_lower)
+                        _VOL_FB = {"vaso": 240.0, "taza": 200.0, "copa": 150.0,
+                                   "botella": 500.0, "jarra": 1000.0, "lata": 355.0}
+                        _m_rec_fb = re.search(
+                            r"\b(vaso|taza|copa|botella|jarra|lata)\b", msg_lower
+                        )
+                        if _m_ml_fb:
+                            _gramos_fb = float(_m_ml_fb.group(1).replace(",", "."))
+                        elif _m_g_fb:
+                            _gramos_fb = float(_m_g_fb.group(1).replace(",", "."))
+                        elif _m_rec_fb:
+                            _gramos_fb = _VOL_FB.get(_m_rec_fb.group(1), 100.0)
+                        _fac_fb = _gramos_fb / 100.0
+                        pre_extraccion = {
+                            **_capa0_fallback,
+                            "calorias":        round(float(_al_obj_fb.calorias_100g or 0) * _fac_fb, 1),
+                            "proteinas_g":     round(float(_al_obj_fb.proteina_100g or 0) * _fac_fb, 1),
+                            "carbohidratos_g": round(float(_al_obj_fb.carbohidratos_100g or 0) * _fac_fb, 1),
+                            "grasas_g":        round(float(_al_obj_fb.grasas_100g or 0) * _fac_fb, 1),
+                            "alimentos_detectados": [_al_obj_fb.nombre],
+                            "porcion_g": _gramos_fb,
+                            "origen": "bd_alimento",
+                        }
+                        logger.info(
+                            "CAPA 0 fallback corregido con BD: '%s' → %s (%.0fg = %.1f kcal)",
+                            _nombre_c0, _al_obj_fb.nombre, _gramos_fb,
+                            float(_al_obj_fb.calorias_100g or 0) * _fac_fb,
+                        )
+                # Si no está en BD local → intentar USDA/FatSecret/Groq + guardar en BD
+                if not pre_extraccion and _nombre_c0:
+                    try:
+                        from app.services.asistente_nutricion import _buscar_o_crear_alimento_async
+                        _al_pipeline = await _buscar_o_crear_alimento_async(
+                            db, _norm_al(_nombre_lookup), _nombre_lookup
+                        )
+                        if _al_pipeline:
+                            _gramos_pl = 100.0
+                            _m_ml_pl = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:ml|cc)", msg_lower)
+                            _m_g_pl  = re.search(r"(\d+(?:[.,]\d+)?)\s*g\b", msg_lower)
+                            _m_rec_pl = re.search(
+                                r"\b(vaso|taza|copa|botella|jarra|lata)\b", msg_lower
+                            )
+                            if _m_ml_pl:
+                                _gramos_pl = float(_m_ml_pl.group(1).replace(",", "."))
+                            elif _m_g_pl:
+                                _gramos_pl = float(_m_g_pl.group(1).replace(",", "."))
+                            elif _m_rec_pl:
+                                _gramos_pl = {"vaso":240,"taza":200,"copa":150,
+                                              "botella":500,"jarra":1000,"lata":355}.get(
+                                    _m_rec_pl.group(1), 100.0)
+                            _fac_pl = _gramos_pl / 100.0
+                            pre_extraccion = {
+                                **_capa0_fallback,
+                                "calorias":        round(float(_al_pipeline.calorias_100g or 0) * _fac_pl, 1),
+                                "proteinas_g":     round(float(_al_pipeline.proteina_100g or 0) * _fac_pl, 1),
+                                "carbohidratos_g": round(float(_al_pipeline.carbohidratos_100g or 0) * _fac_pl, 1),
+                                "grasas_g":        round(float(_al_pipeline.grasas_100g or 0) * _fac_pl, 1),
+                                "alimentos_detectados": [_al_pipeline.nombre],
+                                "porcion_g": _gramos_pl,
+                                "origen": "bd_alimento",
+                            }
+                            logger.info(
+                                "CAPA 0 fallback → pipeline externo: '%s' → %s guardado en BD (%.0fg = %.1f kcal)",
+                                _nombre_c0, _al_pipeline.nombre, _gramos_pl,
+                                float(_al_pipeline.calorias_100g or 0) * _fac_pl,
+                            )
+                    except Exception as _epipe:
+                        logger.debug("Pipeline externo para '%s': %s", _nombre_c0, _epipe)
+                if not pre_extraccion:
+                    logger.info(
+                        "CAPA 1 no resolvió '%s' — usando estimación CAPA 0 como fallback",
+                        _nombre_c0,
+                    )
+                    pre_extraccion = _capa0_fallback
+
+        # ── Resolver ítems pendientes de CAPA 1 vía alimentos ────────────────
+        # Cuando CAPA 1 encontró algún plato pero dejó ítems en _no_resueltos
+        # (ej. "arroz con pollo y incakola" → arroz resuelto, incakola pendiente),
+        # intentar cada ítem pendiente en la tabla de alimentos.
+        if pre_extraccion and pre_extraccion.get("_no_resueltos"):
+            _pendientes = pre_extraccion.pop("_no_resueltos", [])
+            _srv = AlimentosDBService(db)
+            _RE_VERBO_ITEM = re.compile(
+                r"^(?:tom[eé]\s+|beb[íi]\s+|com[íi]\s+|"
+                r"(?:un|una|unos|unas|medio|media)\s+)?",
+                re.IGNORECASE,
+            )
+            # Capturar macros del plato principal antes de acumular extras
+            _macros_por_alimento: list[dict] = []
+            _nombres_plato = pre_extraccion.get("alimentos_detectados") or []
+            if _nombres_plato:
+                _kcal_plato = round(float(pre_extraccion.get("calorias", 0)), 2)
+                _prot_plato = round(float(pre_extraccion.get("proteinas_g", 0)), 2)
+                _carb_plato = round(float(pre_extraccion.get("carbohidratos_g", 0)), 2)
+                _gras_plato = round(float(pre_extraccion.get("grasas_g", 0)), 2)
+                for _np in _nombres_plato:
+                    _macros_por_alimento.append({
+                        "nombre": _np,
+                        "kcal":   _kcal_plato / max(1, len(_nombres_plato)),
+                        "prot_g": _prot_plato / max(1, len(_nombres_plato)),
+                        "carb_g": _carb_plato / max(1, len(_nombres_plato)),
+                        "gras_g": _gras_plato / max(1, len(_nombres_plato)),
+                    })
+            for _item in _pendientes:
+                _q = _RE_VERBO_ITEM.sub("", _item.strip()).strip()
+                if not _q or len(_q) < 2:
+                    continue
+                try:
+                    # Detectar formato "tipo_recipiente:nombre" (ej. "vaso:cocoa")
+                    # producido por CAPA 1 cuando el ítem tenía prefijo de recipiente.
+                    _rec_tipo_resol: str = ""
+                    _m_rec_fmt = re.match(
+                        r'^(vaso|taza|copa|botella|jarra|lata):(.+)$', _q, re.IGNORECASE
+                    )
+                    if _m_rec_fmt:
+                        _rec_tipo_resol = _m_rec_fmt.group(1).lower()
+                        _q = _m_rec_fmt.group(2).strip()
+                    # Extraer cantidad ml/g del ítem antes de buscar el alimento
+                    _gramos_item = 100.0
+                    _m_ml = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:ml|cc)", _q, re.IGNORECASE)
+                    _m_g  = re.search(r"(\d+(?:[.,]\d+)?)\s*g\b", _q, re.IGNORECASE)
+                    if _m_ml:
+                        _gramos_item = float(_m_ml.group(1).replace(",", "."))
+                        _q = re.sub(r"\s*(?:de\s+)?\d+(?:[.,]\d+)?\s*(?:ml|cc)", "", _q, flags=re.IGNORECASE).strip()
+                    elif _m_g:
+                        _gramos_item = float(_m_g.group(1).replace(",", "."))
+                        _q = re.sub(r"\s*\d+(?:[.,]\d+)?\s*g\b", "", _q, flags=re.IGNORECASE).strip()
+                    # CAPA 1: buscar en BD local
+                    _al_id = _srv.resolver_alimento_id(_q)
+                    _al_obj = (
+                        db.query(Alimento).filter(Alimento.id == _al_id).first()
+                        if _al_id else None
+                    )
+                    # CAPA 2-3-Groq: si no está en BD, llamar pipeline completo
+                    if not _al_obj:
+                        try:
+                            from app.services.asistente_nutricion import _buscar_o_crear_alimento_async
+                            _q_norm = _norm_al(_q)
+                            _al_obj = await _buscar_o_crear_alimento_async(db, _q_norm, _q)
+                            if _al_obj:
+                                logger.info("Ítem pendiente '%s' → USDA/FatSecret/Groq → %s", _item, _al_obj.nombre)
+                        except Exception as _ef:
+                            logger.debug("Pipeline externo para '%s': %s", _q, _ef)
+                    if _al_obj:
+                        # Si el ítem vino de un recipiente (vaso:cocoa), consultar
+                        # alimento_unidades para obtener los gramos reales del polvo/líquido.
+                        # Ejemplo: vaso de cocoa → 10g de polvo, no 240ml × densidad.
+                        if _rec_tipo_resol:
+                            try:
+                                from sqlalchemy import text as _sql_au
+                                _au = db.execute(_sql_au(
+                                    "SELECT gramos FROM alimento_unidades "
+                                    "WHERE alimento_id = :ai AND nombre = :u LIMIT 1"
+                                ), {"ai": _al_obj.id, "u": _rec_tipo_resol}).fetchone()
+                                if _au:
+                                    _gramos_item = float(_au[0])
+                                else:
+                                    _VOL_FALLBACK = {
+                                        "vaso": 240.0, "taza": 200.0, "copa": 150.0,
+                                        "botella": 500.0, "jarra": 1000.0, "lata": 355.0,
+                                    }
+                                    _gramos_item = _VOL_FALLBACK.get(_rec_tipo_resol, 100.0)
+                            except Exception:
+                                pass
+                        _factor = _gramos_item / 100.0
+                        _kcal_extra  = round(float(_al_obj.calorias_100g or 0) * _factor, 1)
+                        _prot_extra  = round(float(_al_obj.proteina_100g or 0) * _factor, 2)
+                        _carb_extra  = round(float(_al_obj.carbohidratos_100g or 0) * _factor, 2)
+                        _gras_extra  = round(float(_al_obj.grasas_100g or 0) * _factor, 2)
+                        pre_extraccion["calorias"]        = round(pre_extraccion["calorias"]        + _kcal_extra, 1)
+                        pre_extraccion["proteinas_g"]     = round(pre_extraccion["proteinas_g"]     + _prot_extra, 1)
+                        pre_extraccion["carbohidratos_g"] = round(pre_extraccion["carbohidratos_g"] + _carb_extra, 1)
+                        pre_extraccion["grasas_g"]        = round(pre_extraccion["grasas_g"]        + _gras_extra, 1)
+                        pre_extraccion.setdefault("alimentos_detectados", []).append(_al_obj.nombre)
+                        pre_extraccion.setdefault("extras_nutricionales", []).append(
+                            f"{_al_obj.nombre} {int(_gramos_item)}g ({_kcal_extra} kcal)"
+                        )
+                        _macros_por_alimento.append({
+                            "nombre": _al_obj.nombre,
+                            "kcal":   _kcal_extra,
+                            "prot_g": _prot_extra,
+                            "carb_g": _carb_extra,
+                            "gras_g": _gras_extra,
+                        })
+                        logger.info("Ítem pendiente '%s' resuelto → %s (%.0fg = %.1f kcal)", _item, _al_obj.nombre, _gramos_item, _kcal_extra)
+                    else:
+                        logger.warning("Ítem pendiente '%s' no resuelto ni en BD ni en APIs externas", _item)
+                except Exception as _ep:
+                    logger.debug("Error resolviendo ítem pendiente '%s': %s", _item, _ep)
+            if _macros_por_alimento:
+                pre_extraccion["alimentos_con_macros"] = _macros_por_alimento
+        # ─────────────────────────────────────────────────────────────────────
 
         return await self._aplicar_y_persistir(pre_extraccion, perfil, plan_hoy_data, db, ia_engine, mensaje)
 
@@ -656,7 +896,9 @@ class RegistroComidaHandler:
     ) -> dict:
         """CAPA 0: NLPFoodExtractor — Llama-3 extrae JSON, Python calcula desde BD."""
         try:
-            from app.services.nlp_food_extractor import NLPFoodExtractor, contiene_modificador_ficticio
+            from app.services.nlp_food_extractor import (
+                NLPFoodExtractor, contiene_modificador_ficticio, _nombre_es_no_alimento
+            )
             extractor = NLPFoodExtractor(ia_engine, db)
 
             if contiene_modificador_ficticio(mensaje):
@@ -666,6 +908,23 @@ class RegistroComidaHandler:
                     "mensaje": (
                         "No puedo registrar ese alimento porque contiene un ingrediente "
                         "ficticio o mitológico. Por favor regístra un alimento real. 🍽️"
+                    ),
+                }
+
+            # Guard: mensaje entero que es claramente no-comida
+            # Extrae la "palabra base" del mensaje limpio y la valida contra NO_ALIMENTOS.
+            _msg_base = re.sub(
+                r"(?i)^(com[ií]|tom[eé]|beb[ií]|registra?|anota?|guard[ao])\s+(un[ao]?\s+)?",
+                "", msg_lower,
+            ).strip()
+            _palabra_base = _msg_base.split()[0] if _msg_base else ""
+            if _nombre_es_no_alimento(_msg_base) or _nombre_es_no_alimento(_palabra_base):
+                return {
+                    "_final": True, "success": False,
+                    "tipo_detectado": "no_alimento_bloqueado", "alimentos": [], "datos": {},
+                    "mensaje": (
+                        f"'{_palabra_base or _msg_base}' no parece ser un alimento. "
+                        "¿Quisiste decir otra cosa? Registra una comida o bebida real. 🍽️"
                     ),
                 }
 
@@ -680,6 +939,7 @@ class RegistroComidaHandler:
 
             if resultado and resultado.calorias_total > 0:
                 adv = resultado.advertencia
+                _total_g = sum(it.gramos_totales or 0 for it in resultado.items)
                 ext = {
                     "calorias": resultado.calorias_total,
                     "proteinas_g": resultado.proteinas_total,
@@ -692,6 +952,18 @@ class RegistroComidaHandler:
                     "calidad_nutricional": "Alta",
                     "origen": "nlp_extractor",
                     "advertencia": adv,
+                    "porcion_g": _total_g if _total_g > 0 else None,
+                    "alimentos_con_macros": [
+                        {
+                            "nombre": it.alimento,
+                            "kcal":   it.calorias,
+                            "prot_g": it.proteinas_g,
+                            "carb_g": it.carbohidratos_g,
+                            "gras_g": it.grasas_g,
+                            "gramos": it.gramos_totales,
+                        }
+                        for it in resultado.items
+                    ],
                 }
                 if adv and ("kcal" in adv or "correcto" in adv.lower()):
                     ext["_warn_cantidad"] = adv
@@ -755,15 +1027,13 @@ class RegistroComidaHandler:
         # Expandir "plato_conocido + con + acompañamiento" antes del loop de búsqueda
         items = _expandir_compuestos_con(items, db)
 
-        msg_l          = (mensaje or "").lower()
-        explicit_repeat = any(x in msg_l for x in ("otra vez", "de nuevo", "nuevamente"))
-
         _SQL = (
             "SELECT p.id, p.nombre,"
             " SUM(a.calorias_100g * pi2.gramos / 100.0),"
             " SUM(a.proteina_100g * pi2.gramos / 100.0),"
             " SUM(a.carbohidratos_100g * pi2.gramos / 100.0),"
-            " SUM(a.grasas_100g * pi2.gramos / 100.0)"
+            " SUM(a.grasas_100g * pi2.gramos / 100.0),"
+            " SUM(pi2.gramos)"   # col[6]: peso total del plato para escalar por gramos
             " FROM platos p"
             " JOIN plato_ingredientes pi2 ON pi2.plato_id = p.id"
             " JOIN alimentos a ON a.id = pi2.alimento_id"
@@ -795,7 +1065,8 @@ class RegistroComidaHandler:
             for _hr in _historial_rows:
                 _nn_hist = unicodedata.normalize("NFC", (_hr.nombre_plato or "").lower().strip())
                 _score_hist = difflib.SequenceMatcher(a=_msg_clean_hist, b=_nn_hist).ratio()
-                if _score_hist >= 0.80:
+                # Guard: no aceptar si los modificadores "con X" son incompatibles
+                if _score_hist >= 0.80 and _sufijos_con_compatibles(_msg_clean_hist, _nn_hist):
                     # Match fuerte con un plato recomendado → buscar sus macros reales en BD
                     from sqlalchemy import text as _sql_t
                     _row_hist = db.execute(_sql_t(
@@ -814,17 +1085,35 @@ class RegistroComidaHandler:
                             "Fast-path historial: '%s' → plato id=%s '%s' (score=%.2f)",
                             _msg_clean_hist, _hr.plato_id, _hr.nombre_plato, _score_hist,
                         )
+                        from app.services.asistente_nutricion import _cargar_ingredientes_bd
+                        _desglose_h, _desglose_total_h = [], ""
+                        try:
+                            _kcal_h = round(float(_row_hist[2] or 0), 1)
+                            _p_h = round(float(_row_hist[3] or 0), 1)
+                            _c_h = round(float(_row_hist[4] or 0), 1)
+                            _g_h = round(float(_row_hist[5] or 0), 1)
+                            _desglose_h = _cargar_ingredientes_bd(db, _hr.plato_id)
+                            _desglose_total_h = (
+                                f"Total: {_kcal_h} kcal | P:{_p_h}g | C:{_c_h}g | G:{_g_h}g"
+                            )
+                        except Exception:
+                            _kcal_h = round(float(_row_hist[2] or 0), 1)
+                            _p_h = round(float(_row_hist[3] or 0), 1)
+                            _c_h = round(float(_row_hist[4] or 0), 1)
+                            _g_h = round(float(_row_hist[5] or 0), 1)
                         return {
-                            "calorias":        round(float(_row_hist[2] or 0), 1),
-                            "proteinas_g":     round(float(_row_hist[3] or 0), 1),
-                            "carbohidratos_g": round(float(_row_hist[4] or 0), 1),
-                            "grasas_g":        round(float(_row_hist[5] or 0), 1),
+                            "calorias":        _kcal_h,
+                            "proteinas_g":     _p_h,
+                            "carbohidratos_g": _c_h,
+                            "grasas_g":        _g_h,
                             "fibra_g": 0, "azucar_g": 0, "sodio_mg": 0,
                             "es_comida": True, "es_ejercicio": False,
                             "alimentos_detectados": [_row_hist[1]],
                             "ejercicios_detectados": [],
                             "calidad_nutricional": "Alta",
-                            "origen": "historial_recomendacion",
+                            "origen": "platos",
+                            "desglose_ingredientes": _desglose_h,
+                            "desglose_total": _desglose_total_h,
                         }
         except Exception as _eh:
             logger.debug("Fast-path historial error (no crítico): %s", _eh)
@@ -836,11 +1125,32 @@ class RegistroComidaHandler:
 
         # REGLA 2: prefijos de recipiente que deben quitarse antes de buscar en BD
         _RE_PREFIJO_RECIPIENTE = re.compile(
-            r'^(?:plato\s+de|porci[oó]n\s+de|medio\s+plato\s+de|media\s+porci[oó]n\s+de)\s+',
+            r'^(?:plato\s+de|porci[oó]n\s+de|medio\s+plato\s+de|media\s+porci[oó]n\s+de'
+            r'|vaso\s+de|taza\s+de|copa\s+de|botella\s+de|jarra\s+de|lata\s+de)\s+',
+            re.IGNORECASE,
+        )
+        # Volúmenes estándar por recipiente (en ml, usado como gramos para líquidos)
+        _VOL_RECIPIENTE: dict[str, float] = {
+            "vaso": 240.0, "taza": 200.0, "copa": 150.0,
+            "botella": 500.0, "jarra": 1000.0, "lata": 355.0,
+        }
+
+        # Regex para prefijo de gramos: "250g de X" / "250 gr de X" / "200ml de X"
+        _RE_GRAM_PREFIX = re.compile(
+            r"^(\d+(?:[.,]\d+)?)\s*(?:g|gr|gramos?|ml|cc)\s+(?:de\s+)?(.+)$",
             re.IGNORECASE,
         )
 
         for it in items:
+            # ── Detectar prefijo de gramaje explícito: "250g de ají de gallina" ──
+            # Si el ítem empieza con Xg/Xml, extraer el alimento y guardar gramos
+            # para escalar los macros del plato tras encontrarlo en BD.
+            _gram_explicito: Optional[float] = None
+            _m_gp = _RE_GRAM_PREFIX.match(it)
+            if _m_gp:
+                _gram_explicito = float(_m_gp.group(1).replace(",", "."))
+                it = _m_gp.group(2).strip()
+
             m = re.match(
                 r"^\s*((?:\d+(?:[.,]\d+)?)|uno|una|un|dos|tres|cuatro|cinco|medio|media)\s+(.*)$",
                 it, re.IGNORECASE,
@@ -848,8 +1158,30 @@ class RegistroComidaHandler:
             qty, name_part = 1.0, it
             if m:
                 qty, name_part = _parse_qty(m.group(1)), m.group(2).strip()
+                # Si name_part empieza con unidad de masa/volumen, es otro gram prefix
+                # (ej. el regex numérico separó "250" de "g de ají de gallina")
+                _m_unit_residuo = re.match(
+                    r'^(?:g|gr|gramos?|ml|cc)\s+(?:de\s+)?', name_part, re.IGNORECASE
+                )
+                if _m_unit_residuo and _gram_explicito is None:
+                    _gram_explicito = qty
+                    name_part = name_part[_m_unit_residuo.end():].strip()
+                    qty = 1.0
 
             # REGLA 2: eliminar prefijo de recipiente antes de buscar
+            # Detectar volumen estándar si el prefijo es un recipiente conocido
+            _m_rec = re.match(
+                r'^(vaso|taza|copa|botella|jarra|lata)\s+de\s+', name_part, re.IGNORECASE
+            )
+            # Anotar tipo de recipiente para que el resolver consulte alimento_unidades.
+            _vol_anotado: float = 0.0
+            _rec_tipo_anotado: str = ""
+            if _m_rec:
+                _rec_tipo_anotado = _m_rec.group(1).lower()
+                _rec_vol = _VOL_RECIPIENTE.get(_rec_tipo_anotado, 0.0)
+                if _rec_vol:
+                    name_part = name_part[_m_rec.end():].strip()
+                    _vol_anotado = _rec_vol
             name_part = _RE_PREFIJO_RECIPIENTE.sub("", name_part).strip()
 
             nn = _norm_plato(name_part)
@@ -860,28 +1192,53 @@ class RegistroComidaHandler:
             if not row:
                 # Fallback similitud coseno sobre los últimos 250 platos
                 cands = db.query(Plato.id, Plato.nombre, Plato.nombre_normalizado).order_by(Plato.id.desc()).limit(250).all()
-                best_id, best_score = None, 0.0
+                best_id, best_score, best_norm = None, 0.0, ""
                 for pid, pnombre, pnn in cands:
                     rn = _norm_plato(pnn or pnombre or "")
                     score = difflib.SequenceMatcher(a=nn, b=rn).ratio()
                     if score > best_score:
-                        best_score, best_id = score, pid
-                if best_id and best_score >= 0.92:
+                        best_score, best_id, best_norm = score, pid, rn
+                if best_id and best_score >= 0.88 and _sufijos_con_compatibles(nn, best_norm):
                     row = db.execute(_sql(
                         "SELECT p.id, p.nombre,"
                         " SUM(a.calorias_100g * pi2.gramos / 100.0),"
                         " SUM(a.proteina_100g * pi2.gramos / 100.0),"
                         " SUM(a.carbohidratos_100g * pi2.gramos / 100.0),"
-                        " SUM(a.grasas_100g * pi2.gramos / 100.0)"
+                        " SUM(a.grasas_100g * pi2.gramos / 100.0),"
+                        " SUM(pi2.gramos)"
                         " FROM platos p JOIN plato_ingredientes pi2 ON pi2.plato_id = p.id"
                         " JOIN alimentos a ON a.id = pi2.alimento_id WHERE p.id = :pid"
                         " GROUP BY p.id, p.nombre"
                     ), {"pid": best_id}).fetchone()
             if row:
+                # Escalar por gramos explícitos: "250g de ají de gallina"
+                # row[6] = SUM(pi2.gramos) = peso estándar del plato completo
+                if _gram_explicito and _gram_explicito > 0:
+                    _peso_std = float(row[6] or 0)
+                    if _peso_std > 0:
+                        _scale = _gram_explicito / _peso_std
+                        row = (row[0], row[1],
+                               (row[2] or 0) * _scale,
+                               (row[3] or 0) * _scale,
+                               (row[4] or 0) * _scale,
+                               (row[5] or 0) * _scale,
+                               _gram_explicito)
+                        logger.info(
+                            "CAPA 1: '%s' escalado a %.0fg / %.0fg std → factor %.2f",
+                            row[1], _gram_explicito, _peso_std, _scale,
+                        )
                 matched.append((row, qty))
             else:
                 # REGLA 1: ítem no resuelto por CAPA 1 — registrar para no perderlo silenciosamente
-                _no_resueltos_c1.append(name_part)
+                # Usar formato "tipo_recipiente:nombre" para que el resolver
+                # pueda consultar alimento_unidades (ej. vaso:cocoa → 10g).
+                if _rec_tipo_anotado:
+                    _unresolved_str = f"{_rec_tipo_anotado}:{name_part}"
+                elif _vol_anotado:
+                    _unresolved_str = f"{int(_vol_anotado)}ml {name_part}"
+                else:
+                    _unresolved_str = name_part
+                _no_resueltos_c1.append(_unresolved_str)
 
         if not matched:
             # ── Capa 1.5: construcción dinámica de platos ──────────────────────
@@ -894,8 +1251,10 @@ class RegistroComidaHandler:
                 _msg_clean = _RE_PREFIJO_IMPERATIVO.sub("", mensaje.lower()).strip()
                 _msg_clean = _RE_CANTIDAD_INICIO.sub("", _msg_clean).strip()
                 _msg_clean = re.sub(r"\s+", " ", _msg_clean).strip()
-                # Solo intentar si el texto limpio tiene >= 3 palabras y contiene "con"
-                if " con " in _msg_clean and len(_msg_clean.split()) >= 3:
+                # Solo intentar si el texto limpio tiene "con" pero NO tiene "y"/"más"
+                # (si hay "y"/"más" es multi-alimento, no un plato compuesto único)
+                _tiene_separador_multi = bool(re.search(r"\s+y\s+|\s+m[aá]s\s+", _msg_clean))
+                if " con " in _msg_clean and not _tiene_separador_multi and len(_msg_clean.split()) >= 3:
                     try:
                         from app.services.plato_constructor import crear_plato_dinamico
                         _plato_full = await crear_plato_dinamico(db, _msg_clean)
@@ -971,7 +1330,10 @@ class RegistroComidaHandler:
                                 1.0,
                             ))
                             # REGLA 1: ítem resuelto por CAPA 1.5 → quitar de no_resueltos
-                            _cand_norm = _norm_plato(_cand)
+                            # Strip artículo inicial (ej. "un pan con plátano" → "pan con plátano")
+                            # porque _no_resueltos_c1 almacena el name_part ya sin artículo.
+                            _cand_strip = re.sub(r'^(?:un|una|medio|media)\s+', '', _cand, flags=re.IGNORECASE)
+                            _cand_norm = _norm_plato(_cand_strip)
                             _no_resueltos_c1 = [
                                 n for n in _no_resueltos_c1
                                 if _norm_plato(n) != _cand_norm
@@ -982,28 +1344,8 @@ class RegistroComidaHandler:
             if not matched:
                 return None
 
-        # Guard anti-duplicado 10 min
-        try:
-            last = (
-                db.query(PreferenciaAlimento)
-                .filter(PreferenciaAlimento.client_id == perfil.id)
-                .order_by(PreferenciaAlimento.ultima_vez.desc()).first()
-            )
-            if last and last.ultima_vez:
-                from datetime import timezone as _tz
-                now = datetime.now()
-                try:
-                    now = datetime.now(_tz.utc) if getattr(last.ultima_vez, "tzinfo", None) else now
-                except Exception:
-                    pass
-                delta_min = (now - last.ultima_vez).total_seconds() / 60.0
-                if delta_min <= 10:
-                    is_same = any(_norm_plato(r[1] or "") == _norm_plato(last.alimento or "") for r, _ in matched)
-                    qty_any = any(q > 1.01 for _, q in matched)
-                    if is_same and not qty_any and not explicit_repeat:
-                        return {"skip_duplicate": True, "nombre": last.alimento}
-        except Exception:
-            pass
+        # Guard anti-duplicado eliminado — el usuario puede registrar el mismo plato
+        # múltiples veces en la misma sesión (desayuno, almuerzo, cena, o porciones extra)
 
         kcal = p_g = c_g = g_g = 0.0
         nombres = []
@@ -1171,6 +1513,35 @@ class RegistroComidaHandler:
             )
             if desglose_total:
                 msg_final += f"\n  ━━ {desglose_total}"
+            extras = extraccion.get("extras_nutricionales", [])
+            if extras:
+                msg_final += "\n" + "\n".join(f"  • {e}" for e in extras)
+        elif not desglose and nombres and extraccion.get("calorias", 0) > 0:
+            _macros_items = extraccion.get("alimentos_con_macros", [])
+            if len(_macros_items) > 1:
+                # Múltiples alimentos → un bullet por ítem con sus gramos reales
+                _lineas = []
+                for _m in _macros_items:
+                    _g = int(round(_m.get("gramos", 100)))
+                    _lineas.append(
+                        f"  • {_m['nombre']} ({_g}g) — {round(_m['kcal'], 1)} kcal"
+                        f" | P:{round(_m['prot_g'], 1)}g"
+                        f" | C:{round(_m['carb_g'], 1)}g"
+                        f" | G:{round(_m['gras_g'], 1)}g"
+                    )
+                msg_final += "\n\n📊 Detalle nutricional:\n" + "\n".join(_lineas)
+            else:
+                _d_kcal = round(float(extraccion.get("calorias", 0)), 1)
+                _d_prot = round(float(extraccion.get("proteinas_g", 0)), 1)
+                _d_carb = round(float(extraccion.get("carbohidratos_g", 0)), 1)
+                _d_gras = round(float(extraccion.get("grasas_g", 0)), 1)
+                _d_gramos = extraccion.get("porcion_g") or extraccion.get("gramos") or 100
+                _gramos_txt = f" ({int(_d_gramos)}g)"
+                msg_final += (
+                    f"\n\n📊 Detalle nutricional:\n"
+                    f"  • {nombre_str}{_gramos_txt} — {_d_kcal} kcal"
+                    f" | P:{_d_prot}g | C:{_d_carb}g | G:{_d_gras}g"
+                )
         if adv_prohibido:
             msg_final += f"\n\n{adv_prohibido}"
         if alerta_macros:
@@ -1250,6 +1621,7 @@ class RegistroComidaHandler:
                 "azucar_g":        extraccion.get("azucar_g", 0),
                 "fibra_g":         extraccion.get("fibra_g", 0),
                 "sodio_mg":        extraccion.get("sodio_mg", 0),
+                "porcion_g":       extraccion.get("porcion_g") or extraccion.get("gramos"),
                 "calidad":         extraccion.get("calidad_nutricional", "Media"),
             },
             "mensaje": msg_final,
@@ -1270,7 +1642,7 @@ class RegistroComidaHandler:
                 "{\"nombre\":\"...\",\"calorias\":0,\"proteinas_g\":0,"
                 "\"carbohidratos_g\":0,\"grasas_g\":0,\"porcion_g\":100}"
             )
-            resp = await ia_engine.consultar_groq(prompt, sistema="Eres nutricionista. Solo JSON, sin texto extra.")
+            resp = await ia_engine._llamar_groq(prompt, max_tokens=200, temp=0.05)
             data = json.loads(resp)
 
             nombre = data.get("nombre", "__DESCONOCIDO__")

@@ -208,6 +208,49 @@ class AsistenteService:
                 mensaje, perfil, plan_hoy_data, db, self.ia
             )
 
+        # ── Redirección ejercicio: "Hoy realice / Hice X series…" → handler directo ──
+        # Evita que el LLM genere texto con [CALOFIT_INTENT:LOG] sin registrar nada en BD.
+        from app.services.asistente_ejercicio import frase_registro_actividad_fisica as _fraf
+        if _fraf(mensaje):
+            _ej = await registro_ejercicio_handler.registrar(mensaje, perfil, db, self.ia)
+            if _ej.get("success"):
+                _hoy2 = get_peru_date()
+                _p2   = db.query(ProgresoCalorias).filter(
+                    ProgresoCalorias.client_id == perfil.id,
+                    ProgresoCalorias.fecha == _hoy2,
+                ).first()
+                _q2 = float(_p2.calorias_quemadas   if _p2 else 0)
+                _c2 = float(_p2.calorias_consumidas  if _p2 else consumo_real)
+                return {
+                    "asistente":    "CaloFit IA",
+                    "usuario":      perfil.first_name,
+                    "intencion":    "SUCCESS",
+                    "tipo_pregunta": "LOG",
+                    "alerta_salud": False,
+                    "data_cientifica": {
+                        "progreso_diario": {
+                            "consumido": round(_c2, 1),
+                            "meta":      round(calorias_meta, 1),
+                            "restante":  round(max(0, calorias_meta - _c2 + _q2), 1),
+                            "quemado":   round(_q2, 1),
+                        },
+                        "macros": {
+                            "proteinas_meta":     plan_hoy_data.get("proteinas_g", 0),
+                            "carbohidratos_meta": plan_hoy_data.get("carbohidratos_g", 0),
+                            "grasas_meta":        plan_hoy_data.get("grasas_g", 0),
+                        },
+                    },
+                    "respuesta_ia": _ej.get("mensaje", ""),
+                    "respuesta_estructurada": {
+                        "intent":                "SUCCESS",
+                        "texto_conversacional":  _ej.get("mensaje", ""),
+                        "secciones":             [],
+                    },
+                    "tipo_detectado": _ej.get("tipo_detectado", "ejercicio"),
+                    "datos":          _ej.get("datos", {}),
+                    "balance_actualizado": _ej.get("balance_actualizado", {}),
+                }
+
         if strict_ask_missing_enabled():
             falt = detectar_faltantes(modo_funcion, mensaje)
             if falt:
