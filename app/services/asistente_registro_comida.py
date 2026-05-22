@@ -103,6 +103,17 @@ def _sufijos_con_compatibles(a_norm: str, b_norm: str) -> bool:
     return bool(set(s1) & set(s2))   # al menos 1 palabra en común
 
 
+def _sufijos_de_compatibles(a_norm: str, b_norm: str) -> bool:
+    """Guard 'de ESPECIE': bloquea falsos matches como 'ceviche de cabrilla' vs
+    'ceviche de caballa' (similitud 0.92 pero peces distintos).
+    Si ambos nombres tienen 'de X', la primera palabra de X debe coincidir."""
+    m_a = re.search(r"\bde\s+(\w+)", a_norm)
+    m_b = re.search(r"\bde\s+(\w+)", b_norm)
+    if not m_a or not m_b:
+        return True   # sin "de X" → no aplica guard
+    return m_a.group(1) == m_b.group(1)
+
+
 def _parse_qty(prefix: str) -> float:
     p = (prefix or "").strip().lower()
     if not p:
@@ -494,14 +505,25 @@ class RegistroComidaHandler:
                         "CAPA 0 simplificó '%s' → '%s' (%d→%d palabras): cediendo a Capa 1.5",
                         msg_lower[:60], _nombre_c0, _palabras_msg, _palabras_c0,
                     )
-                elif len((_nombre_c0 or "").split()) >= 2:
-                    # Platos multi-palabra (≥2 tokens): CAPA 0 NO tiene autoridad final.
-                    # Se defiere a CAPA 1/1.5 que consulta ingredientes reales en BD.
-                    # CAPA 0 queda como fallback por si el catálogo tampoco lo encuentra.
-                    _capa0_fallback = capa0_result
                 else:
-                    # Alimento de una sola palabra: CAPA 0 es suficientemente precisa
-                    pre_extraccion = capa0_result
+                    # Platos con variantes (ej. "ceviche de merluza" → Capa 0 devuelve
+                    # solo "Ceviche"): si el nombre es genérico de 1 palabra Y el usuario
+                    # especificó una variante con "de X", ceder a Capa 1/1.5.
+                    _PLATOS_MULTI_VARIANTE = frozenset({
+                        "ceviche", "cebiche", "tiradito", "sudado", "seco", "causa",
+                        "lomo", "jalea", "arroz", "guiso", "estofado", "caldo",
+                    })
+                    _es_plato_multi_variante = (
+                        len((_nombre_c0 or "").split()) == 1
+                        and (_nombre_c0 or "").lower().strip() in _PLATOS_MULTI_VARIANTE
+                        and " de " in msg_lower
+                    )
+                    if len((_nombre_c0 or "").split()) >= 2 or _es_plato_multi_variante:
+                        # Platos multi-palabra o variantes: CAPA 0 NO tiene autoridad final.
+                        _capa0_fallback = capa0_result
+                    else:
+                        # Alimento simple de una sola palabra: CAPA 0 es suficientemente precisa
+                        pre_extraccion = capa0_result
 
         # Porción de lata (capa especial antes del catálogo)
         if not pre_extraccion and _msg_tiene_porcion_lata(mensaje):
@@ -1066,7 +1088,7 @@ class RegistroComidaHandler:
                 _nn_hist = unicodedata.normalize("NFC", (_hr.nombre_plato or "").lower().strip())
                 _score_hist = difflib.SequenceMatcher(a=_msg_clean_hist, b=_nn_hist).ratio()
                 # Guard: no aceptar si los modificadores "con X" son incompatibles
-                if _score_hist >= 0.80 and _sufijos_con_compatibles(_msg_clean_hist, _nn_hist):
+                if _score_hist >= 0.80 and _sufijos_con_compatibles(_msg_clean_hist, _nn_hist) and _sufijos_de_compatibles(_msg_clean_hist, _nn_hist):
                     # Match fuerte con un plato recomendado → buscar sus macros reales en BD
                     from sqlalchemy import text as _sql_t
                     _row_hist = db.execute(_sql_t(
@@ -1198,7 +1220,7 @@ class RegistroComidaHandler:
                     score = difflib.SequenceMatcher(a=nn, b=rn).ratio()
                     if score > best_score:
                         best_score, best_id, best_norm = score, pid, rn
-                if best_id and best_score >= 0.88 and _sufijos_con_compatibles(nn, best_norm):
+                if best_id and best_score >= 0.88 and _sufijos_con_compatibles(nn, best_norm) and _sufijos_de_compatibles(nn, best_norm):
                     row = db.execute(_sql(
                         "SELECT p.id, p.nombre,"
                         " SUM(a.calorias_100g * pi2.gramos / 100.0),"
@@ -1210,6 +1232,11 @@ class RegistroComidaHandler:
                         " JOIN alimentos a ON a.id = pi2.alimento_id WHERE p.id = :pid"
                         " GROUP BY p.id, p.nombre"
                     ), {"pid": best_id}).fetchone()
+                # Último intento: buscar con nombre completo incluyendo el recipiente.
+                # "cocoa" falla → prueba "vaso de cocoa" → encuentra plato 486 directamente.
+                if not row and _rec_tipo_anotado:
+                    _nn_full_rec = _norm_plato(f"{_rec_tipo_anotado} de {name_part}")
+                    row = db.execute(_sql(_SQL), {"q": _nn_full_rec}).fetchone()
             if row:
                 # Escalar por gramos explícitos: "250g de ají de gallina"
                 # row[6] = SUM(pi2.gramos) = peso estándar del plato completo
@@ -1318,6 +1345,7 @@ class RegistroComidaHandler:
             # Caso B: query con múltiples items — intentar cada candidato ≥2 palabras
             elif len(items) > 1:
                 from app.services.plato_constructor import crear_plato_dinamico
+                from app.models.alimento import Alimento as _Alimento
                 candidatos = [it for it in items if _es_candidato_plato_capa15(it)]
                 for _cand in candidatos[:2]:  # máx 2 construcciones por query
                     try:
@@ -1330,8 +1358,6 @@ class RegistroComidaHandler:
                                 1.0,
                             ))
                             # REGLA 1: ítem resuelto por CAPA 1.5 → quitar de no_resueltos
-                            # Strip artículo inicial (ej. "un pan con plátano" → "pan con plátano")
-                            # porque _no_resueltos_c1 almacena el name_part ya sin artículo.
                             _cand_strip = re.sub(r'^(?:un|una|medio|media)\s+', '', _cand, flags=re.IGNORECASE)
                             _cand_norm = _norm_plato(_cand_strip)
                             _no_resueltos_c1 = [
@@ -1343,6 +1369,47 @@ class RegistroComidaHandler:
 
             if not matched:
                 return None
+
+        # Caso B2: ítems que no resolvió la búsqueda de platos → buscar en alimentos directamente.
+        # Itera sobre _no_resueltos_c1 (nombres ya sin prefijo de cantidad) para capturar
+        # tanto items de 1 palabra ("arroz") como de 2+ ("un durazno" → "durazno" normalizado).
+        if _no_resueltos_c1:
+            from app.models.alimento import Alimento as _Alimento
+            for _simp in list(_no_resueltos_c1)[:3]:
+                # Strip "tipo:nombre" format produced by the recipiente handler
+                # e.g. "vaso:cocoa" → "cocoa" so it resolves against alimentos correctly
+                _simp_limpio = re.sub(r'^[a-z]+:', '', _simp)
+                _simp_n = _norm_plato(_simp_limpio)
+                if not _simp_n or len(_simp_n) < 3:
+                    continue
+                _alim = (
+                    db.query(_Alimento)
+                    .filter(_Alimento.nombre_normalizado == _simp_n)
+                    .first()
+                ) or (
+                    db.query(_Alimento)
+                    .filter(_Alimento.nombre_normalizado.like(f"{_simp_n}%"))
+                    .order_by(_Alimento.id)
+                    .first()
+                )
+                if _alim and (_alim.calorias_100g or 0) > 0:
+                    _gramos_std = 200.0 if any(
+                        kw in _simp_n for kw in ("arroz", "pasta", "fideos", "pan", "yuca", "papa")
+                    ) else 150.0
+                    _kcal_a = round(float(_alim.calorias_100g) * _gramos_std / 100, 1)
+                    _p_a    = round(float(_alim.proteina_100g or 0) * _gramos_std / 100, 1)
+                    _c_a    = round(float(_alim.carbohidratos_100g or 0) * _gramos_std / 100, 1)
+                    _g_a    = round(float(_alim.grasas_100g or 0) * _gramos_std / 100, 1)
+                    # row[7]=True marca este ítem como alimento (no plato) para el desglose builder
+                    matched.append((
+                        (_alim.id, _alim.nombre, _kcal_a, _p_a, _c_a, _g_a, _gramos_std, True),
+                        1.0,
+                    ))
+                    _no_resueltos_c1 = [n for n in _no_resueltos_c1 if _norm_plato(n) != _simp_n]
+                    logger.info(
+                        "Capa1 B2: '%s' → alimento '%s' %.0fg (%.0f kcal)",
+                        _simp, _alim.nombre, _gramos_std, _kcal_a,
+                    )
 
         # Guard anti-duplicado eliminado — el usuario puede registrar el mismo plato
         # múltiples veces en la misma sesión (desayuno, almuerzo, cena, o porciones extra)
@@ -1372,18 +1439,32 @@ class RegistroComidaHandler:
             )
             return None
 
-        desglose = []
+        desglose: list[str] = []
         desglose_total = ""
-        if len(matched) == 1:
-            from app.services.asistente_nutricion import _cargar_ingredientes_bd
-            try:
-                desglose = _cargar_ingredientes_bd(db, matched[0][0][0])
-                desglose_total = (
-                    f"Total: {round(kcal, 1)} kcal"
-                    f" | P:{round(p_g, 1)}g | C:{round(c_g, 1)}g | G:{round(g_g, 1)}g"
-                )
-            except Exception:
-                pass
+        from app.services.asistente_nutricion import _cargar_ingredientes_bd
+        for _row, _qty in matched:
+            # row[7]=True → alimento simple (Caso B2), NO llamar _cargar_ingredientes_bd
+            # porque row[0] es alimento_id, no plato_id — causaría desglose del plato incorrecto
+            _es_alimento_simple = len(_row) > 7 and _row[7] is True
+            if not _es_alimento_simple:
+                try:
+                    _ing_list = _cargar_ingredientes_bd(db, _row[0])
+                    if _ing_list:
+                        desglose.extend(_ing_list)
+                        continue
+                except Exception:
+                    pass
+            # Fallback: línea única para alimentos simples (Caso B2) — row[6] = gramos
+            _gramos_d = float(_row[6]) if len(_row) > 6 else 100.0
+            _kcal_d   = round(float(_row[2] or 0), 1)
+            _gramos_s = str(int(_gramos_d)) if _gramos_d == int(_gramos_d) else str(_gramos_d)
+            _kcal_s   = str(int(_kcal_d)) if _kcal_d == int(_kcal_d) else str(_kcal_d)
+            desglose.append(f"{_row[1]} {_gramos_s}g ({_kcal_s} kcal)")
+        if desglose:
+            desglose_total = (
+                f"Total: {round(kcal, 1)} kcal"
+                f" | P:{round(p_g, 1)}g | C:{round(c_g, 1)}g | G:{round(g_g, 1)}g"
+            )
 
         if _no_resueltos_c1:
             logger.warning(

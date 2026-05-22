@@ -7,7 +7,7 @@ class PasswordReset(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, nullable=False)
-    reset_code = Column(String(6), nullable=False)
+    reset_code = Column(String(64), nullable=False)  # HMAC-SHA256 hex digest
     created_at = Column(DateTime, default=datetime.utcnow)
     is_used = Column(Boolean, default=False)
     used_at = Column(DateTime, nullable=True)

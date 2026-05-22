@@ -688,6 +688,13 @@ def check_checkin_status(
     """Verifica si el usuario necesita hacer el check-in del mes"""
     from app.core.utils import get_peru_now
     from app.models.historial import HistorialPeso
+    from app.models.client import Client as ClientModel
+
+    # Solo aplica a clientes — staff no necesita check-in
+    if not isinstance(current_user, ClientModel):
+        return {"needed": False, "already_done": True, "days_since": 0,
+                "days_until_checkin": 30, "precision": 100, "is_new_user": False}
+
     now = get_peru_now()
 
     # 🗓️ Primer día del mes actual (check-in mensual)
@@ -695,7 +702,8 @@ def check_checkin_status(
 
     # 🆕 REGLA PARA USUARIOS NUEVOS: No pedir check-in hasta después de 30 días
     now_naive = now.replace(tzinfo=None)
-    days_since_creation = (now_naive - current_user.created_at).days if current_user.created_at else 31
+    created = current_user.created_at.replace(tzinfo=None) if current_user.created_at else None
+    days_since_creation = (now_naive - created).days if created else 31
     is_new_user = days_since_creation < 30
 
     # 🔍 Verificar si ya registró peso este mes

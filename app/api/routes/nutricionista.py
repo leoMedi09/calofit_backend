@@ -122,7 +122,11 @@ def create_express_patient(
         hashed_password=hashed_dni,
         flutter_uid=flutter_uid,
         is_profile_complete=False,
-        assigned_nutri_id=current_user.id,
+        assigned_nutri_id=(
+            client_data.assigned_nutri_id
+            if str(getattr(current_user, "role_name", "")).lower() in {"admin", "administrador"}
+            else current_user.id
+        ),
         assigned_coach_id=client_data.assigned_coach_id,
     )
     
@@ -798,6 +802,7 @@ def get_coaches_list(
             "full_name": full_name or u.email,
             "email": u.email,
             "profile_picture_url": getattr(u, "profile_picture_url", None),
+            "pacientes_count": len(u.clients_as_coach),
         })
 
     return result

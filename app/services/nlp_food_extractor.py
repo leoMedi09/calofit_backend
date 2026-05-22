@@ -554,6 +554,15 @@ class NLPFoodExtractor:
         except Exception:
             return None
 
+    # Verbos de acción que indican que el nombre es el mensaje del usuario, no un alimento.
+    # Si el nombre a guardar contiene uno de estos tokens, se rechaza para evitar crear
+    # alimentos con nombre "tomé un vaso de X" o "comí una porción de Y".
+    _RE_NOMBRE_MENSAJE = re.compile(
+        r"\b(tom[eé]|com[ií]|beb[ií]|almorcé|almorce|desayun[eé]|cen[eé]|"
+        r"registra|anota|guard[ao]|agreg[ao]|prob[eé]|me\s+com[ií])\b",
+        re.IGNORECASE,
+    )
+
     def _guardar_en_bd(
         self,
         nombre_es: str,
@@ -562,6 +571,15 @@ class NLPFoodExtractor:
     ) -> Optional[Alimento]:
         """Guarda un alimento nuevo en BD. REGLA 4: siempre propaga fuente y flags de confianza."""
         try:
+            # Guard: rechazar nombres que son el mensaje del usuario (contienen verbos de acción).
+            # Previene alimentos como 'tomé un vaso de leche' creados cuando el texto
+            # completo del mensaje llega como nombre al pipeline de estimación.
+            if self._RE_NOMBRE_MENSAJE.search(nombre_es):
+                logger.warning(
+                    "Alimento '%s' rechazado — nombre parece un mensaje de usuario, no un alimento",
+                    nombre_es[:80],
+                )
+                return None
             _es_estimado = "groq" in fuente.lower() or "estimado" in fuente.lower()
             a = Alimento(
                 nombre=nombre_es,

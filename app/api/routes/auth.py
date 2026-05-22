@@ -9,8 +9,19 @@ from app.schemas.user import UserLogin, SyncPasswordRequest, ForgotPasswordReque
 from app.core.config import settings
 from jose import JWTError, jwt
 from app.models.client import Client
+import hmac
+import hashlib
 
 router = APIRouter()
+
+
+def _hash_reset_code(code: str) -> str:
+    """HMAC-SHA256 del código de reset — lo que se persiste en BD."""
+    return hmac.new(
+        settings.SECRET_KEY.encode(),
+        code.encode(),
+        hashlib.sha256,
+    ).hexdigest()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
@@ -482,33 +493,36 @@ async def verify_and_sync_password(
 
 @router.post("/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    """Paso 1: Solicitar código de recuperación"""
+    """Paso 1: Solicitar código de recuperación — solo para clientes."""
     from app.models.password_reset import PasswordReset
     from app.services.email_service import EmailService
     import random
-    
-    # 1. Buscar en ambas tablas
-    user = db.query(User).filter(User.email == request.email).first()
-    if not user:
-        client = db.query(Client).filter(Client.email == request.email).first()
-        if not client:
-            # Por seguridad, retornamos OK aunque no exista para evitar enumeración de correos
-            return {"success": True, "message": "Si el correo está registrado, recibirás un código."}
-            
-    # 2. Generar código de 6 dígitos
+
+    # 1. Si el email pertenece a staff → rechazar con mensaje claro
+    staff = db.query(User).filter(User.email == request.email).first()
+    if staff:
+        raise HTTPException(
+            status_code=403,
+            detail="Este servicio es solo para clientes. Si eres personal del gimnasio, contacta al administrador para restablecer tu contraseña."
+        )
+
+    # 2. Buscar solo en clientes
+    client = db.query(Client).filter(Client.email == request.email).first()
+    if not client:
+        # Respuesta genérica para no revelar si el correo existe
+        return {"success": True, "message": "Si el correo está registrado, recibirás un código."}
+
+    # 3. Generar código de 6 dígitos
     code = str(random.randint(100000, 999999))
-    
-    # 3. Guardar en base de datos
-    reset_record = PasswordReset(
-        email=request.email,
-        reset_code=code
-    )
+
+    # 4. Guardar hash en base de datos — el código plano solo viaja por correo
+    reset_record = PasswordReset(email=request.email, reset_code=_hash_reset_code(code))
     db.add(reset_record)
     db.commit()
-    
-    # 4. Enviar correo usando Brevo
+
+    # 5. Enviar código plano por correo
     EmailService.send_password_reset_brevo(request.email, code)
-    
+
     return {"success": True, "message": "Si el correo está registrado, recibirás un código."}
 
 @router.post("/verify-reset-code")
@@ -522,13 +536,13 @@ async def verify_reset_code(request: ValidateResetCodeRequest, db: Session = Dep
     
     record = db.query(PasswordReset).filter(
         PasswordReset.email == request.email,
-        PasswordReset.reset_code == request.reset_code,
+        PasswordReset.reset_code == _hash_reset_code(request.reset_code),
         PasswordReset.is_used == False
     ).order_by(PasswordReset.created_at.desc()).first()
-    
+
     if not record or record.is_expired():
         raise HTTPException(status_code=400, detail="Código inválido o expirado")
-        
+
     return {"success": True, "message": "Código válido"}
 
 @router.post("/reset-password")
@@ -539,28 +553,37 @@ async def reset_password(request: ValidateResetCodeRequest, db: Session = Depend
     # 1. Validar código
     record = db.query(PasswordReset).filter(
         PasswordReset.email == request.email,
-        PasswordReset.reset_code == request.reset_code,
+        PasswordReset.reset_code == _hash_reset_code(request.reset_code),
         PasswordReset.is_used == False
     ).order_by(PasswordReset.created_at.desc()).first()
-    
+
     if not record or record.is_expired():
         raise HTTPException(status_code=400, detail="Código inválido o expirado")
         
     # 2. Actualizar clave (buscar en User o Client)
     user = db.query(User).filter(User.email == request.email).first()
     if user:
+        # Staff: solo BD local (no usan Firebase)
         user.hashed_password = security.hash_password(request.new_password)
     else:
         client = db.query(Client).filter(Client.email == request.email).first()
         if client:
             client.hashed_password = security.hash_password(request.new_password)
+            # Sincronizar también en Firebase para que el login del cliente no falle
+            if client.flutter_uid:
+                try:
+                    from app.core.firebase import auth as firebase_admin_auth
+                    firebase_admin_auth.update_user(client.flutter_uid, password=request.new_password)
+                    print(f"✅ Firebase password actualizado para {client.email}")
+                except Exception as firebase_err:
+                    print(f"⚠️ No se pudo actualizar Firebase (BD local sí actualizada): {firebase_err}")
         else:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
-            
+
     # 3. Marcar código como usado
     record.is_used = True
     record.used_at = datetime.utcnow()
-    
+
     db.commit()
-    
+
     return {"success": True, "message": "Contraseña actualizada exitosamente"}

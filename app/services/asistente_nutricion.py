@@ -462,13 +462,23 @@ async def _buscar_o_crear_alimento_async(
     if not macros:
         return None
 
-    # 4. Verificar colisión antes de insertar para no crear duplicados
+    # 4. Verificar colisión antes de insertar para no crear duplicados.
+    # Guard: no crear alias si el nombre a buscar parece un mensaje del usuario
+    # (contiene verbos de acción como "tomé", "comí", etc.).
+    # Previene colisiones falsas como "tomé un vaso de chocolate" → "tomé un vaso de leche".
+    _RE_VERBO_USUARIO = re.compile(
+        r"\b(tom[eé]|com[ií]|beb[ií]|almorcé|almorce|desayun[eé]|cen[eé]|"
+        r"registra|anota|guard[ao]|agreg[ao]|prob[eé]|me\s+com[ií])\b",
+        re.IGNORECASE,
+    )
+    _nombre_es_mensaje = bool(_RE_VERBO_USUARIO.search(nombre_es or ""))
+
     colision = _buscar_colision_local(db, nombre_norm)
     if colision:
         alim_existente, sim = colision
-        if sim >= 0.85:
+        if sim >= 0.85 and not _nombre_es_mensaje:
             return alim_existente
-        elif sim >= 0.70:
+        elif sim >= 0.70 and not _nombre_es_mensaje:
             try:
                 from app.models.alimento_alias import AlimentoAlias
                 alias = AlimentoAlias(

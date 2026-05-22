@@ -253,11 +253,122 @@ class EmailService:
             "htmlContent": html_body
         }
 
+        import time
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=15)
+                response.raise_for_status()
+                print(f"Código de recuperación enviado a {email_to} usando BREVO API")
+                return response.json()
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                if attempt < 2:
+                    time.sleep(2)
+        print(f"Error crítico enviando código vía Brevo tras 3 intentos: {last_error}")
+        return None
+
+    @staticmethod
+    def send_welcome_staff_brevo(email_to: str, password: str, staff_name: str, role_name: str, admin_name: str):
+        """Correo de bienvenida al equipo para nuevo personal (nutri, coach, admin)."""
+        import requests, os
+        api_key = os.getenv("BREVO_API_KEY")
+        sender_email = os.getenv("BREVO_SENDER")
+        if not api_key or not sender_email:
+            print("Faltan credenciales BREVO_API_KEY o BREVO_SENDER en .env")
+            return None
+
+        role_label = {
+            "nutritionist": "Nutricionista", "nutricionista": "Nutricionista",
+            "coach": "Entrenador", "entrenador": "Entrenador", "trainer": "Entrenador",
+            "admin": "Administrador", "administrador": "Administrador",
+        }.get(role_name.lower(), role_name.capitalize())
+
+        html_body = f"""
+        <div style="font-family:sans-serif;max-width:460px;margin:auto;border:1px solid #eee;padding:28px;border-radius:14px;box-shadow:0 4px 12px rgba(0,0,0,0.06)">
+          <div style="text-align:center;margin-bottom:24px">
+            <h1 style="color:#1E88E5;margin:0;font-size:28px">CaloFit</h1>
+            <p style="color:#888;margin-top:6px;font-size:13px">Gimnasio World Light Lambayeque</p>
+          </div>
+          <p style="color:#333;font-size:15px;line-height:1.6">Hola, <strong>{staff_name}</strong> 👋</p>
+          <p style="color:#333;font-size:15px;line-height:1.6">
+            El administrador <strong>{admin_name}</strong> te ha dado acceso al sistema CaloFit
+            como <strong>{role_label}</strong>. Ya puedes ingresar a la aplicación con las siguientes credenciales:
+          </p>
+          <div style="background:#F1F5F9;border-left:4px solid #1E88E5;padding:18px;margin:20px 0;border-radius:6px">
+            <p style="margin:0 0 8px 0;color:#555;font-size:12px;text-transform:uppercase;font-weight:bold;letter-spacing:0.5px">Tus credenciales de acceso</p>
+            <p style="margin:0 0 6px 0;font-size:15px"><strong>Correo:</strong> {email_to}</p>
+            <p style="margin:0;font-size:15px"><strong>Contraseña:</strong> {password}</p>
+          </div>
+          <p style="color:#555;font-size:13px;line-height:1.5">
+            Ingresa a la app CaloFit con estos datos. Te recomendamos cambiar tu contraseña desde tu perfil después del primer ingreso.
+          </p>
+          <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
+          <p style="font-size:11px;color:#aaa;text-align:center;margin:0">Mensaje automático del sistema CaloFit · No respondas a este correo.</p>
+        </div>
+        """
+        payload = {
+            "sender": {"name": "CaloFit", "email": sender_email},
+            "to": [{"email": email_to}],
+            "subject": f"¡Bienvenido al equipo CaloFit, {staff_name.split()[0]}!",
+            "htmlContent": html_body,
+        }
         try:
-            response = requests.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            print(f"Código de recuperación enviado a {email_to} usando BREVO API")
-            return response.json()
+            r = requests.post("https://api.brevo.com/v3/smtp/email",
+                              headers={"accept": "application/json", "api-key": api_key, "content-type": "application/json"},
+                              json=payload)
+            r.raise_for_status()
+            print(f"Correo de bienvenida staff enviado a {email_to}")
+            return r.json()
         except requests.exceptions.RequestException as e:
-            print(f"Error crítico enviando código vía Brevo: {e}")
+            print(f"Error enviando bienvenida staff vía Brevo: {e}")
+            return None
+
+    @staticmethod
+    def send_password_updated_staff_brevo(email_to: str, staff_name: str, new_password: str, admin_name: str):
+        """Notificación al staff cuando el admin cambia su contraseña."""
+        import requests, os
+        api_key = os.getenv("BREVO_API_KEY")
+        sender_email = os.getenv("BREVO_SENDER")
+        if not api_key or not sender_email:
+            print("Faltan credenciales BREVO_API_KEY o BREVO_SENDER en .env")
+            return None
+
+        html_body = f"""
+        <div style="font-family:sans-serif;max-width:460px;margin:auto;border:1px solid #eee;padding:28px;border-radius:14px;box-shadow:0 4px 12px rgba(0,0,0,0.06)">
+          <div style="text-align:center;margin-bottom:24px">
+            <h1 style="color:#1E88E5;margin:0;font-size:28px">CaloFit</h1>
+            <p style="color:#888;margin-top:6px;font-size:13px">Aviso de Seguridad</p>
+          </div>
+          <p style="color:#333;font-size:15px;line-height:1.6">Hola, <strong>{staff_name}</strong></p>
+          <p style="color:#333;font-size:15px;line-height:1.6">
+            El administrador <strong>{admin_name}</strong> ha actualizado tu contraseña de acceso al sistema CaloFit.
+          </p>
+          <div style="background:#F1F5F9;border-left:4px solid #1E88E5;padding:18px;margin:20px 0;border-radius:6px">
+            <p style="margin:0 0 8px 0;color:#555;font-size:12px;text-transform:uppercase;font-weight:bold;letter-spacing:0.5px">Tus nuevas credenciales</p>
+            <p style="margin:0 0 6px 0;font-size:15px"><strong>Correo:</strong> {email_to}</p>
+            <p style="margin:0;font-size:15px"><strong>Nueva contraseña:</strong> {new_password}</p>
+          </div>
+          <p style="color:#e53935;font-size:13px;line-height:1.5">
+            Si no solicitaste este cambio, comunícate de inmediato con el administrador del gimnasio.
+          </p>
+          <hr style="border:none;border-top:1px solid #eee;margin:24px 0">
+          <p style="font-size:11px;color:#aaa;text-align:center;margin:0">Mensaje automático del sistema CaloFit · No respondas a este correo.</p>
+        </div>
+        """
+        payload = {
+            "sender": {"name": "CaloFit Seguridad", "email": sender_email},
+            "to": [{"email": email_to}],
+            "subject": "Tu contraseña CaloFit fue actualizada",
+            "htmlContent": html_body,
+        }
+        try:
+            r = requests.post("https://api.brevo.com/v3/smtp/email",
+                              headers={"accept": "application/json", "api-key": api_key, "content-type": "application/json"},
+                              json=payload)
+            r.raise_for_status()
+            print(f"Notificación de cambio de contraseña enviada a {email_to}")
+            return r.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error enviando notificación de contraseña vía Brevo: {e}")
             return None

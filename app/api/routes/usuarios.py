@@ -38,28 +38,46 @@ async def subir_foto_perfil(
     return {"message": "Foto de perfil actualizada exitosamente", "url": public_url}
 
 @router.post("/registrar", status_code=201)
-async def registrar_usuario(usuario_data: UserCreate, db: Session = Depends(get_db)):
-    
+async def registrar_usuario(
+    usuario_data: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     usuario_existente = db.query(User).filter(User.email == usuario_data.email).first()
     if usuario_existente:
         raise HTTPException(status_code=400, detail="El correo electrónico ya está registrado")
 
-    
     hashed_pwd = security.hash_password(usuario_data.password)
-    
+
     nuevo_usuario = User(
         first_name=usuario_data.first_name,
         last_name_paternal=usuario_data.last_name_paternal,
         last_name_maternal=usuario_data.last_name_maternal,
         email=usuario_data.email,
         hashed_password=hashed_pwd,
-        role_name=usuario_data.role, 
-        role_id=usuario_data.role_id 
+        role_name=usuario_data.role,
+        role_id=usuario_data.role_id,
     )
-    
+
     db.add(nuevo_usuario)
     db.commit()
     db.refresh(nuevo_usuario)
+
+    # ✉️ Correo de bienvenida al nuevo miembro del equipo
+    try:
+        from app.services.email_service import EmailService
+        admin_name = f"{current_user.first_name} {current_user.last_name_paternal}".strip()
+        staff_name = f"{nuevo_usuario.first_name} {nuevo_usuario.last_name_paternal}".strip()
+        EmailService.send_welcome_staff_brevo(
+            email_to=nuevo_usuario.email,
+            password=usuario_data.password,
+            staff_name=staff_name,
+            role_name=nuevo_usuario.role_name,
+            admin_name=admin_name,
+        )
+    except Exception as e:
+        print(f"⚠️ No se pudo enviar correo de bienvenida al staff: {e}")
+
     return nuevo_usuario
     
     

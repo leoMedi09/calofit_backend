@@ -68,13 +68,15 @@ async def crear_personal_staff(
         "users", nuevo_usuario.id
     )
     
-    # ✉️ Enviar correo de bienvenida con credenciales usando Brevo
+    # ✉️ Correo de bienvenida al equipo con credenciales
     try:
         from app.services.email_service import EmailService
-        EmailService.send_welcome_credentials_brevo(
+        EmailService.send_welcome_staff_brevo(
             email_to=usuario_data.email,
-            dni=usuario_data.password, # Se asume que la contraseña inicial es asignada aquí
-            nutricionista_name=f"{current_user.first_name} (Admin)"
+            password=usuario_data.password,
+            staff_name=f"{nuevo_usuario.first_name} {nuevo_usuario.last_name_paternal}".strip(),
+            role_name=nuevo_usuario.role_name,
+            admin_name=f"{current_user.first_name} {current_user.last_name_paternal}".strip(),
         )
     except Exception as e:
         print(f"⚠️ No se pudo enviar el correo de bienvenida al staff: {e}")
@@ -95,20 +97,23 @@ async def listar_personal_staff(
     try:
         # 2. Obtener usuarios filtrados (Incluyendo todas las variantes de admin y staff)
         usuarios_db = db.query(User).filter(
-            User.role_name.ilike("%admin%"), # Captura admin, administrador, Administrador, etc.
+            User.role_name.ilike("%admin%"),
             User.id != current_user.id
         ).all()
-        
-        # También incluir nutricionistas y entrenadores de forma flexible
+
         especialistas = db.query(User).filter(
-            (User.role_name.ilike("%nutri%")) | 
-            (User.role_name.ilike("%coach%")) | 
+            (User.role_name.ilike("%nutri%")) |
+            (User.role_name.ilike("%coach%")) |
             (User.role_name.ilike("%train%")) |
             (User.role_name.ilike("%entrenador%")),
             User.id != current_user.id
         ).all()
-        
-        usuarios_db.extend(especialistas)
+
+        # Deduplicar por id y ordenar — sin ORDER BY PostgreSQL cambia el orden tras UPDATE
+        seen = {}
+        for u in usuarios_db + especialistas:
+            seen[u.id] = u
+        usuarios_db = sorted(seen.values(), key=lambda u: u.id)
         
         # 3. Mapeo manual a diccionario
         res = []
@@ -121,11 +126,16 @@ async def listar_personal_staff(
             elif "coach" in role_lower or "train" in role_lower:
                 count = len(u.clients_as_coach)
                 
+            _fn = u.first_name or ""
+            _lp = u.last_name_paternal or ""
+            _lm = u.last_name_maternal or ""
+            _full = f"{_fn} {_lp} {_lm}".strip() or u.email
             res.append({
                 "id": u.id,
-                "first_name": u.first_name if u.first_name else "N/A",
-                "last_name_paternal": u.last_name_paternal if u.last_name_paternal else "",
-                "last_name_maternal": u.last_name_maternal if u.last_name_maternal else "",
+                "first_name": _fn or "N/A",
+                "last_name_paternal": _lp,
+                "last_name_maternal": _lm,
+                "full_name": _full,
                 "email": u.email if u.email else "sin@email.com",
                 "role_name": u.role_name if u.role_name else "staff",
                 "is_active": u.is_active,
@@ -194,13 +204,25 @@ async def cambiar_password_staff(
         
     usuario.hashed_password = security.hash_password(password_data.new_password)
     db.commit()
-    
+
     _log_admin_action(
-        db, current_user.id, "CAMBIO_PASSWORD", 
+        db, current_user.id, "CAMBIO_PASSWORD",
         f"Se cambió la contraseña de {usuario.first_name} ({usuario.email})",
         "users", usuario.id
     )
-    
+
+    # ✉️ Notificar al staff que su contraseña fue actualizada
+    try:
+        from app.services.email_service import EmailService
+        EmailService.send_password_updated_staff_brevo(
+            email_to=usuario.email,
+            staff_name=f"{usuario.first_name} {usuario.last_name_paternal}".strip(),
+            new_password=password_data.new_password,
+            admin_name=f"{current_user.first_name} {current_user.last_name_paternal}".strip(),
+        )
+    except Exception as e:
+        print(f"⚠️ No se pudo notificar el cambio de contraseña al staff: {e}")
+
     return {"message": f"Contraseña de {usuario.first_name} actualizada correctamente"}
 
 @router.put("/staff/{user_id}")

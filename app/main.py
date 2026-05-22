@@ -9,12 +9,12 @@ from app.models import user, client, role, historial
 from app.api import api_router
 from app.api.routes.websockets import router as websocket_router
 
-# ✅ REMOVER IMPORTACIÓN DIRECTA - YA ESTÁ EN api_router
+
 # from app.api.routes.clientes import router as clientes_router
 
 Base.metadata.create_all(bind=engine) 
 
-# ✅ MIGRACIONES MANUALES: Columnas añadidas post-creación inicial
+# MIGRACIONES MANUALES: Columnas añadidas post-creación inicial
 from sqlalchemy import text
 with engine.connect() as connection:
     try:
@@ -22,12 +22,11 @@ with engine.connect() as connection:
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS workout_type VARCHAR DEFAULT 'Cardio';"))
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS session_duration FLOAT DEFAULT 1.0;"))
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nutri_weekly_note TEXT;"))
-        # Eliminar tabla obsoleta (reemplazada por platos + plato_ingredientes + historial_recomendaciones)
         connection.execute(text("DROP TABLE IF EXISTS platos_recomendados CASCADE;"))
         connection.commit()
-        print("✅ Migraciones manuales aplicadas correctamente.")
+        print("Migraciones manuales aplicadas correctamente.")
     except Exception as e:
-        print(f"⚠️ Error en migración manual: {e}")
+        print(f"Error en migración manual: {e}")
 
 app = FastAPI(title="CaloFit - Gimnasio World Light API")
 

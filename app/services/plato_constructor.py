@@ -88,6 +88,15 @@ _RANGOS_CALORICOS: dict = {
     "causa ferreñafana":(400,  650),   # plato norteño compacto
     "arroz con pato":   (700, 1000),   # ración almuerzo — mínimo 700 kcal exigido
     "jalea":            (500,  900),   # fritura mixta con absorción de aceite
+    # Platos adicionales con rango calórico definido
+    "chaufa":           (350,  750),   # arroz chaufa (verduras ~400, con proteína ~600)
+    "sopa":             (100,  400),   # sopas / caldos / chupe / crema
+    "ensalada":         ( 80,  500),   # ensaladas (simple ~150, con pollo/palta ~400)
+    "anticucho":        (200,  500),   # anticuchos (por porción ~ 3-4 pinchos)
+    "mazamorra":        (150,  400),   # postre de maíz / mazamorra morada
+    "picarones":        (250,  550),   # picarones con miel de chancaca
+    "apanado":          (400,  900),   # X apanado: proteína + rebozado + aceite
+    "milanesa":         (400,  900),   # milanesa: igual que apanado
 }
 
 # ─── Filtro de coherencia semántica ──────────────────────────────────────────
@@ -118,6 +127,10 @@ _CONFLICTOS_SEMANTICOS: list[tuple[set[str], frozenset[str]]] = [
     ({"cebiche", "ceviche", "tiradito"},
      frozenset({"frito", "rebozado", "empanizado", "apanado",
                 "horneado", "a la plancha con aceite"})),
+    # Sudado / aguadito / chilcano: pescado FRESCO o cocido — nunca frito ni apanado
+    ({"sudado", "aguadito", "chilcano"},
+     frozenset({"pescado blanco frito", "pescado frito", "apanado", "frito",
+                "rebozado", "empanizado", "chicharron de pescado"})),
     # Platos al horno / parrilla: prohibir variantes sancochadas
     ({"al horno", "a la parrilla", "horneado", "parrillada"},
      frozenset({"sancochado", "sancochada", "hervido", "hervida"})),
@@ -130,10 +143,18 @@ _CONFLICTOS_SEMANTICOS: list[tuple[set[str], frozenset[str]]] = [
     ({"jalea"},
      frozenset({"pescado blanco fresco", "pescado blanco cocido",
                 "calamar crudo", "langostino crudo"})),
-    # Pescado frito / chicharrón / filete: sin lácteos (queso, crema, mantequilla)
-    ({"chicharron de pescado", "chicharrón de pescado", "filete frito"},
-     frozenset({"queso", "queso fresco", "crema de leche", "crema",
-                "leche evaporada", "yogurt", "mantequilla"})),
+    # Chaufa: no lleva perejil, cilantro ni aceite de oliva — sabor asiático-peruano
+    ({"chaufa", "arroz chaufa"},
+     frozenset({"perejil", "cilantro", "albahaca", "aceite de oliva",
+                "mantequilla", "crema de leche"})),
+    # Cualquier "X apanado / empanizado / milanesa": SOLO proteína X + huevo + harina + aceite.
+    # NUNCA verduras de acompañamiento — el rebozado es el único "extra" válido.
+    ({"apanado", "apanada", "empanizado", "empanizada", "milanesa", "rebozado", "rebozada"},
+     frozenset({"cebolla", "ajo", "perejil", "cilantro", "albahaca",
+                "palta", "aguacate", "tomate", "zanahoria", "pimiento", "pepino",
+                "lechuga", "espinaca", "brocoli", "brócoli", "champiñon", "champiñones",
+                "arroz", "papa cocida", "papa sancochada", "fideos",
+                "queso", "crema de leche", "leche evaporada", "yogurt", "mantequilla"})),
     # Cebiches/tiraditos de mariscos: sin lácteos ni vegetales cocidos calientes
     ({"cebiche de camaron", "cebiche de langostino", "cebiche mixto"},
      frozenset({"queso", "crema de leche", "papa cocida", "zanahoria cocida",
@@ -238,7 +259,8 @@ _PLANTILLAS_PLATOS: dict[str, dict] = {
     "ceviche_cebiche": {
         "keywords_plato": ["ceviche", "cebiche"],
         "ingredientes_base": [
-            "pescado", "caballa", "lisa", "mero", "tollo",
+            "pescado", "caballa", "lisa", "mero", "tollo", "toyo",
+            "merluza", "cabrilla", "ojo de uva", "jurel", "bonito",
             "camaron", "langostino", "pulpo", "calamar",
         ],
         "prohibidos": ["queso", "crema", "leche", "mayonesa", "mantequilla", "yogurt"],
@@ -279,12 +301,14 @@ _PLANTILLAS_PLATOS: dict[str, dict] = {
 _PLATOS_ESENCIALES: dict[str, dict] = {
     "ceviche": {
         "obligatorios": ["pescado", "limon", "cebolla", "lisa", "caballa",
-                         "mero", "tollo", "camaron", "langostino", "pulpo"],
+                         "mero", "tollo", "toyo", "merluza", "cabrilla",
+                         "ojo de uva", "jurel", "camaron", "langostino", "pulpo"],
         # El ceviche DEBE tener: al menos un pescado/marisco Y limón Y cebolla
         "obligatorio_todos": [
             # grupo 1: proteína marina (al menos 1)
-            ("pescado", "lisa", "caballa", "mero", "tollo", "camaron",
-             "langostino", "pulpo", "calamar", "anchoveta", "bonito",
+            ("pescado", "lisa", "caballa", "mero", "tollo", "toyo",
+             "merluza", "cabrilla", "ojo de uva", "jurel",
+             "camaron", "langostino", "pulpo", "calamar", "anchoveta", "bonito",
              "trucha", "salmon", "atun"),
             # grupo 2: ácido (al menos 1)
             ("limon", "lima", "citrico"),
@@ -297,6 +321,7 @@ _PLATOS_ESENCIALES: dict[str, dict] = {
     "tiradito": {
         "obligatorio_todos": [
             ("pescado", "lisa", "caballa", "mero", "lenguado", "trucha",
+             "tollo", "toyo", "merluza", "cabrilla", "ojo de uva",
              "salmon", "atun", "bonito"),
             ("limon", "lima"),
         ],
@@ -315,9 +340,66 @@ _PLATOS_ESENCIALES: dict[str, dict] = {
         ],
         "prohibidos": ["carne", "pollo", "pescado"],
     },
+    "chaufa": {
+        # Arroz chaufa siempre lleva arroz y huevo como mínimo
+        "obligatorio_todos": [
+            ("arroz",),
+            ("huevo",),
+        ],
+        "prohibidos": ["perejil", "cilantro", "aceite de oliva", "mantequilla"],
+    },
+    "aji de gallina": {
+        # Plato bandera — debe llevar pollo, no pescado ni res
+        "obligatorio_todos": [
+            ("pollo", "pechuga", "muslo"),
+        ],
+        "prohibidos": ["pescado", "res", "cerdo", "chancho"],
+    },
+    "tacu tacu": {
+        # Tacu tacu = arroz + frejoles mezclados y fritos
+        "obligatorio_todos": [
+            ("arroz",),
+            ("frejol", "frejoles", "menestra"),
+        ],
+        "prohibidos": [],
+    },
     "ensalada": {
         "obligatorio_todos": [],
         "prohibidos": ["salchipapa"],
+    },
+    # Regla general para CUALQUIER "X apanado/empanizado/milanesa"
+    # La clave se busca como substring en el nombre normalizado del plato.
+    "apanado": {
+        "obligatorio_todos": [
+            ("huevo",),
+            ("harina", "pan rallado", "pan molido", "galleta molida"),
+        ],
+        "prohibidos": ["cebolla", "ajo", "perejil", "cilantro", "albahaca",
+                       "tomate", "palta", "zanahoria", "lechuga", "espinaca",
+                       "arroz", "fideos"],
+    },
+    "milanesa": {
+        "obligatorio_todos": [
+            ("huevo",),
+            ("harina", "pan rallado", "pan molido"),
+        ],
+        "prohibidos": ["cebolla", "ajo", "perejil", "cilantro", "arroz", "fideos"],
+    },
+    "pollo apanado": {
+        "obligatorio_todos": [
+            ("pollo", "pechuga", "muslo"),
+            ("huevo",),
+        ],
+        "prohibidos": ["pescado", "res", "cerdo", "cebolla", "ajo",
+                       "perejil", "cilantro", "tomate", "palta", "zanahoria"],
+    },
+    "pescado apanado": {
+        "obligatorio_todos": [
+            ("pescado", "filete", "pescado blanco"),
+            ("huevo",),
+        ],
+        "prohibidos": ["cebolla", "ajo", "perejil", "cilantro", "albahaca",
+                       "tomate", "palta", "zanahoria"],
     },
 }
 
@@ -472,6 +554,8 @@ def validar_semantica_plato(
 # Complementa validar_semantica_plato() que solo cubre 6 tipos de _PLANTILLAS_PLATOS.
 _PROTEINAS_REQUERIDAS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
     (("pollo",),                         ("pollo", "pechuga", "muslo")),
+    # "gallina" en nombre → acepta gallina o pollo/pechuga (sustituto habitual en ají de gallina)
+    (("gallina",),                       ("gallina", "pollo", "pechuga", "muslo")),
     (("pato",),                          ("pato",)),
     (("pavo", "pavita"),                 ("pavo", "pavita")),
     (("bistec", "carne de res", "lomo saltado"),
@@ -489,6 +573,11 @@ _PROTEINAS_REQUERIDAS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
     (("salmon",),                        ("salmon",)),
     (("trucha",),                        ("trucha",)),
     (("caballa",),                       ("caballa",)),
+    (("merluza",),                       ("merluza",)),
+    (("tollo",),                         ("tollo", "toyo")),
+    (("toyo",),                          ("toyo", "tollo")),
+    (("mero",),                          ("mero",)),
+    (("lisa",),                          ("lisa",)),
     (("camaron",),                       ("camaron", "langostino")),
     # "lisa" como token completo → pez, no adjetivo.
     # Se verifica con word-level token en _validar_consistencia_final().
@@ -731,7 +820,19 @@ _PALABRAS_IGNORADAS_NOMBRE = frozenset({
     # conectores y artículos
     "con", "sin", "del", "los", "las", "una", "unos", "unas",
     # descriptores de preparación (no son ingredientes)
-    "horno", "plancha", "parrilla", "vapor", "frito", "cocido", "asado",
+    "horno", "plancha", "parrilla", "vapor", "frito", "frita", "cocido", "cocida", "asado", "asada",
+    "horneado", "horneada",     # hornear — "arroz horneado"
+    "apanado", "apanada",       # apanado en pan rallado — "pescado apanado"
+    "empanizado", "empanizada", # empanizado — variante de apanado
+    "rebozado", "rebozada",     # rebozado en harina/huevo
+    "ahumado", "ahumada",       # ahumado (trucha ahumada, pollo ahumado)
+    "gratinado", "gratinada",   # gratinado con queso
+    "sancochado", "sancochada", # sancochado/hervido
+    "caramelizado",             # cebollas caramelizadas
+    "agridulce",                # pollo agridulce, cerdo agridulce (chifa)
+    "crujiente",                # pollo crujiente, maíz crujiente
+    "dorado", "dorada",         # pollo dorado, papa dorada
+    "salteado", "salteada",     # salteado de verduras
     "ligera", "ligero", "saludable", "natural", "fresco", "fresca",
     "estilo", "tipo", "especial", "peruano", "peruana", "casero", "casera",
     "salsa", "estofado", "guiso", "sudado", "saltado",
@@ -747,8 +848,32 @@ _PALABRAS_IGNORADAS_NOMBRE = frozenset({
     "tallarines", "fideos", "espagueti", "fettuccine",
     # descriptores adicionales de cantidad/método
     "porcion", "porcion", "controlada", "rellena", "relleno",
+    # Cortes de carne — el ingrediente en BD es la carne genérica (ej: "Cerdo Lomo Cocido"),
+    # no el corte específico. El validador busca "cerdo/pollo/res" en los resueltos.
+    "chuleta",     # chuleta de cerdo/res — corte, no ingrediente propio en BD
+    "filete",      # filete de res/pollo — ídem
+    "bistec",      # bistec de res — ídem
+    "lomo",        # lomo fino/saltado — puede ser plato o corte; no verificar como ingrediente
     # términos regionales que no mapean a ingredientes individuales
-    "canchita", "serrana", "serrano",
+    "canchita", "serrana", "serrano", "norteno", "criollo", "criolla",
+    # Tipos de plato peruanos (no son ingredientes en BD)
+    "chaufa",       # arroz chaufa / chifa peruano
+    "anticucho",    # anticuchos de corazón / pollo (singular)
+    "anticuchos",   # plural — forma más común en nombres de platos
+    "mazamorra",    # mazamorra morada / de maíz
+    "picarones",    # picarones de camote/zapallo
+    "empanada",     # empanada de pollo / carne
+    "empanadas",
+    "alfajor",      # postre — alfajor de manjar blanco
+    "alfajores",
+    "pepian",       # seco a lo pepián
+    "chicharron",   # chicharrón como tipo de plato (ej: "chicharrón de cerdo con mote")
+    # Descriptores de color usados en nombres de platos, no en alimentos BD
+    "morado",       # mazamorra morada, chicha morada → el color no es ingrediente
+    "morada",
+    # Nombres de animal en platos peruanos donde el LLM puede usar "pollo" en lugar de "gallina"
+    # _PROTEINAS_REQUERIDAS ya verifica que haya pollo/pechuga si el nombre tiene "gallina"
+    "gallina",
 })
 
 
@@ -1211,7 +1336,11 @@ async def _descomponer_plato_llm(nombre_plato: str) -> List[dict]:
             f"    Ejemplo genérico: Batido de Plátano = [plátano 120g, leche fresca entera 200g]\n"
             f"  * ENSALADA: ingredientes frescos/crudos. PROHIBIDO: ingredientes sancochados pesados\n"
             f"    como papa, yuca, camote (a menos que el nombre lo especifique).\n"
-            f"- Total gramos: 400-750 para platos completos; 150-200 para cebiche/tiradito; 100-300 para snacks/batidos\n"
+            f"- Total gramos por tipo:\n"
+            f"  * Platos completos (segundo, guiso, saltado, arroz): 400-750g total\n"
+            f"  * Cebiche / tiradito: PESCADO 130-180g + acompañamiento (cebolla, limón, papa, ají) → total 350-500g\n"
+            f"    NUNCA más de 200g de pescado en cebiche. Ejemplo: Merluza 150g, Cebolla 80g, Jugo de Limón 50g, Papa Cocida 80g, Ají 15g, Cilantro 5g\n"
+            f"  * Snacks / batidos / bebidas: 100-300g total\n"
             f"- Nombres genéricos (sin marcas)\n"
             f"- SIEMPRE expresa cantidades en GRAMOS enteros, NUNCA en unidades genéricas\n"
             f"  Ejemplos de conversión: 1 huevo→55g, 1 plátano→120g, 1 cebolla→80g,\n"
@@ -1221,12 +1350,24 @@ async def _descomponer_plato_llm(nombre_plato: str) -> List[dict]:
             f"  * Cebiche / tiradito / crudo → pescado FRESCO\n"
             f"  * Al horno / asado / parrilla → ingrediente crudo o 'Al Horno' (NO sancochado)\n"
             f"  * NUNCA uses 'Cocido' ni 'Sancochado' para preparaciones frías\n"
-            f"- Si el plato es marino u Omega-3, usa OBLIGATORIAMENTE en este orden:\n"
+            f"- Si el nombre del plato especifica un pescado (ej. 'ceviche de cabrilla', 'sudado de mero'),\n"
+            f"  USA ESE PESCADO EXACTAMENTE. NUNCA lo reemplaces por otro.\n"
+            f"- Si el plato es marino/Omega-3 y NO especifica pescado, usa en este orden:\n"
             f"  1. Caballa  2. Lisa  3. Mero  4. Tollo\n"
             f"  El Atún y el Salmón SOLO si el usuario los pide explícitamente.\n"
             f"- Causa Ferreñafana: proteína='Pescado Salpreso'. Acompañamiento: Papa+Camote+Huevo+Plátano+Cebolla/Ají.\n"
             f"- Arroz con Pato: proteína='Pato'. Base: arroz verde (culantro+ají+chicha). Mínimo 700 kcal.\n"
-            f"- Jalea de mariscos: usa SIEMPRE variantes FRITAS — 'Pescado Blanco Frito', 'Calamar Frito'."
+            f"- Jalea de mariscos: usa SIEMPRE variantes FRITAS — 'Pescado Blanco Frito', 'Calamar Frito'.\n"
+            f"- Chaufa / Arroz Chaufa: ingredientes OBLIGATORIOS: Arroz Blanco Cocido (200g), Huevo (55g), "
+            f"Sillao (15g), Jengibre (5g), Cebolla (80g), Ajo (10g), Aceite Vegetal (10g). "
+            f"Verduras opcionales según variante: Zanahoria, Pimiento, Cebolla China. "
+            f"NUNCA: perejil, cilantro, aceite de oliva.\n"
+            f"- X Apanado / X Empanizado / Milanesa de X: ingredientes SIEMPRE = "
+            f"proteína X (150-200g) + Huevo (55g) + Harina De Trigo Fortificada Con Hierro (30g) + Aceite Vegetal (15g). "
+            f"Ejemplos: Pollo Apanado → Pechuga De Pollo Cocida 165g. "
+            f"Pescado Apanado → Pescado Blanco Frito 200g (usar la variante 'Frito'). "
+            f"Res/Milanesa → Carne De Res Magra Cocida 150g. "
+            f"NUNCA agregar: cebolla, ajo, perejil, cilantro, palta, tomate, zanahoria, arroz, fideos."
         )
         resp = await ia_engine._llamar_groq(prompt=prompt, max_tokens=300, temp=0.05)
         resp = re.sub(r"```(?:json)?", "", resp).strip().strip("`")
@@ -1508,6 +1649,21 @@ async def crear_plato_dinamico(
             tipo_plato = "arroz con pato"
         elif nombre_norm.startswith("jalea"):
             tipo_plato = "jalea"
+        elif "chaufa" in nombre_norm:
+            tipo_plato = "chaufa"
+        elif any(kw in nombre_norm for kw in ("sopa", "caldo", "chupe", "aguadito")):
+            tipo_plato = "sopa"
+        elif "ensalada" in nombre_norm:
+            tipo_plato = "ensalada"
+        elif "mazamorra" in nombre_norm:
+            tipo_plato = "mazamorra"
+        elif "picarones" in nombre_norm:
+            tipo_plato = "picarones"
+        elif "anticucho" in nombre_norm:
+            tipo_plato = "anticucho"
+        elif any(kw in nombre_norm for kw in ("apanado", "apanada", "empanizado",
+                                               "milanesa", "rebozado")):
+            tipo_plato = "almuerzo"
 
     # Guardia no-alimento: rechazar si contiene tokens claramente no-alimentarios
     _tokens = set(nombre_norm.split())
@@ -1553,6 +1709,23 @@ async def crear_plato_dinamico(
         gramos = item["gramos"]
         nombre_ing_norm = _norm(nombre_ing_es)
         alim = await _buscar_o_crear_alimento_async(db, nombre_ing_norm, nombre_ing_es)
+
+        # Fallback de simplificación: si el nombre completo falla (ej. "Perejil Deshidratado"),
+        # quitar el último descriptor y reintentar ("Perejil").
+        # Solo 1 paso para no sobre-simplificar ("Ají Amarillo" no debe reducirse a "Ají").
+        if not alim:
+            _partes = nombre_ing_es.split()
+            if len(_partes) >= 2:
+                _nombre_simple = " ".join(_partes[:-1])
+                _norm_simple   = _norm(_nombre_simple)
+                if len(_norm_simple) >= 4:
+                    alim = await _buscar_o_crear_alimento_async(db, _norm_simple, _nombre_simple)
+                    if alim:
+                        logger.info(
+                            "Ingrediente '%s' → simplificado a '%s'",
+                            nombre_ing_es, _nombre_simple,
+                        )
+
         if alim:
             resueltos.append((alim, gramos))
         else:
