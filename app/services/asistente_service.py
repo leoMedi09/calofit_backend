@@ -14,6 +14,14 @@ import asyncio
 import re
 from datetime import datetime
 
+# Verbos de ingesta en pasado — redirigen al handler directo (sin LLM)
+# cuando el modo ya fue clasificado como REGISTRAR_NUTRICION.
+# Ejemplos: "Temprano comí pan con pollo", "Almorcé lomo saltado con su gaseosa"
+_RE_PASADO_COMER = re.compile(
+    r"\b(com[ií]|desayun[eé]|almor[cz][eaé]|cen[eé]|tom[eé]|beb[ií]|inger[ií])\b",
+    re.IGNORECASE,
+)
+
 from sqlalchemy.orm import Session
 
 from app.core.cache import get_consulta_cached
@@ -199,10 +207,14 @@ class AsistenteService:
         # Modo funcional + guard rails
         modo_funcion = await resolver_modo_funcion(self.ia, mensaje, es_saludo)
 
-        # ── Redirección imperativa: "Regístrame / Anota / Guarda" → NLP handler ──
+        # ── Redirección registro comida → NLP handler (sin pasar por LLM) ─────────
+        # Cubre dos patrones cuando modo ya clasificado como REGISTRAR_NUTRICION:
+        #   A) Imperativo:  "Regístrame / Anota / Guarda el ceviche"
+        #   B) Pasado:      "Temprano comí pan con pollo, almorcé lomo saltado"
         # Evita que el flujo consultar() muestre una tarjeta RECIPE sin persistir.
-        if modo_funcion == REGISTRAR_NUTRICION and any(
-            msg_limpio.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO
+        if modo_funcion == REGISTRAR_NUTRICION and (
+            any(msg_limpio.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO)
+            or bool(_RE_PASADO_COMER.search(msg_limpio))
         ):
             return await registro_comida_handler.registrar(
                 mensaje, perfil, plan_hoy_data, db, self.ia

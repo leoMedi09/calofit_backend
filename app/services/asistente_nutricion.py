@@ -2537,6 +2537,17 @@ async def procesar_secciones_comida(
         }
         set_consulta_cached(consulta_id, payload)
         seccion["consulta_id"] = consulta_id
+
+        # Marcar si el nombre del plato aparece en el mensaje del usuario.
+        # rescue_nlp_log lo usa para no confundir sugerencias proactivas del LLM
+        # (ej. "Palta ensalada") con comida reportada por el usuario.
+        if mensaje_original:
+            _nom_pal = [
+                w for w in _norm_nombre_plato(nombre_limpio).split()
+                if len(w) > 3
+            ]
+            if any(w in (mensaje_original or "").lower() for w in _nom_pal):
+                seccion["_origen_usuario"] = True
         macros_canon = (
             f"Cal: {payload['calorias']}kcal | P: {payload['proteinas_g']}g | "
             f"C: {payload['carbohidratos_g']}g | G: {payload['grasas_g']}g"

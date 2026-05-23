@@ -103,26 +103,58 @@ class FatSecretClient:
         self._refresh_token()
 
     def foods_search(self, search_expression: str, max_results: int = 5) -> Dict[str, Any]:
+        """
+        Busca alimentos con reintentos automáticos:
+        - 429 Rate Limit → backoff exponencial 2s / 4s / 8s (3 intentos)
+        - Error de red    → backoff lineal 1s / 2s (3 intentos)
+        Devuelve {} en lugar de lanzar excepción tras agotar los intentos.
+        """
+        import logging as _log
+        _logger = _log.getLogger(__name__)
+
         self._ensure_token()
         expr = (search_expression or "").strip()[:200]
         if len(expr) < 2:
             return {}
-        with httpx.Client(timeout=30.0) as client:
-            r = client.post(
-                _API_URL,
-                headers={
-                    "Authorization": f"Bearer {self._access_token}",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                data={
-                    "method": "foods.search",
-                    "search_expression": expr,
-                    "format": "json",
-                    "max_results": str(min(50, max(1, max_results))),
-                },
-            )
-            r.raise_for_status()
-            return r.json()
+
+        last_error: Any = None
+        for attempt in range(3):
+            try:
+                with httpx.Client(timeout=30.0) as client:
+                    r = client.post(
+                        _API_URL,
+                        headers={
+                            "Authorization": f"Bearer {self._access_token}",
+                            "Content-Type": "application/x-www-form-urlencoded",
+                        },
+                        data={
+                            "method": "foods.search",
+                            "search_expression": expr,
+                            "format": "json",
+                            "max_results": str(min(50, max(1, max_results))),
+                        },
+                    )
+                    if r.status_code == 429:
+                        wait_sec = 2 ** (attempt + 1)   # 2 → 4 → 8 s
+                        _logger.warning(
+                            "FatSecret 429 Rate Limit (intento %d/3) — esperando %ds",
+                            attempt + 1, wait_sec,
+                        )
+                        time.sleep(wait_sec)
+                        last_error = f"429 Rate Limit (intento {attempt + 1})"
+                        continue
+                    r.raise_for_status()
+                    return r.json()
+            except httpx.RequestError as exc:
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(1 << attempt)  # 1 → 2 s
+
+        _logger.error(
+            "FatSecret foods_search falló tras 3 intentos para '%s': %s",
+            expr, last_error,
+        )
+        return {}
 
     def lookup_macros(
         self,

@@ -84,6 +84,20 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
         "pasta",
         "snack",
         "comida",
+        # Verbos de ingesta de líquidos
+        "tomé",
+        "tome ",
+        "bebí",
+        "bebi ",
+        "me tomé",
+        "me tome",
+        "me bebí",
+        "gaseosa",
+        "limonada",
+        "chicha",
+        "jugo",
+        "refresco",
+        "cerveza",
     )
     ej_ctx = (
         "ejercicio",
@@ -221,9 +235,30 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
     """
     if es_saludo or len((mensaje or "").strip()) < 2:
         return OTRO
-    # Pre-check: verbos imperativos → nunca pasar al LLM (evita que clasifique como RECIPE)
     _m = (mensaje or "").lower().strip()
+    # Pre-check 1: verbos imperativos → nunca pasar al LLM (evita que clasifique como RECIPE)
     if any(_m.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO):
+        return REGISTRAR_NUTRICION
+    # Pre-check 2: verbos de consumo pasado ("tomé", "bebí", "comí"…) + alimento o bebida →
+    # son registros afirmativos, no consultas. Resolverlos antes del LLM evita que los
+    # clasifique como INFO cuando el usuario simplemente informa lo que consumió.
+    _VERBOS_CONSUMO_PASADO = (
+        "comí", "comi ", "tomé ", "tome ", "bebí ", "bebi ",
+        "desayuné", "desayune", "almorcé", "almorce", "cené", "cene",
+        "me tomé", "me tome", "me bebí", "me bebi",
+    )
+    _ALIMENTOS_RAPIDOS = frozenset({
+        "gaseosa", "jugo", "chicha", "limonada", "refresco", "cerveza",
+        "agua", "bebida", "pollo", "arroz", "sopa", "ensalada", "pan",
+        "ceviche", "cebiche", "lomo", "causa", "papa", "avena", "fruta",
+    })
+    _es_consumo = any(_m.startswith(v) or _m == v.strip() for v in _VERBOS_CONSUMO_PASADO)
+    _tiene_alimento = any(ak in _m for ak in _ALIMENTOS_RAPIDOS)
+    if _es_consumo and _tiene_alimento and "?" not in _m:
+        return REGISTRAR_NUTRICION
+    # También: si el mensaje empieza con verbo de consumo pero el alimento está implícito
+    # (ej. "Tomé un refresco" — "refresco" puede no estar en _ALIMENTOS_RAPIDOS)
+    if any(_m.startswith(v) for v in _VERBOS_CONSUMO_PASADO) and "?" not in _m:
         return REGISTRAR_NUTRICION
     try:
         modo_ia = await ia.clasificar_modo_asistente(mensaje)

@@ -481,49 +481,64 @@ class RegistroComidaHandler:
                 return {k: v for k, v in capa0_result.items() if k != "_final"}
             _kcal_c0   = capa0_result.get("calorias", 0)
             _nombre_c0 = (capa0_result.get("alimentos_detectados") or [""])[0]
-            # Sanity check por rango mínimo (ej. "Causa Ferreñafana" truncada a 110 kcal)
-            _bajo_rango = (
-                _capa0_bajo_rango_plato(_nombre_c0, _kcal_c0)
-                or _capa0_bajo_rango_plato(msg_lower, _kcal_c0)
-            )
-            if _kcal_c0 > 0 and not _bajo_rango:
-                # ── GUARD DE COHERENCIA: si el mensaje tiene ≥4 palabras (plato complejo)
-                # pero CAPA 0 devolvió un nombre con MENOS palabras que el mensaje,
-                # es señal de que la IA simplificó/perdió ingredientes.
-                # En ese caso: forzar Capa 1.5 (plato_constructor) como autoridad.
-                _palabras_msg = len([w for w in msg_lower.split() if len(w) > 2])
-                _palabras_c0  = len((_nombre_c0 or "").split())
-                _es_simplificacion_peligrosa = (
-                    _palabras_msg >= 4
-                    and _palabras_c0 <= 3
-                    and _palabras_c0 < (_palabras_msg // 2)
+            # ── Multi-ítem PRIMERO (antes del check de rango) ───────────────────
+            # Cuando CAPA 0 resolvió ≥2 alimentos independientes desde la BD, el total
+            # de kcal no representa un único plato — no tiene sentido aplicar el mínimo
+            # de "pollo a la brasa" (600 kcal) a una suma multi-ítem (plato + bebida).
+            _n_items_c0 = len(capa0_result.get("alimentos_con_macros") or [])
+            if _kcal_c0 > 0 and _n_items_c0 >= 2:
+                pre_extraccion = capa0_result
+                logger.info(
+                    "CAPA 0 multi-ítem (%d alimentos) — usando directamente: %s",
+                    _n_items_c0,
+                    capa0_result.get("alimentos_detectados"),
                 )
-                if _es_simplificacion_peligrosa:
-                    # Guardar como fallback de último recurso pero preferir Capa 1.5
-                    _capa0_fallback = capa0_result
-                    logger.info(
-                        "CAPA 0 simplificó '%s' → '%s' (%d→%d palabras): cediendo a Capa 1.5",
-                        msg_lower[:60], _nombre_c0, _palabras_msg, _palabras_c0,
+            elif _kcal_c0 > 0:
+                # Sanity check por rango mínimo (ej. "Causa Ferreñafana" truncada a 110 kcal)
+                # Solo aplica a resultados de UN SOLO alimento.
+                _bajo_rango = (
+                    _capa0_bajo_rango_plato(_nombre_c0, _kcal_c0)
+                    or _capa0_bajo_rango_plato(msg_lower, _kcal_c0)
+                )
+                if not _bajo_rango:
+                    # ── GUARD DE COHERENCIA: si el mensaje tiene ≥4 palabras (plato complejo)
+                    # pero CAPA 0 devolvió un nombre con MENOS palabras que el mensaje,
+                    # es señal de que la IA simplificó/perdió ingredientes.
+                    # En ese caso: forzar Capa 1.5 (plato_constructor) como autoridad.
+                    _palabras_msg = len([w for w in msg_lower.split() if len(w) > 2])
+                    _palabras_c0  = len((_nombre_c0 or "").split())
+                    _es_simplificacion_peligrosa = (
+                        _palabras_msg >= 4
+                        and _palabras_c0 <= 3
+                        and _palabras_c0 < (_palabras_msg // 2)
                     )
-                else:
-                    # Platos con variantes (ej. "ceviche de merluza" → Capa 0 devuelve
-                    # solo "Ceviche"): si el nombre es genérico de 1 palabra Y el usuario
-                    # especificó una variante con "de X", ceder a Capa 1/1.5.
-                    _PLATOS_MULTI_VARIANTE = frozenset({
-                        "ceviche", "cebiche", "tiradito", "sudado", "seco", "causa",
-                        "lomo", "jalea", "arroz", "guiso", "estofado", "caldo",
-                    })
-                    _es_plato_multi_variante = (
-                        len((_nombre_c0 or "").split()) == 1
-                        and (_nombre_c0 or "").lower().strip() in _PLATOS_MULTI_VARIANTE
-                        and " de " in msg_lower
-                    )
-                    if len((_nombre_c0 or "").split()) >= 2 or _es_plato_multi_variante:
-                        # Platos multi-palabra o variantes: CAPA 0 NO tiene autoridad final.
+                    if _es_simplificacion_peligrosa:
+                        # Guardar como fallback de último recurso pero preferir Capa 1.5
                         _capa0_fallback = capa0_result
+                        logger.info(
+                            "CAPA 0 simplificó '%s' → '%s' (%d→%d palabras): cediendo a Capa 1.5",
+                            msg_lower[:60], _nombre_c0, _palabras_msg, _palabras_c0,
+                        )
                     else:
-                        # Alimento simple de una sola palabra: CAPA 0 es suficientemente precisa
-                        pre_extraccion = capa0_result
+                        # Platos con variantes (ej. "ceviche de merluza" → Capa 0 devuelve
+                        # solo "Ceviche"): si el nombre es genérico de 1 palabra Y el usuario
+                        # especificó una variante con "de X", ceder a Capa 1/1.5.
+                        _PLATOS_MULTI_VARIANTE = frozenset({
+                            "ceviche", "cebiche", "tiradito", "sudado", "seco", "causa",
+                            "lomo", "jalea", "arroz", "guiso", "estofado", "caldo",
+                        })
+                        _es_plato_multi_variante = (
+                            len((_nombre_c0 or "").split()) == 1
+                            and (_nombre_c0 or "").lower().strip() in _PLATOS_MULTI_VARIANTE
+                            and " de " in msg_lower
+                        )
+                        if len((_nombre_c0 or "").split()) >= 2 or _es_plato_multi_variante:
+                            # Platos multi-palabra o variantes: CAPA 0 NO tiene autoridad final.
+                            _capa0_fallback = capa0_result
+                        else:
+                            # Alimento simple de una sola palabra: CAPA 0 es suficientemente precisa
+                            pre_extraccion = capa0_result
+                # else: _bajo_rango=True → no usar CAPA 0, caer a CAPA 1/1.5
 
         # Porción de lata (capa especial antes del catálogo)
         if not pre_extraccion and _msg_tiene_porcion_lata(mensaje):
@@ -1610,6 +1625,13 @@ class RegistroComidaHandler:
                         f" | C:{round(_m['carb_g'], 1)}g"
                         f" | G:{round(_m['gras_g'], 1)}g"
                     )
+                # Agregar extras_nutricionales si existen (ej: gaseosa como con_extra)
+                # Solo si NO ya aparecen como ítems en _macros_items (evitar duplicados)
+                _nombres_items = {str(_m.get("nombre") or "").lower() for _m in _macros_items}
+                for _ex in extraccion.get("extras_nutricionales", []):
+                    _ex_nom = str(_ex).split("(")[0].strip().lower()
+                    if not any(_ex_nom in _n for _n in _nombres_items):
+                        _lineas.append(f"  • {_ex}")
                 msg_final += "\n\n📊 Detalle nutricional:\n" + "\n".join(_lineas)
             else:
                 _d_kcal = round(float(extraccion.get("calorias", 0)), 1)

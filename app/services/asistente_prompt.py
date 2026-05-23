@@ -670,7 +670,14 @@ async def rescue_nlp_log(
     """
     if str(resp_est.get("intent") or "").upper() != "LOG":
         return
-    if any(s.get("tipo") == "comida" for s in (resp_est.get("secciones") or [])):
+    # Saltar solo si alguna sección realmente proviene del mensaje del usuario
+    # (marcada con _origen_usuario en procesar_secciones_comida).
+    # Sugerencias proactivas del LLM (ej. "Palta ensalada" cuando el usuario
+    # dijo "comí pan con pollo") no tienen _origen_usuario → rescue sigue.
+    if any(
+        s.get("tipo") == "comida" and s.get("_origen_usuario")
+        for s in (resp_est.get("secciones") or [])
+    ):
         return
     try:
         import uuid

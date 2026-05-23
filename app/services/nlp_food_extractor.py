@@ -98,7 +98,17 @@ REGLAS ESTRICTAS:
       usa unidad: "g" y cantidad: <número de gramos>. Ejemplo: "comí 250g de pollo al horno con plátano"
       → [{alimento:"pollo al horno con platano", cantidad:250, unidad:"g"}]
 - Usa nombres EXACTOS y genéricos en español. Para bebidas: "agua", "gaseosa", "jugo de naranja".
-- MODIFICADORES: "sin X" → agregar en campo "sin". "con extra X" / "con más X" → campo "con_extra".
+- BEBIDAS INDEPENDIENTES — REGLA ABSOLUTA: "gaseosa", "jugo", "chicha", "limonada", "refresco",
+  "cerveza", "agua con sabor" y cualquier bebida explícita son SIEMPRE un objeto SEPARADO en el
+  array raíz. NUNCA los incluyas en "con_extra" de otro alimento.
+  El campo "con_extra" SOLO acepta strings simples de ingredientes sólidos (ej: "queso", "arroz").
+  Ejemplo CORRECTO para "lomo saltado con su gaseosa":
+  [{"alimento":"lomo saltado","cantidad":1.0,"unidad":"porcion","sin":[],"con_extra":[]},
+   {"alimento":"gaseosa","cantidad":1.0,"unidad":"vaso","sin":[],"con_extra":[]}]
+  Ejemplo INCORRECTO (NUNCA hagas esto):
+  [{"alimento":"lomo saltado","con_extra":["gaseosa"]}]  ← PROHIBIDO para bebidas
+- MODIFICADORES: "sin X" → agregar en campo "sin" (strings simples).
+  "con extra X" / "con más X" → campo "con_extra" (strings simples, SOLO sólidos: "queso", "huevo extra", "más arroz").
 
 Responde SOLO con JSON array válido, sin texto adicional, sin markdown.
 
@@ -305,6 +315,85 @@ class ResultadoExtraccion:
     grasas_total: float
     nombres: List[str]
     advertencia: Optional[str]
+
+
+def _promover_bebidas_extras(
+    items_raw: list[dict],
+    bebidas_keywords: "frozenset[str]",
+) -> list[dict]:
+    """
+    Garantía Python-level: si el LLM puso una bebida en ``con_extra`` de otro
+    alimento (como string O como dict), la extrae y la convierte en ítem independiente.
+    Evita duplicados si el LLM TAMBIÉN la incluyó como ítem propio en el array raíz.
+    """
+    def _extra_nombre(extra) -> str:
+        """Extrae el nombre legible de un extra (string o dict)."""
+        if isinstance(extra, dict):
+            return str(extra.get("alimento") or extra.get("nombre") or "").strip()
+        return str(extra).strip()
+
+    def _extra_unidad(extra) -> str:
+        if isinstance(extra, dict):
+            return str(extra.get("unidad") or "vaso").strip()
+        return "vaso"
+
+    def _extra_cantidad(extra) -> float:
+        if isinstance(extra, dict):
+            try:
+                return float(extra.get("cantidad") or 1.0)
+            except (TypeError, ValueError):
+                return 1.0
+        return 1.0
+
+    # Nombres de bebidas ya presentes como ítems raíz (para evitar duplicados)
+    nombres_bebidas_ya = {
+        _norm(it.get("alimento", ""))
+        for it in items_raw
+        if any(bk in _norm(str(it.get("alimento", "")))
+               for bk in bebidas_keywords)
+    }
+
+    resultado: list[dict] = []
+    bebidas_nuevas: list[dict] = []
+
+    for item in items_raw:
+        con_extra = item.get("con_extra") or []
+        extras_filtrados = []
+        for extra in con_extra:
+            nombre_extra = _extra_nombre(extra)
+            extra_norm = _norm(nombre_extra)
+            es_bebida = any(bk in extra_norm for bk in bebidas_keywords)
+            if es_bebida:
+                # SIEMPRE quitar bebida de con_extra — evita doble conteo cuando el LLM
+                # pone la bebida en con_extra Y también como ítem propio.
+                if extra_norm not in nombres_bebidas_ya:
+                    # No está como ítem propio aún → promover a ítem nuevo
+                    bebidas_nuevas.append({
+                        "alimento": nombre_extra,
+                        "cantidad": _extra_cantidad(extra),
+                        "unidad": _extra_unidad(extra),
+                        "sin": [],
+                        "con_extra": [],
+                    })
+                    nombres_bebidas_ya.add(extra_norm)
+                    logger.info(
+                        "[NLPExtractor] Bebida '%s' promovida de con_extra → ítem propio",
+                        nombre_extra,
+                    )
+                else:
+                    # Ya existe como ítem propio → solo eliminar de con_extra (no duplicar)
+                    logger.info(
+                        "[NLPExtractor] Bebida '%s' eliminada de con_extra (ya es ítem propio)",
+                        nombre_extra,
+                    )
+            elif extra_norm:
+                # Mantener extras no-bebida como strings simples
+                extras_filtrados.append(nombre_extra if isinstance(extra, dict) else extra)
+        item_copia = dict(item)
+        item_copia["con_extra"] = extras_filtrados
+        resultado.append(item_copia)
+
+    return resultado + bebidas_nuevas
 
 
 def _norm(texto: str) -> str:
@@ -945,8 +1034,18 @@ class NLPFoodExtractor:
 
         # PASO 1: Llama-3 extrae JSON
         items_raw = await self._llm_extraer_json(mensaje)
+        logger.info("[NLPExtractor] LLM extrajo %d items: %s", len(items_raw or []), items_raw)
         if not items_raw:
             return None
+
+        # ── POST-PROCESO: promover bebidas que siguen en con_extra a items propios ─────
+        # Llama-3 a veces ignora la regla BEBIDAS_INDEPENDIENTES y las pone en con_extra.
+        # Este bloque Python garantiza la separación independientemente del LLM.
+        _BEBIDAS_KEYWORDS = frozenset({
+            "gaseosa", "jugo", "chicha", "limonada", "refresco",
+            "cerveza", "agua con sabor", "bebida",
+        })
+        items_raw = _promover_bebidas_extras(items_raw, _BEBIDAS_KEYWORDS)
 
         items_calculados: List[ItemExtraido] = []
         advertencias = []
@@ -955,8 +1054,18 @@ class NLPFoodExtractor:
             nombre   = str(item.get("alimento", "")).strip()
             cantidad = float(item.get("cantidad", 1.0) or 1.0)
             unidad   = str(item.get("unidad", "porcion")).strip().lower()
-            sin_lista       = [str(x) for x in item.get("sin", []) if x]
-            con_extra_lista = [str(x) for x in item.get("con_extra", []) if x]
+            sin_lista = [str(x) for x in item.get("sin", []) if x]
+            # con_extra puede tener strings o dicts (si el LLM usó el schema completo)
+            _raw_extras = item.get("con_extra") or []
+            con_extra_lista = []
+            for _x in _raw_extras:
+                if isinstance(_x, dict):
+                    _nm = str(_x.get("alimento") or _x.get("nombre") or "").strip()
+                    if _nm:
+                        con_extra_lista.append(_nm)
+                elif _x:
+                    con_extra_lista.append(str(_x).strip())
+            logger.info("[NLPExtractor] → item: '%s' %.1f×%s", nombre, cantidad, unidad)
 
             if not nombre or cantidad <= 0:
                 continue
@@ -1128,6 +1237,10 @@ class NLPFoodExtractor:
                         origen = "groq"
 
                 if not alimento_bd:
+                    logger.warning(
+                        "[NLPExtractor] '%s' no encontrado en BD/USDA/Groq — descartado",
+                        nombre,
+                    )
                     advertencias.append(f"No encontré datos para '{nombre}'")
                     continue
 
@@ -1138,6 +1251,10 @@ class NLPFoodExtractor:
                 carbos    = round(float(alimento_bd.carbohidratos_100g) * factor, 1)
                 grasas    = round(float(alimento_bd.grasas_100g)        * factor, 1)
                 nombre_final = alimento_bd.nombre
+                logger.info(
+                    "[NLPExtractor] '%s' desde alimentos: %.1f kcal (%.0fg, %s)",
+                    nombre_final, calorias, gramos, origen,
+                )
 
                 # Aplicar modificadores
                 if sin_lista or con_extra_lista:
