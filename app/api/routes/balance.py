@@ -117,7 +117,9 @@ async def obtener_balance_hoy(
             "WHERE client_id = :cid AND date(created_at) = :hoy"
         ), {"cid": cliente.id, "hoy": hoy}).scalar() or 0)
 
-    calorias_restantes = objetivo_diario - calorias_consumidas + calorias_quemadas
+    # Restan = Meta − Consumido (la meta ya incluye el factor de actividad;
+    # sumar quemadas doblaría el ejercicio y rompería la coherencia con el % mostrado)
+    calorias_restantes = objetivo_diario - calorias_consumidas
     
     # Obtener preferencias de alimentos registrados hoy (como proxy de registros)
     from app.models.preferencias import PreferenciaAlimento, PreferenciaEjercicio
@@ -316,15 +318,27 @@ async def eliminar_registro(
     from sqlalchemy import text as _text2
 
     if tipo == "alimento":
+        # Buscar el registro referenciado para obtener nombre y fecha
         registro = db.query(ComidaRegistro).filter(
             ComidaRegistro.id == registro_id,
             ComidaRegistro.client_id == cliente.id
         ).first()
         if not registro:
-            raise HTTPException(status_code=404, detail="Registro no encontrado")
+            # 404 silencioso: el registro ya no existe (huérfano o borrado antes).
+            # Devolvemos 200 vacío para que el frontend refresque sin mostrar error.
+            return {"eliminado": 0, "mensaje": "Registro no encontrado, ya eliminado"}
         nombre_registro = registro.nombre_alimento
         fecha_alim = registro.fecha
-        db.delete(registro)
+        # Eliminar TODOS los registros del mismo alimento en el mismo día
+        # (la UI agrupa por nombre → un solo "delete" limpia todo el grupo)
+        todos = db.query(ComidaRegistro).filter(
+            ComidaRegistro.client_id == cliente.id,
+            ComidaRegistro.nombre_alimento == nombre_registro,
+            ComidaRegistro.fecha == fecha_alim,
+        ).all()
+        n_eliminados = len(todos)
+        for r in todos:
+            db.delete(r)
         db.flush()
         recalcular_progreso_diario(cliente.id, fecha_alim, db)
         db.commit()

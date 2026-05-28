@@ -145,6 +145,25 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
     fc = sum(1 for x in comida_ctx if x in m)
     fe = sum(1 for x in ej_ctx if x in m)
 
+    # Narración diaria de comidas: "Hoy desayuné X, almorcé Y, cené Z"
+    # El LLM clasifica estos mensajes como recomendar_nutricion por error.
+    # Señales: adverbio temporal + verbo pasado + alimento → siempre registro.
+    _VERBOS_LOG = (
+        "desayuné", "desayune", "almorcé", "almorce", "cené", "cene",
+        "comí", "comi ", "tomé ", "tome ", "bebí ", "bebi ",
+        "he desayunado", "he almorzado", "he cenado", "he comido", "he tomado",
+    )
+    _TEMPORALES_LOG = ("hoy ", "hoy,", "esta mañana", "esta tarde", "esta noche",
+                       "al mediodia", "al mediodía", "ayer ", "en la mañana", "en la noche")
+    _verbos_log_count = sum(1 for v in _VERBOS_LOG if v in m)
+    _tiene_temporal_log = any(t in m for t in _TEMPORALES_LOG)
+    # Una de estas condiciones basta:
+    # a) ≥2 verbos de consumo pasado en el mismo mensaje (resumen del día)
+    # b) adverbio temporal + ≥1 verbo de consumo pasado + alimento
+    # c) ≥1 verbo de consumo pasado + alimento (cualquier verbo de ingesta es señal de log)
+    if _verbos_log_count >= 1 and fc > 0 and "?" not in m:
+        return REGISTRAR_NUTRICION
+
     registro = any(
         x in m
         for x in (
@@ -246,11 +265,14 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
         "comí", "comi ", "tomé ", "tome ", "bebí ", "bebi ",
         "desayuné", "desayune", "almorcé", "almorce", "cené", "cene",
         "me tomé", "me tome", "me bebí", "me bebi",
+        # Pretérito perfecto compuesto: "he desayunado/almorzado/cenado/comido"
+        "he desayunado", "he almorzado", "he cenado", "he comido", "he tomado", "he bebido",
     )
     _ALIMENTOS_RAPIDOS = frozenset({
         "gaseosa", "jugo", "chicha", "limonada", "refresco", "cerveza",
         "agua", "bebida", "pollo", "arroz", "sopa", "ensalada", "pan",
         "ceviche", "cebiche", "lomo", "causa", "papa", "avena", "fruta",
+        "fideos", "menestra", "lentejas", "cebada", "quinua", "tamal",
     })
     _es_consumo = any(_m.startswith(v) or _m == v.strip() for v in _VERBOS_CONSUMO_PASADO)
     _tiene_alimento = any(ak in _m for ak in _ALIMENTOS_RAPIDOS)
@@ -259,6 +281,13 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
     # También: si el mensaje empieza con verbo de consumo pero el alimento está implícito
     # (ej. "Tomé un refresco" — "refresco" puede no estar en _ALIMENTOS_RAPIDOS)
     if any(_m.startswith(v) for v in _VERBOS_CONSUMO_PASADO) and "?" not in _m:
+        return REGISTRAR_NUTRICION
+    # Narración diaria: "Hoy desayuné/almorcé/cené X" — el verbo aparece tras adverbio temporal.
+    # Condición adicional: ≥2 verbos de comida en el mensaje → definitivamente es un log.
+    _TEMPORALES = ("hoy ", "esta mañana", "esta tarde", "esta noche", "al mediodia", "al mediodía", "ayer ")
+    _verbos_en_msg = sum(1 for v in _VERBOS_CONSUMO_PASADO if v.strip() in _m)
+    _tiene_temporal = any(t in _m for t in _TEMPORALES)
+    if ((_tiene_temporal and _verbos_en_msg >= 1) or _verbos_en_msg >= 2) and _tiene_alimento and "?" not in _m:
         return REGISTRAR_NUTRICION
     try:
         modo_ia = await ia.clasificar_modo_asistente(mensaje)

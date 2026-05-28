@@ -2560,6 +2560,29 @@ async def procesar_secciones_comida(
             "carbohidratos_g": _carb_final,
             "grasas_g":        _gras_final,
         }
+        # ── Caché de macros recomendados — para que "comi X" use los mismos valores ──
+        # Cuando el usuario dice "comi tortilla de quinoa con verduras", el NLP
+        # consulta esta caché (por nombre normalizado) antes de buscar en BD/alimentos.
+        # TTL 24h: suficiente para la comida del día; se sobrescribe en la próxima recomendación.
+        if _kcal_final > 0 and nombre_limpio:
+            try:
+                from app.core.cache import set_cached
+                from unicodedata import normalize as _unorm
+                import unicodedata as _ud
+                _nom_reco = _unorm("NFC", nombre_limpio.lower().strip())
+                set_cached(
+                    f"reco_macros:{_perfil_id}:{_nom_reco}",
+                    {
+                        "calorias":        round(_kcal_final, 1),
+                        "proteinas_g":     round(_prot_final, 1),
+                        "carbohidratos_g": round(_carb_final, 1),
+                        "grasas_g":        round(_gras_final, 1),
+                        "nombre":          nombre_limpio,
+                    },
+                    ttl_seconds=86400,  # 24h
+                )
+            except Exception:
+                pass
         # Solo guardar en recent_meals si el nombre es un plato real (no genérico).
         # Nombres como "Sugerencia 1" contaminan la caché y causan lookups incorrectos.
         if not _RE_NOMBRE_GENERICO.match(_norm_nombre_plato(nombre_limpio)):

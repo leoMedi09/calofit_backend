@@ -88,6 +88,13 @@ METS_GYM: Dict[str, float] = {
     "core": 4.0,
     "flexiones": 4.0,
     "push up": 4.0,
+    "fondos en paralelas": 5.0,
+    "fondos en banco": 4.5,
+    "fondos": 5.0,
+    "paralelas": 5.0,
+    "zancadas": 4.5,
+    "lunges": 4.5,
+    "aperturas": 4.0,
     "burpees": 10.0,
     # Rutinas completas (aproximado)
     "rutina de pecho": 5.0,

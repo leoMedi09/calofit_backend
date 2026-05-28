@@ -65,29 +65,50 @@ REGLAS ESTRICTAS:
   Si el usuario dijo "pollo al horno", extrae "pollo al horno" — no añadas arroz, verduras ni nada más.
 - NO separes platos tradicionales conocidos ni combinaciones de arroz/cereal con acompañamiento. Son UN solo ítem:
   "lomo saltado", "aji de gallina", "arroz con leche", "arroz con pollo", "arroz con verduras", "arroz con atun",
-  "choclo con queso", "pan con huevo", "yogur con granola", "platano con yogur", "avena con leche",
+  "choclo con queso", "pan con huevo", "yogur con granola", "yogur con fruta", "yogur con avena",
+  "platano con yogur", "avena con leche", "avena con granola", "cafe con leche", "te con leche",
   "pollo con arroz", "tallarines con carne", "sopa de verduras", "sopa de lentejas", "crema de verduras",
   "ensalada de pollo", "ensalada de frutas", "tortilla de huevo".
 - REGLA CRÍTICA: "ensalada de X", "ensalada de X con Y", "sopa de X", "crema de X" siempre son UN solo ítem.
   Ejemplos: "ensalada de plátano con pollo" → UN ítem; "ensalada de frutas con yogur" → UN ítem.
   NUNCA extraigas los ingredientes internos de una ensalada/sopa/crema como ítems separados.
+- REGLA MENÚ PERUANO: cuando el usuario describe un almuerzo con "X con sopa de Y" o "X y sopa de Y",
+  la sopa es SIEMPRE un ítem SEPARADO (en Perú el menú incluye sopa + segundo + bebida por separado).
+  Ejemplos:
+    "arroz a la naranja con sopa de fideos" → [{alimento:"arroz a la naranja",...}, {alimento:"sopa de fideos",...}]
+    "lomo saltado con sopa de verduras"     → [{alimento:"lomo saltado",...}, {alimento:"sopa de verduras",...}]
+    "arroz con pollo y sopa de letras"      → [{alimento:"arroz con pollo",...}, {alimento:"sopa de letras",...}]
 - REGLA CRÍTICA: "plátano" siempre es "plátano maduro" (banana dulce). NUNCA uses "plátano verde cocido".
   "plátano verde" solo si el usuario dice explícitamente "plátano verde" o "patacón" o "tostón".
-- REGLA ESPECIAL: si el usuario dice "medio X" o "media X", extrae el ítem completo (X) con cantidad=0.5.
-  Ejemplo: "media ensalada de plátano con pollo" → [{alimento:"ensalada de platano con pollo", cantidad:0.5, unidad:"porcion"}]
-  Ejemplo: "medio arroz con verduras" → [{alimento:"arroz con verduras", cantidad:0.5, unidad:"porcion"}]
-  NUNCA separes los ingredientes internos cuando se diga "medio" o "media".
+- REGLA ESPECIAL: cantidades numéricas antes de un ítem discreto dentro de una combinación.
+  Si el usuario dice "avena con 2 panes" o "arroz con 3 huevos", el ítem con número ES SEPARADO:
+  "avena con 2 panes con mermelada" → [{alimento:"avena",cantidad:1,unidad:"porcion"}, {alimento:"pan con mermelada",cantidad:2,unidad:"unidad"}]
+  "avena con 2 panes" → [{alimento:"avena",cantidad:1,unidad:"porcion"}, {alimento:"pan",cantidad:2,unidad:"unidad"}]
+  EXCEPCIÓN: si el número describe la receta (ej. "sopa de 3 verduras", "arroz con 2 tipos de menestra") → mantener como 1 solo ítem.
+  La señal de separación es: número + ítem discreto contable (pan, huevo, fruta, galleta, naranja, manzana, etc.).
+- REGLA ESPECIAL: fracciones de porción — extrae el ítem completo con la cantidad decimal correspondiente.
+  "medio X" / "media X"          → cantidad=0.5
+  "un cuarto de X" / "cuarto X"  → cantidad=0.25
+  "un octavo de X" / "octavo X"  → cantidad=0.125
+  Ejemplos:
+    "media ensalada de plátano con pollo" → [{alimento:"ensalada de platano con pollo", cantidad:0.5, unidad:"porcion"}]
+    "medio arroz con verduras"            → [{alimento:"arroz con verduras", cantidad:0.5, unidad:"porcion"}]
+    "un cuarto de torta de chocolate"     → [{alimento:"torta de chocolate", cantidad:0.25, unidad:"porcion"}]
+    "un octavo de pizza"                  → [{alimento:"pizza", cantidad:0.125, unidad:"porcion"}]
+  NUNCA separes los ingredientes internos cuando se diga una fracción.
 - REGLA ESPECIAL: si el usuario dice "X con Y" donde Y es una verdura/guarnición, trátalo como UN plato.
   Ejemplo: "arroz con verduras", "pollo con papas", "pescado con ensalada" → UN ítem cada uno.
 - Convierte cantidades verbales exactamente así:
-    "medio" o "media" → 0.5
-    "un" / "una" / "uno" → 1.0
-    "dos" → 2.0
-    "tres" → 3.0
-    "cuatro" → 4.0
-    "un par" → 2.0
-    "un poco" → 0.5
-    Si no hay cantidad → 1.0
+    "medio" o "media"             → 0.5
+    "un cuarto" o "cuarto"        → 0.25
+    "un octavo" o "octavo"        → 0.125
+    "un" / "una" / "uno"          → 1.0
+    "dos"                         → 2.0
+    "tres"                        → 3.0
+    "cuatro"                      → 4.0
+    "un par"                      → 2.0
+    "un poco"                     → 0.5
+    Si no hay cantidad             → 1.0
 - Elige la unidad más lógica:
     pan/galleta/huevo/fruta/unidad discreta → "unidad"
     leche/jugo/gaseosa/agua/bebida → "vaso"
@@ -97,7 +118,16 @@ REGLAS ESTRICTAS:
     Si el usuario especifica gramos explícitamente (ej: "300g de pollo", "200 gramos de arroz") →
       usa unidad: "g" y cantidad: <número de gramos>. Ejemplo: "comí 250g de pollo al horno con plátano"
       → [{alimento:"pollo al horno con platano", cantidad:250, unidad:"g"}]
+    Si el usuario especifica ml o litros explícitamente para bebidas (ej: "500ml de gaseosa", "1 litro de agua", "250 ml de jugo") →
+      usa unidad: "ml" y cantidad: <número de ml>. Ejemplo: "tome 500ml de gaseosa"
+      → [{alimento:"gaseosa", cantidad:500, unidad:"ml"}]
+      NUNCA conviertas una cantidad explícita en ml/litros a "vaso" — respeta siempre el volumen indicado.
 - Usa nombres EXACTOS y genéricos en español. Para bebidas: "agua", "gaseosa", "jugo de naranja".
+- BEBIDAS DE CEREALES/GRANOS: cuando el usuario pide un "vaso de cebada", "taza de cebada" o solo "cebada"
+  en contexto de bebida caliente, usa SIEMPRE el nombre "agua de cebada" (no "cebada" a secas ni "cebada con cáscara").
+  "emoliente" o "vaso de emoliente" → "emoliente de cebada".
+  "avena bebida" o "vaso de avena" (la bebida andina líquida, no el cereal) → "avena bebida".
+- MARCAS COMERCIALES: Si el usuario menciona una marca de bebida (Inca Kola, Coca Cola, Pepsi, Sprite, Fanta, etc.), usa SOLO el nombre genérico. Ejemplo: "gaseosa inca kola" → {alimento:"gaseosa"}. Nunca registres la marca como ítem separado.
 - BEBIDAS INDEPENDIENTES — REGLA ABSOLUTA: "gaseosa", "jugo", "chicha", "limonada", "refresco",
   "cerveza", "agua con sabor" y cualquier bebida explícita son SIEMPRE un objeto SEPARADO en el
   array raíz. NUNCA los incluyas en "con_extra" de otro alimento.
@@ -131,6 +161,37 @@ BEBIDAS_CERO_KCAL = {
     "te", "te sin azucar", "infusion", "cafe solo", "cafe negro",
 }
 
+# ─── Post-procesador: "avena con 2 panes" → ["avena", {pan, qty:2}] ──────────
+# Separa "X con N <ítem_discreto>" en dos ítems cuando N≥2 y el ítem es contable.
+_DISCRETOS_CONTABLES = frozenset({
+    "pan", "panes", "huevo", "huevos", "manzana", "manzanas", "naranja", "naranjas",
+    "platano", "platanos", "mandarina", "mandarinas", "galleta", "galletas",
+    "biscocho", "biscochito", "tostada", "tostadas", "fruta", "frutas",
+    "biscot", "biscocho", "empanada", "empanadas",
+})
+_RE_CON_N_ITEM = re.compile(
+    r"^(.+?)\s+con\s+(\d+)\s+(.+)$", re.IGNORECASE
+)
+
+def _separar_con_n_items(items_raw: list[dict]) -> list[dict]:
+    """Divide 'avena con 2 panes con mermelada' → ['avena', {pan con mermelada, qty:2}]."""
+    resultado = []
+    for item in items_raw:
+        nombre = item.get("alimento", "")
+        m = _RE_CON_N_ITEM.match(nombre)
+        if m:
+            base   = m.group(1).strip()
+            qty    = int(m.group(2))
+            resto  = m.group(3).strip()
+            primer_token = _norm(resto).split()[0] if resto else ""
+            if primer_token in _DISCRETOS_CONTABLES and qty >= 2:
+                resultado.append({**item, "alimento": base})
+                resultado.append({**item, "alimento": resto, "cantidad": float(qty), "unidad": "unidad"})
+                continue
+        resultado.append(item)
+    return resultado
+
+
 # ─── Normalizaciones de texto antes de enviar al LLM ─────────────────────────
 PRE_NORM_PATRONES = [
     # Conectores temporales que confunden al LLM → reemplazar por " y "
@@ -145,6 +206,20 @@ PRE_NORM_PATRONES = [
     (r"(?i)\bun\s+poco\s+de\b",   "medio "),
     (r"\s{2,}",                    " "),
 ]
+
+# ─── Marcas comerciales de bebidas → nombre genérico ─────────────────────────
+# "gaseosa inkacola" → "gaseosa", "inca kola" solo → "gaseosa"
+# Se aplica ANTES de enviar al LLM para evitar que el LLM las registre como
+# alimentos separados (LLM estimaría macros inventados para "inkacola").
+_MARCAS_GASEOSAS_RE = re.compile(
+    r"(?i)\b(?:inca[\s\-]?kola|inka[\s\-]?kola|inkakola|inkacola|"
+    r"coca[\s\-]?cola|cocacola|"
+    r"pepsi(?:[\s\-]?cola)?|"
+    r"sprite|fanta|"
+    r"seven[\s\-]?up|7[\s\-]?up|"
+    r"kola[\s\-]?real|"
+    r"guarana)\b"
+)
 
 # ─── Palabras que indican negación → no registrar nada ─────────────────────
 NEGACION_PATRONES = [
@@ -230,6 +305,7 @@ NUMEROS_TEXTO: dict[str, float] = {
     "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
     "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
     "once": 11, "doce": 12, "media": 0.5, "medio": 0.5,
+    "cuarto": 0.25, "octavo": 0.125,
 }
 
 # ─── Mapa de unidades globales (fallback cuando el alimento no tiene unidad en BD) ──
@@ -280,6 +356,7 @@ PESOS_UNIDAD: dict[str, float] = {
     "papa cocida":         150.0,
     "camote cocido":       130.0,
     "fresa":                12.0,
+    "galleta":              15.0,   # 1 galleta de soda/vainilla (~15g)
 }
 
 USDA_API_KEY = "uFeX5hag2c1mmeR7ueaJj0K86VmsgnQsoxhsyyBt"
@@ -417,10 +494,18 @@ class NLPFoodExtractor:
 
     # ─── PRE-NORMALIZACIÓN del texto antes del LLM ───────────────────────────
     def _pre_normalizar(self, texto: str) -> str:
-        """Normaliza conectores temporales y redundancias para reducir varianza del LLM."""
+        """Normaliza conectores temporales, redundancias y marcas comerciales
+        para reducir varianza del LLM antes de enviar al extractor JSON."""
         t = texto
         for patron, reemplazo in PRE_NORM_PATRONES:
             t = re.sub(patron, reemplazo, t)
+        # Marcas comerciales de gaseosas → nombre genérico "gaseosa"
+        # Ej: "tome gaseosa inkacola" → "tome gaseosa gaseosa" → "tome gaseosa"
+        # Ej: "tome inca kola"        → "tome gaseosa"
+        t = _MARCAS_GASEOSAS_RE.sub("gaseosa", t)
+        # Deduplicar "gaseosa gaseosa" → "gaseosa" (ocurre cuando el texto tenía
+        # "gaseosa MARCA" y la marca fue reemplazada por "gaseosa")
+        t = re.sub(r"(?i)\bgaseosa\s+gaseosa\b", "gaseosa", t)
         return t.strip()
 
     def _es_negacion(self, texto: str) -> bool:
@@ -503,10 +588,13 @@ class NLPFoodExtractor:
             "yuca":      100.0,
             "fideos":    140.0,
             "platano":   118.0,
+            "galleta":    15.0,   # 1 galleta de soda/vainilla (~15g)
+            "galletas":   15.0,
         }
         n = _norm(nombre_ingrediente)
+        tokens = set(n.split())
         for kw, gramos in GRAMOS_TIPICOS.items():
-            if kw in n:
+            if kw in tokens:
                 return gramos
         return 100.0  # default: 1 porción
 
@@ -739,6 +827,7 @@ class NLPFoodExtractor:
     _PORCIONES_COMPONENTE: dict[str, float] = {
         # Proteínas
         "pollo":    200.0, "pechuga":  180.0, "muslo":    180.0,
+        # Nota: "res" se comprueba por token exacto (evita match en "fresco")
         "pescado":  180.0, "salmon":   180.0, "atun":     100.0,
         "carne":    180.0, "res":       180.0, "cerdo":    180.0,
         "huevo":     50.0, "huevos":   100.0, "jamon":     60.0,
@@ -747,6 +836,7 @@ class NLPFoodExtractor:
         "arroz":    180.0, "papa":     150.0, "camote":   130.0,
         "fideos":   180.0, "tagliatelle": 180.0, "pasta": 180.0,
         "pan":       60.0, "quinua":   120.0, "yuca":     150.0,
+        "tostada":   30.0, "tostadas":  30.0,   # 1 rebanada tostada
         "choclo":   120.0, "avena":     80.0, "granola":   40.0,
         # Frutas
         "platano":  120.0, "manzana":  150.0, "naranja":  140.0,
@@ -766,8 +856,9 @@ class NLPFoodExtractor:
     def _porcion_componente(self, nombre_componente: str) -> float:
         """Devuelve gramos de porción estándar para un componente dado su nombre normalizado."""
         n = _norm(nombre_componente)
+        tokens = set(n.split())  # word-level: evita "res" en "fresco", "pan" en "plátano", etc.
         for clave, gramos in self._PORCIONES_COMPONENTE.items():
-            if clave in n:
+            if clave in tokens:
                 return gramos
         return 150.0  # default genérico
 
@@ -939,14 +1030,26 @@ class NLPFoodExtractor:
                     _msg_clean = _msg_clean[:-len(_sf)].strip()
             # ── Extraer cantidad numérica antes del fuzzy ("dos", "tres", etc.) ─────
             _qty_pre = 1.0
-            _m_qty_pre = re.match(r"(?i)^(dos|tres|cuatro|cinco|2|3|4|5)\s+(.+)$", _msg_clean)
-            if _m_qty_pre:
-                _qty_map_pre = {
-                    "dos": 2.0, "tres": 3.0, "cuatro": 4.0, "cinco": 5.0,
-                    "2": 2.0, "3": 3.0, "4": 4.0, "5": 5.0,
-                }
-                _qty_pre = _qty_map_pre.get(_m_qty_pre.group(1).lower(), 1.0)
-                _msg_clean = _m_qty_pre.group(2).strip()
+            # Fracciones: "un cuarto de X" → strip "un cuarto de " antes del fuzzy
+            _m_fraccion_pre = re.match(
+                r"(?i)^(?:un\s+)?(?:cuarto|octavo)\s+(?:de\s+)?(.+)$", _msg_clean
+            )
+            if _m_fraccion_pre:
+                _qty_pre = 0.25 if re.search(r'\bcuarto\b', _msg_clean, re.IGNORECASE) else 0.125
+                _msg_clean = _m_fraccion_pre.group(1).strip()
+            else:
+                _m_qty_pre = re.match(
+                    r"(?i)^(dos|tres|cuatro|cinco|2|3|4|5|medio|media)\s+(.+)$",
+                    _msg_clean,
+                )
+                if _m_qty_pre:
+                    _qty_map_pre = {
+                        "dos": 2.0, "tres": 3.0, "cuatro": 4.0, "cinco": 5.0,
+                        "2": 2.0, "3": 3.0, "4": 4.0, "5": 5.0,
+                        "medio": 0.5, "media": 0.5,
+                    }
+                    _qty_pre = _qty_map_pre.get(_m_qty_pre.group(1).lower(), 1.0)
+                    _msg_clean = _m_qty_pre.group(2).strip()
             # ──────────────────────────────────────────────────────────────────────
             _q_pre = _norm(_msg_clean)
             if _q_pre and len(_q_pre) >= 5:
@@ -960,7 +1063,8 @@ class NLPFoodExtractor:
                         " SUM(a.calorias_100g*pi2.gramos/100.0),"
                         " SUM(a.proteina_100g*pi2.gramos/100.0),"
                         " SUM(a.carbohidratos_100g*pi2.gramos/100.0),"
-                        " SUM(a.grasas_100g*pi2.gramos/100.0)"
+                        " SUM(a.grasas_100g*pi2.gramos/100.0),"
+                        " SUM(pi2.gramos)"
                         " FROM platos p"
                         " JOIN plato_ingredientes pi2 ON pi2.plato_id=p.id"
                         " JOIN alimentos a ON a.id=pi2.alimento_id"
@@ -989,7 +1093,8 @@ class NLPFoodExtractor:
                                 " SUM(a.calorias_100g*pi2.gramos/100.0),"
                                 " SUM(a.proteina_100g*pi2.gramos/100.0),"
                                 " SUM(a.carbohidratos_100g*pi2.gramos/100.0),"
-                                " SUM(a.grasas_100g*pi2.gramos/100.0)"
+                                " SUM(a.grasas_100g*pi2.gramos/100.0),"
+                                " SUM(pi2.gramos)"
                                 " FROM platos p"
                                 " JOIN plato_ingredientes pi2 ON pi2.plato_id=p.id"
                                 " JOIN alimentos a ON a.id=pi2.alimento_id"
@@ -1005,6 +1110,7 @@ class NLPFoodExtractor:
                         _prot0 = round(float(_pre_row[3] or 0), 1)
                         _carb0 = round(float(_pre_row[4] or 0), 1)
                         _gras0 = round(float(_pre_row[5] or 0), 1)
+                        _g0    = float(_pre_row[6] or 300.0)
                         logger.info(
                             "[NLPExtractor] Pre-check: '%s' qty=%.0f %.1f kcal",
                             _pre_row[1], _qty_pre, _kcal0,
@@ -1013,7 +1119,7 @@ class NLPFoodExtractor:
                             alimento=str(_pre_row[1]),
                             cantidad=_qty_pre,
                             unidad="porcion",
-                            gramos_totales=100.0,
+                            gramos_totales=round(_g0 * _qty_pre, 1),
                             calorias=round(_kcal0 * _qty_pre, 1),
                             proteinas_g=round(_prot0 * _qty_pre, 1),
                             carbohidratos_g=round(_carb0 * _qty_pre, 1),
@@ -1037,6 +1143,8 @@ class NLPFoodExtractor:
         logger.info("[NLPExtractor] LLM extrajo %d items: %s", len(items_raw or []), items_raw)
         if not items_raw:
             return None
+        # Post-proc: "avena con 2 panes con mermelada" → ["avena", {pan con mermelada, qty:2}]
+        items_raw = _separar_con_n_items(items_raw)
 
         # ── POST-PROCESO: promover bebidas que siguen en con_extra a items propios ─────
         # Llama-3 a veces ignora la regla BEBIDAS_INDEPENDIENTES y las pone en con_extra.
@@ -1047,6 +1155,15 @@ class NLPFoodExtractor:
         })
         items_raw = _promover_bebidas_extras(items_raw, _BEBIDAS_KEYWORDS)
 
+        # Granos/semillas que, en contexto de vaso/taza, son bebidas distintas.
+        # Clave: nombre normalizado del grano; valor: nombre de la bebida equivalente.
+        _GRANO_A_BEBIDA = {
+            "cebada":                 "agua de cebada",
+            "emoliente":              "emoliente de cebada",
+            "avena bebida":           "avena bebida",
+        }
+        _UNIDADES_LIQUIDO = frozenset({"vaso", "taza", "copa", "ml", "cc", "l", "litro"})
+
         items_calculados: List[ItemExtraido] = []
         advertencias = []
 
@@ -1054,6 +1171,11 @@ class NLPFoodExtractor:
             nombre   = str(item.get("alimento", "")).strip()
             cantidad = float(item.get("cantidad", 1.0) or 1.0)
             unidad   = str(item.get("unidad", "porcion")).strip().lower()
+            # Remap: si el LLM extrajo un grano en contexto de bebida, usar la bebida
+            _n_norm = _norm(nombre)
+            if unidad in _UNIDADES_LIQUIDO and _n_norm in _GRANO_A_BEBIDA:
+                nombre = _GRANO_A_BEBIDA[_n_norm].title()
+                _n_norm = _norm(nombre)
             sin_lista = [str(x) for x in item.get("sin", []) if x]
             # con_extra puede tener strings o dicts (si el LLM usó el schema completo)
             _raw_extras = item.get("con_extra") or []
@@ -1109,7 +1231,8 @@ class NLPFoodExtractor:
                 " SUM(a.calorias_100g      * pi2.gramos / 100.0),"
                 " SUM(a.proteina_100g      * pi2.gramos / 100.0),"
                 " SUM(a.carbohidratos_100g * pi2.gramos / 100.0),"
-                " SUM(a.grasas_100g        * pi2.gramos / 100.0)"
+                " SUM(a.grasas_100g        * pi2.gramos / 100.0),"
+                " SUM(pi2.gramos)"
                 " FROM platos p"
                 " JOIN plato_ingredientes pi2 ON pi2.plato_id = p.id"
                 " JOIN alimentos a ON a.id = pi2.alimento_id"
@@ -1148,7 +1271,8 @@ class NLPFoodExtractor:
                         " SUM(a.calorias_100g*pi2.gramos/100.0),"
                         " SUM(a.proteina_100g*pi2.gramos/100.0),"
                         " SUM(a.carbohidratos_100g*pi2.gramos/100.0),"
-                        " SUM(a.grasas_100g*pi2.gramos/100.0)"
+                        " SUM(a.grasas_100g*pi2.gramos/100.0),"
+                        " SUM(pi2.gramos)"
                         " FROM platos p"
                         " JOIN plato_ingredientes pi2 ON pi2.plato_id=p.id"
                         " JOIN alimentos a ON a.id=pi2.alimento_id"
@@ -1161,12 +1285,13 @@ class NLPFoodExtractor:
                         )
 
             if plato_row:
-                # Columnas: 0=id, 1=nombre, 2=kcal, 3=prot, 4=carb, 5=gras
-                nombre_final = plato_row[1]
-                calorias     = float(plato_row[2] or 0)
-                proteinas    = float(plato_row[3] or 0)
-                carbos       = float(plato_row[4] or 0)
-                grasas       = float(plato_row[5] or 0)
+                # Columnas: 0=id, 1=nombre, 2=kcal, 3=prot, 4=carb, 5=gras, 6=gramos_total
+                nombre_final    = plato_row[1]
+                calorias        = float(plato_row[2] or 0)
+                proteinas       = float(plato_row[3] or 0)
+                carbos          = float(plato_row[4] or 0)
+                grasas          = float(plato_row[5] or 0)
+                _gramos_plato   = float(plato_row[6] or 300.0)
                 logger.info(
                     "[NLPExtractor] '%s' desde platos+ingredientes: %.1f kcal",
                     nombre_final, calorias,
@@ -1184,7 +1309,7 @@ class NLPFoodExtractor:
                 proteinas = round(proteinas * cantidad, 1)
                 carbos    = round(carbos    * cantidad, 1)
                 grasas    = round(grasas    * cantidad, 1)
-                gramos    = 300.0 * cantidad  # porción estándar de plato
+                gramos    = _gramos_plato * cantidad
             else:
                 # PASO 3: Buscar en alimentos base
                 alimento_bd = self._buscar_alimento_bd(nombre)
@@ -1212,6 +1337,62 @@ class NLPFoodExtractor:
                             origen="bd_combinado",
                         ))
                         continue
+
+                # PASO 3d: Construcción dinámica con plato_constructor.
+                # Activa para nombres ≥2 palabras no resueltos por pasos anteriores.
+                # Cubre platos con "de"/"a la"/adjetivos sin "con"/"y" explícito
+                # (p.ej. "arroz a la naranja", "sopa de mariscos", "ají de gallina").
+                # El plato se persiste en BD para futuras consultas (cache).
+                if not alimento_bd and len(nombre.split()) >= 2:
+                    try:
+                        from app.services.plato_constructor import crear_plato_dinamico as _cpd
+                        _plato_din = await _cpd(self.db, nombre)
+                        if _plato_din and _plato_din.id:
+                            _din_row = self.db.execute(_text(
+                                "SELECT p.id, p.nombre,"
+                                " SUM(a.calorias_100g*pi2.gramos/100.0),"
+                                " SUM(a.proteina_100g*pi2.gramos/100.0),"
+                                " SUM(a.carbohidratos_100g*pi2.gramos/100.0),"
+                                " SUM(a.grasas_100g*pi2.gramos/100.0),"
+                                " SUM(pi2.gramos)"
+                                " FROM platos p"
+                                " JOIN plato_ingredientes pi2 ON pi2.plato_id=p.id"
+                                " JOIN alimentos a ON a.id=pi2.alimento_id"
+                                " WHERE p.id=:pid GROUP BY p.id,p.nombre LIMIT 1"
+                            ), {"pid": _plato_din.id}).fetchone()
+                            if _din_row:
+                                nombre_final = _din_row[1]
+                                _kcal_d = round(float(_din_row[2] or 0), 1)
+                                _prot_d = round(float(_din_row[3] or 0), 1)
+                                _carb_d = round(float(_din_row[4] or 0), 1)
+                                _gras_d = round(float(_din_row[5] or 0), 1)
+                                _grms_d = float(_din_row[6] or 300.0)
+                                calorias  = round(_kcal_d * cantidad, 1)
+                                proteinas = round(_prot_d * cantidad, 1)
+                                carbos    = round(_carb_d * cantidad, 1)
+                                grasas    = round(_gras_d * cantidad, 1)
+                                gramos    = _grms_d * cantidad
+                                logger.info(
+                                    "[NLPExtractor] Plato dinámico '%s': %.1f kcal",
+                                    nombre_final, calorias,
+                                )
+                                if sin_lista or con_extra_lista:
+                                    calorias, proteinas, carbos, grasas, _ = \
+                                        self._aplicar_modificadores(
+                                            calorias, proteinas, carbos, grasas,
+                                            sin_lista, con_extra_lista, nombre_final,
+                                        )
+                                items_calculados.append(ItemExtraido(
+                                    alimento=nombre_final, cantidad=cantidad, unidad=unidad,
+                                    gramos_totales=gramos, calorias=calorias,
+                                    proteinas_g=proteinas, carbohidratos_g=carbos,
+                                    grasas_g=grasas, origen="plato_dinamico",
+                                ))
+                                continue
+                    except Exception as _ep:
+                        logger.warning(
+                            "[NLPExtractor] Plato dinámico falló para '%s': %s", nombre, _ep
+                        )
 
                 # PASO 3c: Si no encontró por nombre completo, buscar ingrediente base
                 # Ej: "sopa de lentejas ligera" → busca "lentejas" en alimentos

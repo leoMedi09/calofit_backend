@@ -22,6 +22,76 @@ _RE_PASADO_COMER = re.compile(
     re.IGNORECASE,
 )
 
+# ── Limpieza de historial para el LLM ────────────────────────────────────────
+# Los mensajes del asistente contienen emojis, desgloses y advertencias
+# formateados (✅ 📊 • | P:7.8g | C:77.6g) que Llama-3 lee literalmente
+# y repite, produciendo respuestas incoherentes. Solo se conserva el hecho
+# principal ("Registré: X — 650 kcal.").
+_RE_EMOJI_HIST = re.compile(
+    r"[\U0001F300-\U0001FFFF]"  # emoji amplio (📊 🥗 ✅ ❌ etc.)
+    r"|[☀-➿]"          # símbolos misc (⚠️ → ✅)
+    r"|[⬀-⯿]"          # flechas extendidas
+    r"|[•]"                 # bullet •
+    r"|[—–]"           # em dash — / en dash –
+    r"|[️‍]",          # variation selector / ZWJ
+    re.UNICODE,
+)
+_RE_MACROS_INLINE = re.compile(
+    r"\s*\|\s*[PCGpcg][a-zA-Z]*\s*:\s*[\d.,]+\s*g",
+    re.IGNORECASE,
+)
+# Prefijos de sección que marcan el inicio de bloques de desglose/advertencia
+_CORTES_HISTORIAL = (
+    "\n\n📊", "\n\n⚠️", "\n\n•", "\n\n🥗",
+    "\n\nTotal:", "\n\n[CALOFIT",
+    "\n\nDesglose", "\n\nDetalle",
+    "\n\nRegistrado igualmente",
+    "\n\nAlimentos no compatibles",
+)
+
+
+def _resumir_para_historial(content: str, role: str) -> str:
+    """
+    Extrae solo el hecho principal de los mensajes del asistente antes de
+    pasarlos a Llama-3 como historial de contexto.
+
+    - Mensajes de usuario  → se pasan intactos (texto natural, máx 300 chars).
+    - Mensajes del asistente → se conserva solo la primera línea útil;
+      se eliminan desgloses nutricionales, advertencias, emojis, bullets y
+      los patrones '| P:Xg | C:Xg | G:Xg' que confunden al modelo.
+    """
+    if not content:
+        return ""
+    texto = str(content).strip()
+
+    if role != "assistant":
+        return texto[:300]
+
+    # 1. Cortar en el primer bloque de desglose o advertencia
+    for patron in _CORTES_HISTORIAL:
+        idx = texto.find(patron)
+        if idx > 0:
+            texto = texto[:idx]
+
+    # 2. Quitar emojis, bullets y guiones especiales
+    texto = _RE_EMOJI_HIST.sub("", texto)
+
+    # 3. Quitar macros inline "| P:7.8g | C:77.6g | G:0.7g"
+    texto = _RE_MACROS_INLINE.sub("", texto)
+
+    # 4. Pipes y flechas restantes → coma
+    texto = re.sub(r"\s*[|→]\s*", ", ", texto)
+
+    # 5. Normalizar espacios
+    texto = re.sub(r"\s{2,}", " ", texto).strip()
+    texto = re.sub(r",\s*$", ".", texto)
+
+    # 6. Máximo 200 chars — el LLM solo necesita el hecho central
+    if len(texto) > 200:
+        texto = texto[:200].rsplit(" ", 1)[0] + "."
+
+    return texto
+
 from sqlalchemy.orm import Session
 
 from app.core.cache import get_consulta_cached
@@ -216,9 +286,55 @@ class AsistenteService:
             any(msg_limpio.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO)
             or bool(_RE_PASADO_COMER.search(msg_limpio))
         ):
-            return await registro_comida_handler.registrar(
+            _com = await registro_comida_handler.registrar(
                 mensaje, perfil, plan_hoy_data, db, self.ia
             )
+            # Envolver en el formato completo que Flutter espera (respuesta_ia + respuesta_estructurada)
+            _hoy_c = get_peru_date()
+            _p_c   = db.query(ProgresoCalorias).filter(
+                ProgresoCalorias.client_id == perfil.id,
+                ProgresoCalorias.fecha == _hoy_c,
+            ).first()
+            _con_c = float(_p_c.calorias_consumidas if _p_c else consumo_real)
+            _que_c = float(_p_c.calorias_quemadas   if _p_c else quemadas_real)
+            _msg_c = _com.get("mensaje", "")
+            return {
+                "asistente":    "CaloFit IA",
+                "usuario":      perfil.first_name,
+                "intencion":    "SUCCESS" if _com.get("success") else "ERROR",
+                "tipo_pregunta": "LOG",
+                "alerta_salud": False,
+                "data_cientifica": {
+                    "progreso_diario": {
+                        "consumido": round(_con_c, 1),
+                        "meta":      round(calorias_meta, 1),
+                        "restante":  round(max(0, calorias_meta - _con_c + _que_c), 1),
+                        "quemado":   round(_que_c, 1),
+                    },
+                    "macros": {
+                        "proteinas_meta":     plan_hoy_data.get("proteinas_g", 0),
+                        "carbohidratos_meta": plan_hoy_data.get("carbohidratos_g", 0),
+                        "grasas_meta":        plan_hoy_data.get("grasas_g", 0),
+                    },
+                },
+                "respuesta_ia": _msg_c,
+                "respuesta_estructurada": {
+                    "intent":               "SUCCESS" if _com.get("success") else "ERROR",
+                    "texto_conversacional": _msg_c,
+                    "secciones":            [],
+                },
+                "tipo_detectado":      _com.get("tipo_detectado", "comida"),
+                "datos":               _com.get("datos", {}),
+                "balance_actualizado": _com.get("balance_actualizado", {}),
+                # Advertencias para el frontend
+                "advertencia_dieta":     _com.get("advertencia_dieta"),
+                "advertencia_prohibido": _com.get("advertencia_prohibido"),
+                "advertencia_horario":   _com.get("advertencia_horario"),
+                "advertencia_temporal":  _com.get("advertencia_temporal"),
+                "advertencia_gula":      _com.get("advertencia_gula"),
+                "advertencia_gramaje":   _com.get("advertencia_gramaje"),
+                "alerta_macros":         _com.get("alerta_macros"),
+            }
 
         # ── Redirección ejercicio: "Hoy realice / Hice X series…" → handler directo ──
         # Evita que el LLM genere texto con [CALOFIT_INTENT:LOG] sin registrar nada en BD.
@@ -263,6 +379,63 @@ class AsistenteService:
                     "balance_actualizado": _ej.get("balance_actualizado", {}),
                 }
 
+        # ── Guard: vocab gym + "por/durante X min" sin verbo → registro implícito ──
+        # Cubre "fondos en paralelas por 20min", "sentadillas durante 15 min", etc.
+        # El usuario omitió el verbo "hice" pero la intención es reportar lo que hizo.
+        # Se añade "hice " para que el NLP lo procese igual que el flujo estándar.
+        from app.services.asistente_ejercicio import frase_vocabulario_gimnasio as _fvg
+        from app.services.asistente_registro_ejercicio import _RE_DURACION as _RE_DUR_EJ
+        _MARCADORES_FUTURO = (
+            "quiero", "voy a", "necesito", "puedo hacer",
+            "debo", "cómo hacer", "como hacer", "cómo se", "como se", "me recomiend",
+            "ejercicio",  # "ejercicios de pecho por 30 min" = recomendación, no registro
+        )
+        if (
+            not _fraf(mensaje)
+            and "?" not in msg_limpio
+            and _fvg(mensaje)
+            and _RE_DUR_EJ.search(msg_limpio)
+            and not any(p in msg_limpio for p in _MARCADORES_FUTURO)
+        ):
+            _ej2 = await registro_ejercicio_handler.registrar("hice " + mensaje, perfil, db, self.ia)
+            if _ej2.get("success"):
+                _hoy3 = get_peru_date()
+                _p3   = db.query(ProgresoCalorias).filter(
+                    ProgresoCalorias.client_id == perfil.id,
+                    ProgresoCalorias.fecha == _hoy3,
+                ).first()
+                _q3 = float(_p3.calorias_quemadas   if _p3 else 0)
+                _c3 = float(_p3.calorias_consumidas  if _p3 else consumo_real)
+                return {
+                    "asistente":    "CaloFit IA",
+                    "usuario":      perfil.first_name,
+                    "intencion":    "SUCCESS",
+                    "tipo_pregunta": "LOG",
+                    "alerta_salud": False,
+                    "data_cientifica": {
+                        "progreso_diario": {
+                            "consumido": round(_c3, 1),
+                            "meta":      round(calorias_meta, 1),
+                            "restante":  round(max(0, calorias_meta - _c3 + _q3), 1),
+                            "quemado":   round(_q3, 1),
+                        },
+                        "macros": {
+                            "proteinas_meta":     plan_hoy_data.get("proteinas_g", 0),
+                            "carbohidratos_meta": plan_hoy_data.get("carbohidratos_g", 0),
+                            "grasas_meta":        plan_hoy_data.get("grasas_g", 0),
+                        },
+                    },
+                    "respuesta_ia": _ej2.get("mensaje", ""),
+                    "respuesta_estructurada": {
+                        "intent":               "SUCCESS",
+                        "texto_conversacional": _ej2.get("mensaje", ""),
+                        "secciones":            [],
+                    },
+                    "tipo_detectado":      _ej2.get("tipo_detectado", "ejercicio"),
+                    "datos":               _ej2.get("datos", {}),
+                    "balance_actualizado": _ej2.get("balance_actualizado", {}),
+                }
+
         if strict_ask_missing_enabled():
             falt = detectar_faltantes(modo_funcion, mensaje)
             if falt:
@@ -300,8 +473,15 @@ class AsistenteService:
         else:
             ctx_hist = ""
             if historial:
+                # Limpiar mensajes del asistente antes de pasarlos al LLM:
+                # se eliminan desgloses nutricionales, emojis, bullets y
+                # patrones "| P:Xg" que Llama-3 interpretaría literalmente.
                 ctx_hist = "\n\nHISTORIAL RECIENTE:\n" + "\n".join(
-                    f"{m.get('role','user').upper()}: {m.get('content','')}" for m in historial[-4:]
+                    "{}: {}".format(
+                        m.get("role", "user").upper(),
+                        _resumir_para_historial(m.get("content", ""), m.get("role", "user")),
+                    )
+                    for m in historial[-4:]
                 )
             prompt_final = await enriquecer_prompt_con_bd(
                 ctx + _ctx_extra + ctx_hist + f"\n\nMENSAJE DEL USUARIO: {mensaje}",
@@ -323,6 +503,18 @@ class AsistenteService:
         resp_est["modo_funcion"] = modo_funcion
         await procesar_secciones_comida(resp_est, perfil, db=db, mensaje_original=mensaje)
         procesar_secciones_ejercicio(resp_est, perfil)
+
+        # ── Guard: meta calórica cumplida → eliminar tarjetas RECIPE ─────────
+        # El LLM a veces genera tarjetas de comida aunque se le diga que no.
+        # Este guard las borra en código, independiente de lo que haya generado el LLM.
+        _restantes_actual = calorias_meta - consumo_real + quemadas_real
+        if _restantes_actual <= 0 and modo_funcion == "recomendar_nutricion":
+            resp_est["secciones"] = [
+                s for s in (resp_est.get("secciones") or [])
+                if s.get("tipo") != "comida"
+            ]
+            resp_est["intent"] = "INFO"
+
         await rescue_nlp_log(resp_est, mensaje, perfil, self.ia, db)
         clasificar_intencion_respuesta(resp_est, mensaje)
         limpiar_tags_calofit(resp_est)

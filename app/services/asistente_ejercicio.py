@@ -64,6 +64,7 @@ _RE_LEX_GYM = re.compile(
     r"cu[aá]driceps|gemelo|gl[uú]te|hiit|cardio|trot|corr|burpee|flexi|dominad|"
     r"jal[oó]n|pesas|mancuern|barra|gym|m[aá]quina|bici|el[ií]ptic|soga|saltos?|zancad|"
     r"rowing|adduct|abd\w*|bis\w*|tris\w*|hip\s*thrust|kettle|snatch|clean|thruster|"
+    r"fondos?|paralelas?|apertur|lunges?|"
     r"ejercicio|entreno|fuerza|aer[óo]bic)"
     r"|(?<!a la )(?<!la )\bplancha\b"  # 'plancha' solo si NO es 'a la plancha' (cocción)
 )
@@ -89,7 +90,7 @@ def rotulo_actividad_desde_mensaje(texto: str) -> str:
     t = texto.strip()
     m = re.search(
         r"(?i)(?:\b(hice|realicé|realice|entren[ée]|entrené|entrene|practiqué|practique)\s+)(.+?)"
-        r"(?=\s+por\s+\d|\s+\d+\s*min|\s+\d+\s*minut|$)",
+        r"(?=\s+(?:por|durante)\s+\d|\s+\d+\s*min|\s+\d+\s*minut|$)",
         t,
     )
     if m:

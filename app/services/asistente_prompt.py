@@ -378,6 +378,7 @@ def construir_prompt_cliente(
                 n=3,
                 excluir_nombres=excluir,
                 ingrediente_clave=ingrediente_clave,
+                condiciones_dieta=list(perfil.medical_conditions or []),
             )
 
             if platos:
@@ -400,8 +401,172 @@ def construir_prompt_cliente(
                     "para su objetivo actual, y luego preséntale estas 3 opciones como alternativas saludables y balanceadas que SÍ "
                     "le ayudarán a llegar a su meta."
                 )
+
+            # ── KNN complementario — alimentos individuales por similitud coseno ──
+            if ml_recomendador is not None:
+                try:
+                    _knn_sugs = ml_recomendador.obtener_recomendaciones(
+                        calorias_faltantes=hi_i,
+                        prote_faltante=d_prot,
+                        carbo_faltante=d_carb,
+                        grasa_faltante=d_gras,
+                        n_recomendaciones=6,   # extra para compensar filtro dietético
+                        excluir_nombres=excluir,
+                    )
+                    # Filtrar por restricciones dietéticas del usuario
+                    if perfil.medical_conditions:
+                        try:
+                            from app.services.recomendador_platos import _tokens_prohibidos
+                            _knn_tok = _tokens_prohibidos(list(perfil.medical_conditions))
+                            if _knn_tok:
+                                _knn_sugs = [
+                                    k for k in (_knn_sugs or [])
+                                    if not any(
+                                        t in (k.get("alimento", "") or "").lower()
+                                        for t in _knn_tok
+                                    )
+                                ][:3]
+                        except Exception:
+                            pass
+                    if _knn_sugs:
+                        _knn_lineas = "\n".join(
+                            f"- {k['alimento']}: {k['calorias_100g']:.0f} kcal/100g "
+                            f"(P:{k['proteina_100g']:.1f}g C:{k.get('carbohidratos_100g', 0):.1f}g "
+                            f"G:{k['grasas_100g']:.1f}g) — similitud {k['similitud']}%"
+                            for k in _knn_sugs
+                        )
+                        bloque_reco_ml += (
+                            "\n\nALIMENTOS COMPLEMENTARIOS KNN (snacks o acompañantes sugeridos):\n"
+                            + _knn_lineas
+                            + "\nMenciónales brevemente si el cliente necesita complementar su ingesta."
+                        )
+                except Exception:
+                    pass
         except Exception as e:
             print(f"[Prompt] Error RecomendadorPlatosConfiables: {e}")
+
+    # ── Justificación personalizada: objetivo + condiciones clínicas ─────────
+    # Le dice al LLM que explique POR QUÉ cada sugerencia es adecuada para este usuario,
+    # vinculando el objetivo (ganar masa, perder peso…) y las condiciones (diabetes, vegano…).
+    _objetivo_raw = (getattr(perfil, "goal", "Mantenimiento") or "Mantenimiento").strip()
+    _OBJ_FRASES = {
+        "ganar masa":    "ganar masa muscular (superávit calórico + alta proteína)",
+        "ganar":         "ganar masa muscular (superávit calórico + alta proteína)",
+        "perder peso":   "perder peso (déficit calórico + proteína para conservar músculo)",
+        "perder":        "perder peso (déficit calórico + proteína para conservar músculo)",
+        "mantenimiento": "mantener el peso actual (balance calórico equilibrado)",
+        "mantener peso": "mantener el peso actual (balance calórico equilibrado)",
+        "mantener":      "mantener el peso actual (balance calórico equilibrado)",
+    }
+    _obj_txt = _OBJ_FRASES.get(_objetivo_raw.lower(), f"objetivo: {_objetivo_raw}")
+
+    _cond_justif: list[str] = []
+    for _c in list(perfil.medical_conditions or []):
+        _cl = _c.lower()
+        if "diabetes" in _cl:
+            _cond_justif.append("diabetes (bajo índice glucémico, sin azúcares refinados)")
+        elif "vegano" in _cl:
+            _cond_justif.append("alimentación 100% vegana (sin ningún producto animal)")
+        elif "vegetariano" in _cl:
+            _cond_justif.append("vegetarianismo (sin carnes ni pescados, lácteos/huevos permitidos)")
+        elif "intolerancia" in _cl:
+            _cond_justif.append("intolerancia a la lactosa (sin lácteos)")
+        elif "celí" in _cl or "celiaco" in _cl:
+            _cond_justif.append("celiaquía / sin gluten")
+        elif "hipertensión" in _cl or "hipertension" in _cl:
+            _cond_justif.append("hipertensión (bajo en sodio, evitar embutidos y frituras)")
+        elif "renal" in _cl:
+            _cond_justif.append("enfermedad renal (controlar proteína total y potasio)")
+
+    _hay_condiciones = bool(_cond_justif)
+    _cond_txt = "; ".join(_cond_justif) if _hay_condiciones else ""
+
+    bloque_justificacion = (
+        f"\n\nOBJETIVO ACTIVO: {_obj_txt}."
+        + (f"\nCONDICIONES CLÍNICAS: {_cond_txt}." if _hay_condiciones else "")
+        + "\n\nREGLA DE JUSTIFICACIÓN (aplicar en MODO RECIPE):"
+        "\n• ANTES de las tarjetas escribe 1–2 frases explicando por qué las opciones"
+        " encajan con el objetivo y las condiciones del usuario."
+        "\n  Ejemplo objetivo solo:    'Como tu meta es ganar masa, prioricé opciones"
+        " ricas en proteína y con superávit calórico moderado:'"
+        "\n  Ejemplo con condición:    'Considerando que buscas perder peso y tienes"
+        " diabetes, elegí platos altos en proteína, sin azúcar y de bajo índice glucémico:'"
+        + (
+            "\n• Después del nombre de cada tarjeta añade 1 línea corta (fuera de [CALOFIT_LIST])"
+            " con el beneficio principal para su condición."
+            "\n  Ejemplo: '→ Apto para diabéticos: sin azúcares refinados, proteína de legumbres.'"
+            if _hay_condiciones else ""
+        )
+    )
+
+    # ── Bloque meta cumplida — bloquea RECIPE cuando el usuario ya llegó a su meta ──
+    bloque_meta_cumplida = ""
+    if restantes <= 0 and calorias_meta > 0:
+        bloque_meta_cumplida = (
+            f"\n\n🚫 META CALÓRICA DEL DÍA CUMPLIDA (REGLA CRÍTICA — MÁXIMA PRIORIDAD):"
+            f"\nEl usuario ya alcanzó su meta: {consumo_real:.0f} kcal consumidas "
+            f"/ {calorias_meta:.0f} kcal meta. Le quedan 0 kcal disponibles."
+            "\n• PROHIBIDO ABSOLUTO: sugerir comidas, platos o recetas adicionales. NO usar MODO RECIPE."
+            "\n• OBLIGATORIO: informar amablemente que la meta del día está cubierta."
+            "\n• Si el usuario insiste en comer, sugiere SOLO agua, infusión o una fruta muy pequeña (≤80 kcal)."
+            "\n• Usa MODO PROGRESS o INFO. NUNCA RECIPE en esta situación."
+        )
+
+    # ── Refuerzo proteína alta para ganar masa + dieta vegana/vegetariana ────
+    _es_ganar_masa = _objetivo_raw.lower() in ("ganar masa", "ganar", "ganar músculo", "ganar musculo")
+    _es_dieta_plant = any(
+        p in (texto_dieta or "").lower()
+        for p in ("vegano", "vegetariano", "plant")
+    )
+    if _es_ganar_masa and _es_dieta_plant:
+        bloque_justificacion += (
+            "\n• PROTEÍNA VEGETAL ALTA (obligatorio para ganar masa sin carne):"
+            " cada opción debe aportar ≥20 g de proteína."
+            " Prioriza: tofu (~18 g/100 g), seitán (~25 g/100 g), tempeh (~19 g/100 g),"
+            " edamame (~11 g/100 g), combinación quinua + lentejas. EVITA 'ensaladas ligeras'"
+            " o sopas con <15 g proteína — son insuficientes para superávit muscular."
+        )
+
+    # ── Regla 10 — Restricciones dietéticas del usuario ──────────────────────
+    _bloque_regla10 = ""
+    _reglas_dieta_r10: list[str] = []
+    _conds_all = list(perfil.medical_conditions or [])
+    if "Vegano" in _conds_all:
+        _reglas_dieta_r10.append(
+            "VEGANO — PROHIBIDO absolutamente: carnes, aves, pescados, mariscos, huevos, "
+            "leche, queso, yogurt, mantequilla y cualquier derivado animal. "
+            "TODAS las opciones deben ser 100% de origen vegetal."
+        )
+    elif "Vegetariano" in _conds_all:
+        _reglas_dieta_r10.append(
+            "VEGETARIANO — PROHIBIDO: carnes (res, cerdo, pollo, pavo, pato, cabrito), "
+            "pescados y mariscos. Huevos y lácteos SÍ están permitidos."
+        )
+    if any("intolerancia" in c.lower() for c in _conds_all):
+        _reglas_dieta_r10.append(
+            "INTOLERANCIA A LA LACTOSA — PROHIBIDO: leche, queso, yogurt, "
+            "mantequilla, crema de leche, quesillo."
+        )
+    if any("celí" in c.lower() or "celiaco" in c.lower() for c in _conds_all):
+        _reglas_dieta_r10.append(
+            "CELÍACO — PROHIBIDO: trigo, avena, cebada, centeno, pan de trigo, "
+            "pasta, fideos, galletas con gluten."
+        )
+    if any("diabetes" in c.lower() for c in _conds_all):
+        _reglas_dieta_r10.append(
+            "DIABETES — PROHIBIDO: azúcar refinada, miel, mermelada, gaseosas, "
+            "chocolates, helados, pasteles, bebidas azucaradas."
+        )
+    if _reglas_dieta_r10:
+        _bloque_regla10 = (
+            f"\n10. RESTRICCIÓN DIETÉTICA OBLIGATORIA (perfil: {texto_dieta}):\n"
+            + "\n".join(f"   • {r}" for r in _reglas_dieta_r10)
+            + "\n   ⚠️ INCUMPLIR ESTA REGLA ES ERROR GRAVE. Verifica que CADA opción "
+            "cumpla TODAS las restricciones antes de responder."
+            + "\n   ✅ JUSTIFICACIÓN OBLIGATORIA: Por cada plato recomendado añade 1 línea "
+            "entre paréntesis explicando por qué es apto para el perfil del usuario."
+            + "\n      Ejemplo: '(100% vegetal · proteína de quinua · sin derivados animales)'"
+        )
 
     # ── Bloque Nutricionista (máxima prioridad) ──
     nota = getattr(perfil, "nutri_weekly_note", None)
@@ -423,6 +588,8 @@ def construir_prompt_cliente(
         f"ALERGIAS: {texto_alergias}. DIETA: {texto_dieta}. CONDICIONES: {texto_condiciones}."
         f"{bloque_hora}{bloque_rango_kcal}{bloque_anti_repetir}{bloque_favoritos}"
         f"{bloque_perfil_ml}{bloque_reco_ml}"
+        f"{bloque_justificacion}"
+        f"{bloque_meta_cumplida}"
         f"\nSTATUS DEL DÍA: Meta: {calorias_meta} kcal | Consumido: {consumo_real} kcal | "
         f"Restante: {restantes:.0f} kcal | Adherencia: {adherencia_pct:.0f}% | {mensaje_fuzzy}."
         f"\n\nREGLAS DE INTENCIÓN Y FORMATO (OBLIGATORIO):"
@@ -438,6 +605,7 @@ def construir_prompt_cliente(
         "\n   • Prioridad de especies: Caballa → Lisa → Mero → Tollo (en ese orden)."
         "\n   • PROHIBIDO sugerir Atún o Salmón salvo que el usuario los pida por nombre."
         "\n   • El Ceviche NUNCA lleva palta, tomate ni zanahoria."
+        f"{_bloque_regla10}"
         f"{bloque_saludo}"
         f"{bloque_prompt_modo_funcion(modo_funcion)}"
     )

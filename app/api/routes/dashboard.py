@@ -68,10 +68,13 @@ async def get_daily_summary(
                     break
             
             mensaje_cliente = ""
-            if estado_frontend == "validado":
+            if estado_frontend == "validado" and es_condicion_critica:
+                # Aprobado + condición crítica: seguimiento especial activo
+                mensaje_cliente = "✅ Plan aprobado. Tu nutricionista te acompaña con seguimiento especial por tu condición médica."
+            elif estado_frontend == "validado":
                 mensaje_cliente = "✅ Tu nutricionista ha validado tu plan. ¡Sigue así!"
             elif es_condicion_critica:
-                mensaje_cliente = "⚠️ Tu plan es provisional y ultra-conservador por tu condición médica. Contacta a tu nutricionista."
+                mensaje_cliente = "⚠️ Tu plan es provisional y ultra-conservador por tu condición médica. Tu nutricionista lo revisará pronto."
                 estado_frontend = "en_revision"
             else:
                 mensaje_cliente = "🤖 Plan generado por IA. Tu nutricionista lo revisará pronto."
@@ -89,7 +92,7 @@ async def get_daily_summary(
                 "validado": plan_maestro.status == "validado",
                 "plan_id": plan_maestro.id,
                 "estado_plan": estado_frontend,
-                "requiere_validacion": estado_api == "draft_ia" or es_condicion_critica,
+                "requiere_validacion": estado_api != "validado",
                 "es_condicion_critica": es_condicion_critica,
                 "mensaje_cliente": mensaje_cliente,
                 "descripcion_estado": "Plan validado" if estado_frontend == "validado" else "Pendiente de validación",
@@ -99,9 +102,10 @@ async def get_daily_summary(
     else:
         # FALLBACK: Usar el cálculo centralizado de utils.py
         calorias_fallback = calcular_metabolismo_basal(cliente)
-        if cliente.goal == "Perder peso":
+        _goal = (cliente.goal or "").lower().strip()
+        if "perder" in _goal:
             calorias_fallback *= 0.85
-        elif cliente.goal == "Ganar masa":
+        elif "ganar" in _goal or "masa" in _goal:
             calorias_fallback *= 1.1
 
         peso = float(cliente.weight or 70.0)

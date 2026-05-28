@@ -29,6 +29,64 @@ from app.services.nutrition.plate.plate_builder import PlatoBuilder
 
 logger = logging.getLogger(__name__)
 
+# ─── Tokens prohibidos por condición dietética ───────────────────────────────
+# Se comparan contra el nombre del plato y sus ingredientes (lowercase).
+_CONDICION_TOKENS: dict[str, set[str]] = {
+    "Vegano": {
+        "pollo", "pechuga", "muslo", "gallina", "pato", "pavo", "cabrito",
+        "cerdo", "chancho", "res", "carne", "bistec", "lomo", "ternera",
+        "chicharron", "chicharrón", "jamon", "jamón", "salchicha",
+        "pescado", "salmon", "salmón", "atun", "atún", "trucha", "caballa",
+        "corvina", "cachema", "lisa", "mero", "tollo", "anchoveta",
+        "mariscos", "camaron", "camarón", "langostino", "pulpo", "calamar",
+        "leche", "queso", "yogur", "yogurt", "mantequilla", "crema",
+        "manteca", "quesillo", "huevo",
+    },
+    "Vegetariano": {
+        "pollo", "pechuga", "muslo", "gallina", "pato", "pavo", "cabrito",
+        "cerdo", "chancho", "res", "carne", "bistec", "lomo", "ternera",
+        "chicharron", "chicharrón", "jamon", "jamón", "salchicha",
+        "pescado", "salmon", "salmón", "atun", "atún", "trucha", "caballa",
+        "corvina", "cachema", "lisa", "mero", "tollo", "anchoveta",
+        "mariscos", "camaron", "camarón", "langostino", "pulpo", "calamar",
+    },
+    "Intolerancia a la Lactosa": {
+        "leche", "queso", "yogur", "yogurt", "mantequilla", "crema",
+        "manteca", "quesillo", "lactosa",
+    },
+    "Celíaco": {
+        "trigo", "avena", "cebada", "centeno", "gluten",
+        "pan", "pasta", "fideos", "tallarin", "tallarín", "spaghetti",
+        "galleta", "harina", "cuscuz", "cuscús",
+    },
+    "Diabetes": {
+        # Azúcares directas
+        "azucar", "azúcar", "miel", "mermelada", "jarabe",
+        # Bebidas azucaradas
+        "gaseosa", "chicha", "refresco", "jugo azucarado",
+        # Dulces y postres
+        "chocolate", "caramelo", "helado", "torta", "pastel",
+        "galleta", "donuts", "churro", "suspiro",
+    },
+}
+
+
+def _tokens_prohibidos(condiciones: list[str]) -> set[str]:
+    """Devuelve el conjunto de tokens prohibidos para una lista de condiciones."""
+    tokens: set[str] = set()
+    for cond in (condiciones or []):
+        tokens.update(_CONDICION_TOKENS.get(cond, set()))
+    return tokens
+
+
+def _plato_es_apto(nombre: str, ingredientes_str: str, tokens: set[str]) -> bool:
+    """True si el plato no contiene ningún token prohibido."""
+    if not tokens:
+        return True
+    texto = (nombre + " " + ingredientes_str).lower()
+    return not any(t in texto for t in tokens)
+
+
 # Confianza mínima para mostrar un plato al usuario
 _MIN_CONFIANZA = 60
 
@@ -174,6 +232,7 @@ class RecomendadorPlatosConfiables:
         n: int = 3,
         excluir_nombres: Optional[List[str]] = None,
         ingrediente_clave: Optional[str] = None,
+        condiciones_dieta: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Retorna N platos recomendados, confiables y variados.
@@ -197,6 +256,12 @@ class RecomendadorPlatosConfiables:
         historial = self._historial_reciente(client_id, dias=_HISTORIAL_DIAS)
         excluir.update(historial)
 
+        # Tokens prohibidos por condición dietética (Vegano, Vegetariano, etc.)
+        tokens_prohibidos = _tokens_prohibidos(condiciones_dieta or [])
+
+        # Pool ampliado cuando hay filtro dietético: más candidatos para compensar descartes
+        _pool_efectivo = _POOL_SIZE * 3 if tokens_prohibidos else _POOL_SIZE
+
         # 2. Candidatos desde BD (platos con macros reales)
         candidatos_bd = self._candidatos_desde_bd(
             deficit_kcal=deficit_kcal,
@@ -205,8 +270,9 @@ class RecomendadorPlatosConfiables:
             deficit_grasas=deficit_grasas,
             excluir=excluir,
             momento_dia=momento_dia,
-            pool=_POOL_SIZE,
+            pool=_pool_efectivo,
             ingrediente_clave=ingrediente_clave,
+            tokens_prohibidos=tokens_prohibidos,
         )
 
         # 3. Mezclar con diversidad (shuffl estable por día)
@@ -270,6 +336,7 @@ class RecomendadorPlatosConfiables:
         momento_dia: str,
         pool: int = 30,
         ingrediente_clave: Optional[str] = None,
+        tokens_prohibidos: Optional[set] = None,
     ) -> List[Dict[str, Any]]:
         """
         Busca platos en BD con macros reales calculadas desde sus ingredientes.
@@ -320,6 +387,11 @@ class RecomendadorPlatosConfiables:
             if ing_clave_norm:
                 if not _tiene_ingrediente(nombre, ingredientes_str, ing_clave_norm):
                     continue
+
+            # Filtro dietético: descartar platos con ingredientes prohibidos
+            if tokens_prohibidos and not _plato_es_apto(nombre, ingredientes_str, tokens_prohibidos):
+                logger.debug("[Dieta] Plato '%s' descartado por restricción dietética", nombre)
+                continue
 
             kcal = float(row[3] or 0)
             prot = float(row[4] or 0)
@@ -476,18 +548,45 @@ class RecomendadorPlatosConfiables:
         seleccionados = []
         nombres_vistos = set()
 
-        # Agrupar por "tipo" para diversidad
+        # Categoriza por ingrediente PRINCIPAL (parte antes del primer "con"/"y"/etc.)
+        # para evitar que "Arroz con Lentejas" y "Lentejas con Verduras"
+        # caigan en la misma categoría ("verdura").
+        _RE_CONECTOR = re.compile(r"\s+(?:con|y|a\s+la?|al|en\s+|de\s+)", re.I)
+
         def categoria(nombre: str) -> str:
-            n = nombre.lower()
-            for kw in ("pollo", "pescado", "res", "cerdo", "huevo"):
-                if kw in n:
-                    return kw
-            for kw in ("sopa", "caldo", "crema"):
-                if kw in n:
-                    return "sopa"
-            for kw in ("ensalada", "vegetal", "verdura"):
-                if kw in n:
-                    return "vegetal"
+            # Parte primaria: antes del primer conector
+            partes = _RE_CONECTOR.split(nombre.lower(), maxsplit=1)
+            primaria = partes[0].strip()
+            nombre_full = nombre.lower()
+
+            def _match(kws: list, texto: str) -> bool:
+                return any(kw in texto for kw in kws)
+
+            # ── Evaluar primaria primero, luego nombre completo ──
+            for texto in (primaria, nombre_full):
+                # Proteínas animales
+                if _match(["pollo", "pechuga", "gallina"], texto): return "pollo"
+                if _match(["pescado", "caballa", "corvina", "trucha", "lisa",
+                           "mero", "tollo", "cachema", "cebiche", "tiradito",
+                           "anchoveta", "sudado"], texto): return "pescado"
+                if _match(["lomo", "bistec", "ternera"], texto): return "res"
+                if _match([" res ", "carne de res"], " " + texto + " "): return "res"
+                if _match(["cerdo", "chancho", "chicharron"], texto): return "cerdo"
+                if _match(["pato", "pavo", "cabrito"], texto): return "ave"
+                if "huevo" in texto: return "huevo"
+                # Sopas
+                if _match(["sopa", "caldo", "crema de"], texto): return "sopa"
+                # Proteínas vegetales (legumbres)
+                if _match(["lenteja", "garbanzo", "frejol", "frijol", "haba",
+                           "arveja", "pallare", "tofu", "soya"], texto): return "legumbre"
+                # Quínoa
+                if _match(["quinua", "quinoa"], texto): return "quinua"
+                # Base arroz
+                if "arroz" in texto: return "arroz"
+                # Tubérculos
+                if _match(["papa", "camote", "yuca", "causa"], texto): return "tuberculo"
+                # Ensaladas y vegetales puros
+                if _match(["ensalada", "verdura", "vegetal"], texto): return "vegetal"
             return "otro"
 
         categorias_usadas: Dict[str, int] = {}

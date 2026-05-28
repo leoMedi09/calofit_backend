@@ -219,6 +219,9 @@ async def guardar_sugerencia(
     current_user=Depends(get_current_user),
 ):
     """Guarda una receta/rutina sugerida por la IA para prepararla después."""
+    import re as _re
+    from app.models.preferencias import PreferenciaAlimento
+
     try:
         perfil = db.query(Client).filter(Client.email == current_user.email).first()
         if not perfil:
@@ -236,6 +239,48 @@ async def guardar_sugerencia(
         db.add(nueva)
         db.commit()
         db.refresh(nueva)
+
+        # ── Sincronizar con Favoritos cuando es una comida ────────────────
+        if body.tipo == "comida" and body.nombre:
+            nombre_lower = body.nombre.lower().strip()
+
+            # Parsear macros del string "Cal: 252.9kcal | P: 26.4g | C: 13.5g | G: 13.3g"
+            def _parse_macro(pattern: str, text: str) -> float:
+                m = _re.search(pattern, text or "")
+                return float(m.group(1)) if m else 0.0
+
+            _cal  = _parse_macro(r"Cal:\s*([\d.]+)", body.macros)
+            _prot = _parse_macro(r"P:\s*([\d.]+)",   body.macros)
+            _carb = _parse_macro(r"C:\s*([\d.]+)",   body.macros)
+            _gras = _parse_macro(r"G:\s*([\d.]+)",   body.macros)
+
+            pref = db.query(PreferenciaAlimento).filter(
+                PreferenciaAlimento.client_id == perfil.id,
+                PreferenciaAlimento.alimento   == nombre_lower,
+            ).first()
+
+            if pref:
+                pref.es_favorito    = 1
+                pref.frecuencia     = (pref.frecuencia or 0) + 1
+                pref.calorias       = _cal  if _cal  > 0 else (pref.calorias or 0)
+                pref.proteinas      = _prot if _prot > 0 else (pref.proteinas or 0)
+                pref.carbohidratos  = _carb if _carb > 0 else (pref.carbohidratos or 0)
+                pref.grasas         = _gras if _gras > 0 else (pref.grasas or 0)
+            else:
+                pref = PreferenciaAlimento(
+                    client_id      = perfil.id,
+                    alimento       = nombre_lower,
+                    es_favorito    = 1,
+                    frecuencia     = 1,
+                    puntuacion     = 1.0,
+                    calorias       = _cal,
+                    proteinas      = _prot,
+                    carbohidratos  = _carb,
+                    grasas         = _gras,
+                )
+                db.add(pref)
+
+            db.commit()
 
         return {"mensaje": f"🔖 '{body.nombre}' guardado en tu recetario", "id": nueva.id}
     except Exception as e:

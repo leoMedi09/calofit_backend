@@ -172,7 +172,10 @@ def validar_macros_atwater(
             f"(Atwater produce {kcal_calculada:.1f} kcal)"
         )
     desviacion = abs(kcal - kcal_calculada) / kcal
-    if desviacion > 0.15:
+    # Tolerancia ampliada al 30%: la fórmula Atwater es una aproximación.
+    # Mariscos, legumbres, fibra, alcohol y alimentos procesados pueden superar
+    # el 15% sin ser datos inválidos. Rechazar al 30% cubre solo errores reales.
+    if desviacion > 0.30:
         return False, (
             f"inconsistencia nutricional: kcal_bd={kcal:.1f} "
             f"vs kcal_atwater={kcal_calculada:.1f} "

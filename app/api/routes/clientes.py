@@ -358,16 +358,25 @@ def actualizar_perfil_cliente(
     
     # Actualizar solo campos proporcionados
     update_data = cliente_data.model_dump(exclude_unset=True)
-    
+
+    # Campos que, si cambian, invalidan la validación del nutricionista
+    # (peso/talla afectan Mifflin-St Jeor; actividad/objetivo cambian el multiplicador;
+    # condiciones médicas cambian las restricciones dietéticas)
+    _PLAN_TRIGGER_FIELDS    = {"activity_level", "goal", "weight", "height"}
+    _PLAN_INVALIDATE_FIELDS = {"activity_level", "goal", "weight", "height", "medical_conditions"}
+
+    # Capturar valores ANTES del update para detectar cambios reales
+    _old_plan_vals = {
+        f: getattr(cliente, f)
+        for f in _PLAN_INVALIDATE_FIELDS
+        if hasattr(cliente, f)
+    }
+
     for field, value in update_data.items():
         if hasattr(cliente, field):
             old_value = getattr(cliente, field)
             setattr(cliente, field, value)
             print(f"✅ {field}: {old_value} → {value}")
-    
-    # Fields that invalidate the current daily plan macros when changed
-    # weight/height affect Mifflin-St Jeor; activity_level/goal affect the multiplier
-    _PLAN_TRIGGER_FIELDS = {"activity_level", "goal", "weight", "height"}
 
     try:
         db.commit()
@@ -413,12 +422,43 @@ def actualizar_perfil_cliente(
                     print(f"✅ Plan recalculado: {round(rec.calorias_diarias)} kcal ({cliente.activity_level}, {cliente.goal})")
             except Exception as _e:
                 print(f"⚠️ Recalculo de plan falló (no crítico): {_e}")
+
+        # ── Resetear validación cuando cambia cualquier campo que afecte el plan ─
+        # El nutricionista validó el plan con parámetros específicos (peso, talla,
+        # actividad, objetivo, condiciones médicas). Si alguno cambió, el plan
+        # aprobado ya no refleja la realidad del paciente y debe re-validarse.
+        try:
+            from app.models.nutricion import PlanNutricional
+
+            _campos_cambiados = [
+                f for f in _PLAN_INVALIDATE_FIELDS
+                if f in update_data and getattr(cliente, f) != _old_plan_vals.get(f)
+            ]
+
+            if _campos_cambiados:
+                plan_activo = (
+                    db.query(PlanNutricional)
+                    .filter(PlanNutricional.client_id == cliente.id)
+                    .order_by(PlanNutricional.fecha_creacion.desc())
+                    .first()
+                )
+                if plan_activo and plan_activo.status == "validado":
+                    plan_activo.status = "draft_ia"
+                    plan_recalculado = plan_recalculado or bool(_PLAN_TRIGGER_FIELDS & set(_campos_cambiados))
+                    db.commit()
+                    print(
+                        f"⚠️ Plan ID {plan_activo.id} → draft_ia "
+                        f"(campos modificados: {_campos_cambiados})"
+                    )
+        except Exception as _e:
+            print(f"⚠️ Reset plan falló (no crítico): {_e}")
         # ─────────────────────────────────────────────────────────────────────
 
         return {
             "message": "Perfil actualizado exitosamente",
             "cliente": cliente,
             "plan_recalculado": plan_recalculado,
+            "plan_invalidado": bool(_campos_cambiados) if '_campos_cambiados' in dir() else False,
         }
     except IntegrityError as e:
         db.rollback()

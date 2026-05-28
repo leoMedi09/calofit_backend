@@ -527,7 +527,9 @@ class RegistroEjercicioHandler:
                 "origen": f"MET gym ({clave})",
             }
 
-        if frase_vocabulario_gimnasio(mensaje):
+        # Fallback: si el usuario usó un verbo de ejercicio + tiempo (aunque el ejercicio
+        # específico no esté en el vocabulario GYM), registrar con MET genérico.
+        if frase_vocabulario_gimnasio(mensaje) or frase_registro_actividad_fisica(mensaje):
             return extraccion_ejercicio_fallback_fuerza(mensaje, msg_lower, peso_kg)
 
         return None

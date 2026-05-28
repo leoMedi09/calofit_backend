@@ -251,17 +251,32 @@ class PlatoBuilder:
         nombre_plato: str,
         ingredientes_resueltos: List[Dict],
     ) -> int:
-        """Guarda o actualiza plato en BD."""
+        """Guarda o actualiza plato en BD — transacción atómica.
+
+        Garantía: NUNCA persiste un plato sin ingredientes.
+        Si < 2 ingredientes son válidos, hace rollback y devuelve None.
+        """
         try:
             nombre_norm = nombre_plato.lower().strip()
-            
+
+            # ── Guard: filtrar sólo ingredientes resueltos con alimento_id ─────
+            ingredientes_validos = [
+                ing for ing in ingredientes_resueltos
+                if ing.get('exito') and ing.get('alimento_id')
+            ]
+            if len(ingredientes_validos) < 2:
+                logger.warning(
+                    "Plato '%s' descartado — solo %d ingrediente(s) válido(s) (necesita ≥2)",
+                    nombre_plato, len(ingredientes_validos),
+                )
+                return None
+
             # Buscar plato existente
             plato = self.db.query(Plato).filter(
                 Plato.nombre_normalizado == nombre_norm
             ).first()
-            
+
             if not plato:
-                # Crear nuevo
                 plato = Plato(
                     nombre=nombre_plato,
                     nombre_normalizado=nombre_norm,
@@ -269,29 +284,28 @@ class PlatoBuilder:
                     origen='llm',
                 )
                 self.db.add(plato)
-                self.db.flush()
-            
-            # Limpiar ingredientes anteriores
+                self.db.flush()  # obtiene plato.id — aún en la misma transacción
+
+            # Reemplazar ingredientes anteriores (actualización limpia)
             self.db.query(PlatoIngrediente).filter(
                 PlatoIngrediente.plato_id == plato.id
             ).delete()
-            
-            # Agregar nuevos ingredientes
-            for idx, ing in enumerate(ingredientes_resueltos):
-                if ing['exito'] and ing.get('alimento_id'):
-                    plato_ing = PlatoIngrediente(
-                        plato_id=plato.id,
-                        alimento_id=ing['alimento_id'],
-                        gramos=ing.get('gramos', 100),
-                        orden=idx + 1,
-                    )
-                    self.db.add(plato_ing)
-            
-            self.db.commit()
+
+            for idx, ing in enumerate(ingredientes_validos):
+                self.db.add(PlatoIngrediente(
+                    plato_id=plato.id,
+                    alimento_id=ing['alimento_id'],
+                    gramos=ing.get('gramos', 100),
+                    orden=idx + 1,
+                ))
+
+            self.db.commit()  # único commit — plato + ingredientes atómicos
+            logger.info("Plato '%s' persistido id=%s con %d ingredientes",
+                        nombre_plato, plato.id, len(ingredientes_validos))
             return plato.id
-        
+
         except Exception as e:
-            logger.error(f"Error guardando plato: {str(e)}")
+            logger.error("Error guardando plato '%s': %s", nombre_plato, e)
             self.db.rollback()
             return None
     

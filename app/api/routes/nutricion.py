@@ -264,67 +264,122 @@ async def obtener_recomendaciones_personalizadas(
 ):
     """
     🧠 SISTEMA DE APRENDIZAJE: Recomendaciones personalizadas de alimentos
-    
-    - Usuario NUEVO → Top 10 alimentos populares generales
-    - Usuario CON historial → Sus favoritos + similares
+
+    - Usuario NUEVO → Top alimentos según objetivo y condiciones dietéticas
+    - Usuario CON historial → Sus favoritos filtrados por restricciones dietéticas
     """
     from app.models.client import Client
     from app.models.preferencias import PreferenciaAlimento
-    
+    from app.services.recomendador_platos import _tokens_prohibidos
+
     # Obtener cliente
     cliente = db.query(Client).filter(Client.email == current_user.email).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
-    
+
+    # Tokens prohibidos según condiciones dietéticas del perfil
+    _conds = list(cliente.medical_conditions or [])
+    tokens_prohib = _tokens_prohibidos(_conds)
+
+    def _es_apto(nombre: str) -> bool:
+        """True si el nombre del alimento no contiene tokens prohibidos."""
+        if not tokens_prohib:
+            return True
+        return not any(t in nombre.lower() for t in tokens_prohib)
+
+    def _justificacion_cold(nombre: str, categoria: str) -> str:
+        """Genera una justificación breve para cold-start según categoría."""
+        _map = {
+            "proteina":         "fuente de proteína de calidad para tu meta",
+            "proteina_vegetal": "proteína 100% vegetal, apta para tu dieta",
+            "verduras":         "bajo en calorías, rico en fibra y micronutrientes",
+            "carbohidratos":    "carbohidrato complejo para energía sostenida",
+            "completo":         "plato equilibrado con macros balanceados",
+            "frutas":           "vitaminas, fibra y azúcares naturales",
+        }
+        return _map.get(categoria, "opción equilibrada según tu objetivo")
+
     # Consultar preferencias del cliente
     preferencias = db.query(PreferenciaAlimento).filter(
         PreferenciaAlimento.client_id == cliente.id
-    ).order_by(PreferenciaAlimento.frecuencia.desc()).limit(10).all()
-    
-    if len(preferencias) < 3:  # Cold start - Usuario nuevo
-        # Recomendaciones generales según objetivo
-        recomendaciones_base = {
+    ).order_by(PreferenciaAlimento.frecuencia.desc()).limit(20).all()
+
+    if len(preferencias) < 3:  # Cold start — usuario nuevo
+        # Catálogo base omnívoro por objetivo
+        _base_omnivoro = {
             "Perder peso": [
-                {"nombre": "Pollo a la plancha", "categoria": "proteina", "calorias_aprox": 165},
-                {"nombre": "Ensalada verde", "categoria": "verduras", "calorias_aprox": 50},
-                {"nombre": "Pescado blanco", "categoria": "proteina", "calorias_aprox": 100},
+                {"nombre": "Pollo a la plancha",  "categoria": "proteina",      "calorias_aprox": 165},
+                {"nombre": "Ensalada verde",       "categoria": "verduras",      "calorias_aprox": 50},
+                {"nombre": "Pescado blanco",       "categoria": "proteina",      "calorias_aprox": 100},
             ],
             "Ganar masa": [
-                {"nombre": "Arroz integral", "categoria": "carbohidratos", "calorias_aprox": 215},
-                {"nombre": "Pollo con piel", "categoria": "proteina", "calorias_aprox": 230},
-                {"nombre": "Batata", "categoria": "carbohidratos", "calorias_aprox": 180},
+                {"nombre": "Arroz integral",       "categoria": "carbohidratos", "calorias_aprox": 215},
+                {"nombre": "Pollo con piel",       "categoria": "proteina",      "calorias_aprox": 230},
+                {"nombre": "Camote al horno",      "categoria": "carbohidratos", "calorias_aprox": 180},
             ],
             "Mantener peso": [
-                {"nombre": "Arroz con pollo", "categoria": "completo", "calorias_aprox": 350},
-                {"nombre": "Salmon", "categoria": "proteina", "calorias_aprox": 206},
-                {"nombre": "Quinoa", "categoria": "carbohidratos", "calorias_aprox": 222},
-            ]
+                {"nombre": "Arroz con pollo",      "categoria": "completo",      "calorias_aprox": 350},
+                {"nombre": "Pescado a la plancha", "categoria": "proteina",      "calorias_aprox": 140},
+                {"nombre": "Quinua cocida",        "categoria": "carbohidratos", "calorias_aprox": 222},
+            ],
         }
-        
+        # Alternativas veganas/vegetarianas por objetivo
+        _base_vegetal = {
+            "Perder peso": [
+                {"nombre": "Ensalada de quinua con verduras", "categoria": "proteina_vegetal", "calorias_aprox": 180},
+                {"nombre": "Ensalada verde mixta",            "categoria": "verduras",         "calorias_aprox": 50},
+                {"nombre": "Sopa de lentejas",                "categoria": "proteina_vegetal", "calorias_aprox": 150},
+            ],
+            "Ganar masa": [
+                {"nombre": "Arroz con lentejas",         "categoria": "proteina_vegetal", "calorias_aprox": 320},
+                {"nombre": "Tofu salteado con verduras", "categoria": "proteina_vegetal", "calorias_aprox": 180},
+                {"nombre": "Camote al horno",            "categoria": "carbohidratos",    "calorias_aprox": 180},
+            ],
+            "Mantener peso": [
+                {"nombre": "Quinua con verduras salteadas", "categoria": "completo",         "calorias_aprox": 280},
+                {"nombre": "Ensalada de garbanzos",         "categoria": "proteina_vegetal", "calorias_aprox": 220},
+                {"nombre": "Avena con frutas frescas",      "categoria": "carbohidratos",    "calorias_aprox": 200},
+            ],
+        }
+
         objetivo = cliente.goal or "Mantener peso"
-        recomendaciones = recomendaciones_base.get(objetivo, recomendaciones_base["Mantener peso"])
-        
+        _es_vegano = "Vegano" in _conds or "Vegetariano" in _conds
+        catalogo = _base_vegetal if _es_vegano else _base_omnivoro
+        recomendaciones_raw = catalogo.get(objetivo, catalogo["Mantener peso"])
+
+        # Filtrar cualquier residuo que incumpla restricciones + añadir justificación
+        recomendaciones = [
+            {**item, "justificacion": _justificacion_cold(item["nombre"], item["categoria"])}
+            for item in recomendaciones_raw
+            if _es_apto(item["nombre"])
+        ]
+
         return {
             "tipo": "cold_start",
-            "mensaje": "Recomendaciones generales segun tu objetivo",
+            "mensaje": "Recomendaciones según tu objetivo y perfil dietético",
             "recomendaciones": recomendaciones,
-            "nota": "El sistema aprendera tus preferencias a medida que registres tus comidas"
+            "nota": "El sistema aprenderá tus preferencias a medida que registres tus comidas",
         }
-    
+
     else:  # Usuario con historial
-        favoritos = [
-            {
-                "nombre": pref.alimento.capitalize(),
-                "frecuencia": pref.frecuencia,
-                "puntuacion": round(pref.puntuacion, 2),
-                "ultima_vez": pref.ultima_vez.strftime("%Y-%m-%d")
-            }
-            for pref in preferencias
-        ]
-        
+        favoritos = []
+        for pref in preferencias:
+            nombre = pref.alimento.capitalize()
+            if not _es_apto(nombre):
+                continue   # Excluir favorito que incumple restricción dietética actual
+            favoritos.append({
+                "nombre":       nombre,
+                "frecuencia":   pref.frecuencia,
+                "puntuacion":   round(pref.puntuacion, 2),
+                "ultima_vez":   pref.ultima_vez.strftime("%Y-%m-%d"),
+                "justificacion": "uno de tus alimentos más frecuentes, compatible con tu perfil",
+            })
+            if len(favoritos) == 10:
+                break
+
         return {
             "tipo": "personalizado",
-            "mensaje": f"Basado en tus {len(favoritos)} alimentos favoritos",
+            "mensaje": f"Basado en tus {len(favoritos)} alimentos favoritos compatibles con tu dieta",
             "favoritos": favoritos,
-            "nota": "Estas son tus elecciones mas frecuentes"
+            "nota": "Estas son tus elecciones más frecuentes que respetan tus restricciones dietéticas",
         }

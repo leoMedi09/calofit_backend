@@ -102,6 +102,7 @@ class RecomendacionesHandler:
         plan_hoy_data: dict,
         db: Session,
         n: int = 3,
+        condiciones_dieta: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Ejecuta el KNN Similitud Coseno con el déficit real del día.
@@ -136,8 +137,9 @@ class RecomendacionesHandler:
         excluir += list(getattr(perfil, "forbidden_foods", None) or [])
 
         recommended = list(getattr(perfil, "recommended_foods", None) or [])
-        # Fetch extra candidates so we can surface preferred foods even after shuffle
-        n_fetch = n * 2 if recommended else n
+        # Fetch extra candidates: 4× when dietary filter active, 2× for boosting preferred
+        _hay_dieta = bool(condiciones_dieta)
+        n_fetch = n * 4 if _hay_dieta else (n * 2 if recommended else n)
 
         recs = ml_recomendador.obtener_recomendaciones(
             calorias_faltantes = deficit["calorias"],
@@ -147,6 +149,22 @@ class RecomendacionesHandler:
             n_recomendaciones  = n_fetch,
             excluir_nombres    = excluir,
         )
+
+        # Filtrar por restricciones dietéticas (Vegano / Vegetariano / Lactosa / Celíaco / Diabetes)
+        if _hay_dieta:
+            try:
+                from app.services.recomendador_platos import _tokens_prohibidos
+                _tok = _tokens_prohibidos(condiciones_dieta)
+                if _tok:
+                    recs = [
+                        r for r in recs
+                        if not any(
+                            t in (r.get("alimento", "") or "").lower()
+                            for t in _tok
+                        )
+                    ]
+            except Exception:
+                pass
 
         # Boost foods the nutritionist explicitly recommended → move to front
         if recommended and len(recs) > n:

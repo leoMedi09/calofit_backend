@@ -144,17 +144,16 @@ class CalculadorDietaAutomatica:
         factor_actividad = CalculadorDietaAutomatica.get_factor_actividad(nivel_actividad)
         gasto_calorico_diario = gmb * factor_actividad
         
-        # 4. Ajustar según objetivo
-        if objetivo == "Perder peso":
-            # Déficit calórico del 15-20%
+        # 4. Ajustar según objetivo (comparación case-insensitive para tolerar
+        #    valores como "perder peso" / "Perder peso" / "PERDER PESO")
+        _obj = (objetivo or "").lower().strip()
+        if "perder" in _obj:
             calorias = gasto_calorico_diario * 0.85
             ajuste_objetivo = "Déficit calórico (perder ~0.5kg/semana)"
-        elif objetivo == "Ganar masa":
-            # Superávit calórico del 10-15%
+        elif "ganar" in _obj or "masa" in _obj:
             calorias = gasto_calorico_diario * 1.1
             ajuste_objetivo = "Superávit calórico (ganar ~0.5kg/semana)"
         else:
-            # Mantener peso
             calorias = gasto_calorico_diario
             ajuste_objetivo = "Mantenimiento de peso actual"
         
