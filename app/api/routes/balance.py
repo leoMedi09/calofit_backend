@@ -295,17 +295,19 @@ async def listar_favoritos(
 @router.delete("/registro/{registro_id}")
 async def eliminar_registro(
     registro_id: int,
-    tipo: str,  # "alimento" o "ejercicio"
+    tipo: str,              # "alimento" o "ejercicio"
+    n: int = 0,             # cuántos eliminar (0 = todos del grupo)
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
     """
     🗑️ ELIMINAR REGISTRO: Elimina un alimento o ejercicio registrado
-    
+
     Parámetros:
     - registro_id: ID del registro a eliminar
     - tipo: "alimento" o "ejercicio"
-    
+    - n: cuántos registros borrar del grupo (0 = todos)
+
     Recalcula automáticamente el balance después de eliminar.
     """
     # Obtener cliente
@@ -329,15 +331,16 @@ async def eliminar_registro(
             return {"eliminado": 0, "mensaje": "Registro no encontrado, ya eliminado"}
         nombre_registro = registro.nombre_alimento
         fecha_alim = registro.fecha
-        # Eliminar TODOS los registros del mismo alimento en el mismo día
-        # (la UI agrupa por nombre → un solo "delete" limpia todo el grupo)
+        # Obtener todos los registros del grupo ordenados por creación DESC
         todos = db.query(ComidaRegistro).filter(
             ComidaRegistro.client_id == cliente.id,
             ComidaRegistro.nombre_alimento == nombre_registro,
             ComidaRegistro.fecha == fecha_alim,
-        ).all()
-        n_eliminados = len(todos)
-        for r in todos:
+        ).order_by(ComidaRegistro.created_at.desc()).all()
+        # n=0 → eliminar todos; n>0 → eliminar solo los N más recientes
+        a_eliminar = todos if (n == 0 or n >= len(todos)) else todos[:n]
+        n_eliminados = len(a_eliminar)
+        for r in a_eliminar:
             db.delete(r)
         db.flush()
         recalcular_progreso_diario(cliente.id, fecha_alim, db)

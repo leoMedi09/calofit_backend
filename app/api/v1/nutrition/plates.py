@@ -81,9 +81,14 @@ async def recomendar_platos(
     try:
         from app.services.recomendador_platos import RecomendadorPlatosConfiables
         from app.models import ProgresoCalorias, MetaUsuario
+        from app.models.client import Client
         from app.core.utils import get_peru_date
 
         logger.info(f"Recomendando platos BD para cliente {client_id}")
+
+        # Obtener cliente para leer condiciones dietéticas
+        cliente = db.query(Client).filter(Client.id == client_id).first()
+        condiciones_dieta = list(getattr(cliente, "medical_conditions", None) or [])
 
         # Obtener déficit real del día
         hoy = get_peru_date()
@@ -127,6 +132,7 @@ async def recomendar_platos(
             momento_dia=request.momento_dia,
             n=request.cantidad,
             excluir_nombres=request.restricciones,
+            condiciones_dieta=condiciones_dieta,
         )
 
         if not platos:

@@ -500,6 +500,20 @@ async def _buscar_o_crear_alimento_async(
     # Alimentos estimados por Groq se marcan como no confiables y pendientes de validación
     # para que un administrador pueda revisarlos antes de confiar en ellos.
     _es_groq = fuente == "Groq (estimado)"
+
+    # Guardia: rechazar nombres que parecen mensajes de usuario (verbos de registro,
+    # demasiadas palabras) para evitar contaminación de la BD con texto libre.
+    _RE_MSG_VERBOS = re.compile(
+        r"\b(com[eií]|tom[eéoó]|beb[eií]|almorzar|cen[aé]|registr|anot|come\s|comes\s)\b",
+        re.IGNORECASE,
+    )
+    if _RE_MSG_VERBOS.search(nombre_es) or len(nombre_es.split()) > 7:
+        logger.warning(
+            "Alimento '%s' rechazado — nombre parece un mensaje, no un alimento",
+            nombre_es[:80],
+        )
+        return None
+
     try:
         _ok, _motivo = validar_macros_atwater(
             macros.get("calorias_100g", 0),

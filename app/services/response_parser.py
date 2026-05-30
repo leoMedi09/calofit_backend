@@ -21,6 +21,20 @@ def sanear_texto_conversacional_recipe(texto: str) -> str:
     if not texto or not str(texto).strip():
         return texto
     t = str(texto).strip()
+    # Quitar artefactos de formato que el LLM incluye literalmente:
+    # "[Tipo: INFO]", "[Type: INFO]", "[TIPO: RECIPE]", etc.
+    t = re.sub(r"\s*\[Tipo:\s*\w+\]", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s*\[Type:\s*\w+\]", "", t, flags=re.IGNORECASE)
+    # Si todo el texto está envuelto en corchetes "[Hola...] " → quitar corchetes externos
+    if t.startswith("[") and t.endswith("]"):
+        _inner = t[1:-1].strip()
+        # Solo quitar si el interior no tiene más corchetes no cerrados (para evitar borrar listas)
+        if _inner.count("[") == _inner.count("]"):
+            t = _inner
+    # Corchete de apertura suelto al inicio seguido de texto normal → quitar solo el corchete
+    t = re.sub(r"^\[\s*(?=[A-ZÁÉÍÓÚ])", "", t)
+    # Corchete de cierre suelto al final → quitar
+    t = re.sub(r"\s*\]\s*$", "", t)
     t = re.sub(r"(?im)^\s*[123]\.\s*$", "", t)
     t = re.sub(
         r"(?i)\b(sugerencias?|opciones?|ideas?|propuestas?)\s*:\s*[123]\.?\s*$",
@@ -275,11 +289,12 @@ def parsear_respuesta_para_frontend(
             i += 2
 
         for bloque in bloques_reales:
-            header = re.search(r'\[CALOFIT_HEADER\](.*?)\[/CALOFIT_HEADER\]', bloque, re.DOTALL | re.IGNORECASE)
-            stats = re.search(r'\[CALOFIT_STATS\](.*?)\[/CALOFIT_STATS\]', bloque, re.DOTALL | re.IGNORECASE)
-            lista = re.search(r'\[CALOFIT_LIST\](.*?)\[/CALOFIT_LIST\]', bloque, re.DOTALL | re.IGNORECASE)
-            action = re.search(r'\[CALOFIT_ACTION\](.*?)\[/CALOFIT_ACTION\]', bloque, re.DOTALL | re.IGNORECASE)
-            footer = re.search(r'\[CALOFIT_FOOTER\](.*?)\[/CALOFIT_FOOTER\]', bloque, re.DOTALL | re.IGNORECASE)
+            header  = re.search(r'\[CALOFIT_HEADER\](.*?)\[/CALOFIT_HEADER\]',   bloque, re.DOTALL | re.IGNORECASE)
+            stats   = re.search(r'\[CALOFIT_STATS\](.*?)\[/CALOFIT_STATS\]',     bloque, re.DOTALL | re.IGNORECASE)
+            lista   = re.search(r'\[CALOFIT_LIST\](.*?)\[/CALOFIT_LIST\]',       bloque, re.DOTALL | re.IGNORECASE)
+            action  = re.search(r'\[CALOFIT_ACTION\](.*?)\[/CALOFIT_ACTION\]',   bloque, re.DOTALL | re.IGNORECASE)
+            footer  = re.search(r'\[CALOFIT_FOOTER\](.*?)\[/CALOFIT_FOOTER\]',   bloque, re.DOTALL | re.IGNORECASE)
+            justif  = re.search(r'\[CALOFIT_JUSTIF\](.*?)\[/CALOFIT_JUSTIF\]',   bloque, re.DOTALL | re.IGNORECASE)
 
             if header or lista:
                 # 🎯 DETECCIÓN DE TIPO MEJORADA (v12.1 - INTENT POR BLOQUE + DEBUG MACROS)
@@ -528,7 +543,7 @@ def parsear_respuesta_para_frontend(
                 seccion = {
                     "tipo": tipo,
                     "nombre": nombre_clean,
-                    "justificacion": "",
+                    "justificacion": justif.group(1).strip() if justif else "",
                     "ingredientes": items_clean if tipo == "comida" else [],
                     "ejercicios": items_clean if tipo == "ejercicio" else [],
                     "preparacion": pasos_clean if tipo == "comida" else [],
@@ -566,13 +581,17 @@ def parsear_respuesta_para_frontend(
             tag = bloques_raw[k]
             content = bloques_raw[k+1] if (k+1) < len(bloques_raw) else ""
             
-            # 🛡️ FIX v72.1: Solo meter al chat el contenido de [CALOFIT_INTENT: CHAT]
-            # Ignorar ITEM_RECIPE, ITEM_WORKOUT y tags de HEADER, ya que van a Cards.
-            if "[CALOFIT_INTENT: CHAT]" in tag.upper():
-                texto_limpio_parts.append(content)
-            elif "[CALOFIT_INTENT" not in tag.upper() and "[CALOFIT_HEADER]" not in tag.upper():
-                # Si es un bloque de texto que quedó fuera de los tags por error de la IA, lo incluimos
-                # pero limpiamos cualquier tag residual
+            # El texto conversacional introductorio puede estar DENTRO de un bloque INTENT
+            # (entre [CALOFIT_INTENT:RECIPE/LOG/POWER] y el primer [CALOFIT_HEADER]).
+            # Ese contenido es el texto que el usuario ve como introducción — debe capturarse.
+            # HEADER y sus contenidos NO se capturan aquí (van a Cards).
+            if "[CALOFIT_INTENT:" in tag.upper():
+                # Capturar el texto intro del bloque INTENT (antes de cualquier HEADER dentro de él)
+                # Limpiar cualquier tag residual que se haya colado
+                texto_sucio = re.sub(r'\[/?CALOFIT_[A-Z_]+.*?\]', '', content, flags=re.IGNORECASE)
+                texto_limpio_parts.append(texto_sucio)
+            elif "[CALOFIT_HEADER]" not in tag.upper():
+                # Texto suelto fuera de cualquier tag reconocido
                 texto_sucio = re.sub(r'\[/?CALOFIT_[A-Z_]+.*?\]', '', content, flags=re.IGNORECASE)
                 texto_limpio_parts.append(texto_sucio)
             

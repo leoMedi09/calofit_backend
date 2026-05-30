@@ -341,7 +341,9 @@ _CAPA15_SKIP_RE = re.compile(
     r'^\d+(?:[.,]\d+)?\s*(?:g|gr|kg|ml|l|litros?|vasos?|tazas?|copas?)\b'
     r'|^(?:un|una|medio|media)\s+(?:vaso|taza|copa|botella|lata|plato)\b'
     r'|^(?:vaso|taza|copa|botella|jarra|lata)\s+de\b'
-    r'|^(?:un\s+poco\s+de|un\s+poquito\s+de|algo\s+de|medio\s+plato\s+de|media\s+porci[oó]n\s+de)\b',
+    r'|^(?:un\s+poco\s+de|un\s+poquito\s+de|algo\s+de|medio\s+plato\s+de|media\s+porci[oó]n\s+de)\b'
+    # Números verbales + alimento: "dos peras", "tres manzanas" → son cantidad, no plato
+    r'|^(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+\w',
     re.IGNORECASE,
 )
 
@@ -584,7 +586,21 @@ class RegistroComidaHandler:
                                 and (_nombre_c0 or "").lower().strip() in _PLATOS_MULTI_VARIANTE
                                 and " de " in msg_lower
                             )
-                            if len((_nombre_c0 or "").split()) >= 2 or _es_plato_multi_variante:
+                            # Excepción: "cantidad + alimento" (ej. "tres peras" → Pera Nacional).
+                            # El nombre resuelto tiene 2 palabras pero es un ALIMENTO de BD, no un plato.
+                            # Si CAPA 0 resolvió con alta confianza (sin estimación Groq), confiar en él.
+                            _es_cantidad_alim_c0 = (
+                                not capa0_result.get("confianza_baja")
+                                and _n_items_c0 == 1
+                                and any(
+                                    msg_lower.lstrip("comi comí tome tomé bebí bebi ").startswith(v + " ")
+                                    for v in ("dos", "tres", "cuatro", "cinco", "seis",
+                                              "siete", "ocho", "nueve", "diez", "un", "una")
+                                )
+                            )
+                            if _es_cantidad_alim_c0:
+                                pre_extraccion = capa0_result
+                            elif len((_nombre_c0 or "").split()) >= 2 or _es_plato_multi_variante:
                                 # Platos multi-palabra o variantes: CAPA 0 NO tiene autoridad final.
                                 _capa0_fallback = capa0_result
                             else:
@@ -1056,10 +1072,16 @@ class RegistroComidaHandler:
                             "carb_g": it.carbohidratos_g,
                             "gras_g": it.grasas_g,
                             "gramos": it.gramos_totales,
+                            "confianza_baja": it.confianza_baja,
                         }
                         for it in resultado.items
                     ],
                 }
+                # Propagar flag de baja confianza si algún ítem fue estimado por Groq
+                _hay_baja_confianza = any(it.confianza_baja for it in resultado.items)
+                if _hay_baja_confianza:
+                    ext["confianza_baja"] = True
+                    ext["nombres_input"] = [it.alimento for it in resultado.items if it.confianza_baja]
                 if adv and ("kcal" in adv or "correcto" in adv.lower()):
                     ext["_warn_cantidad"] = adv
                 return ext

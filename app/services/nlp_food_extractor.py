@@ -109,6 +109,13 @@ REGLAS ESTRICTAS:
     "un par"                      → 2.0
     "un poco"                     → 0.5
     Si no hay cantidad             → 1.0
+- REGLA CRÍTICA para "cantidad + alimento en plural":
+    "dos peras" → {alimento:"pera", cantidad:2.0, unidad:"unidad"}  ← NO "dos peras" como alimento
+    "tres manzanas" → {alimento:"manzana", cantidad:3.0, unidad:"unidad"}
+    "dos huevos" → {alimento:"huevo", cantidad:2.0, unidad:"unidad"}
+    "dos tazas de leche" → {alimento:"leche", cantidad:2.0, unidad:"taza"}
+    El número SIEMPRE va en "cantidad", NUNCA en el nombre del alimento.
+    PROHIBIDO: {alimento:"dos peras"}, {alimento:"tres manzanas"}, {alimento:"dos huevos"}
 - Elige la unidad más lógica:
     pan/galleta/huevo/fruta/unidad discreta → "unidad"
     leche/jugo/gaseosa/agua/bebida → "vaso"
@@ -116,8 +123,17 @@ REGLAS ESTRICTAS:
     aceite/salsa → "cucharada"
     Si el usuario especifica unidad (taza, vaso, plato), úsala.
     Si el usuario especifica gramos explícitamente (ej: "300g de pollo", "200 gramos de arroz") →
-      usa unidad: "g" y cantidad: <número de gramos>. Ejemplo: "comí 250g de pollo al horno con plátano"
-      → [{alimento:"pollo al horno con platano", cantidad:250, unidad:"g"}]
+      usa unidad: "g" y cantidad: <número de gramos>. Ejemplos:
+      "comí 250g de pollo al horno con plátano" → [{alimento:"pollo al horno con platano", cantidad:250, unidad:"g"}]
+      "comi 100 gramos de pollo saltado" → [{alimento:"pollo saltado", cantidad:100, unidad:"g"}]
+      "tome 300 gramos de arroz con leche" → [{alimento:"arroz con leche", cantidad:300, unidad:"g"}]
+      REGLA CRÍTICA: "X gramos de [alimento]" es SIEMPRE UN SOLO objeto con unidad:"g". NUNCA ignores los gramos
+      aunque el alimento sea normalmente discreto (fruta, etc.). NUNCA separes el número en un ítem distinto.
+      MENSAJES MIXTOS — cuando algunos ítems tienen gramos y otros tienen conteo:
+      "comi 50g de palta y 2 pan integral" → [{alimento:"palta",cantidad:50,unidad:"g"},{alimento:"pan integral",cantidad:2,unidad:"unidad"}]
+      "tome 100ml de leche y 3 galletas" → [{alimento:"leche",cantidad:100,unidad:"ml"},{alimento:"galleta",cantidad:3,unidad:"unidad"}]
+      "comi 200g de pollo y una manzana" → [{alimento:"pollo",cantidad:200,unidad:"g"},{alimento:"manzana",cantidad:1,unidad:"unidad"}]
+      En mensajes mixtos: CADA ítem mantiene SU unidad. El ítem con gramos usa unidad:"g", el ítem con conteo usa unidad:"unidad".
     Si el usuario especifica ml o litros explícitamente para bebidas (ej: "500ml de gaseosa", "1 litro de agua", "250 ml de jugo") →
       usa unidad: "ml" y cantidad: <número de ml>. Ejemplo: "tome 500ml de gaseosa"
       → [{alimento:"gaseosa", cantidad:500, unidad:"ml"}]
@@ -381,6 +397,7 @@ class ItemExtraido:
     carbohidratos_g: float
     grasas_g: float
     origen: str          # "bd", "usda", "estimado"
+    confianza_baja: bool = False  # True cuando el alimento fue estimado por Groq (no encontrado en BD/USDA)
 
 
 @dataclass
@@ -528,10 +545,83 @@ class NLPFoodExtractor:
             m = re.search(r"\[.*\]", respuesta, re.DOTALL)
             if not m:
                 return []
-            return json.loads(m.group(0))
+            items = json.loads(m.group(0))
+            items = self._normalizar_cantidad_en_nombre(items)
+            return self._fusionar_item_duplicado(items)
         except Exception as e:
             print(f"[NLPExtractor] Error parsing LLM JSON: {e}")
             return []
+
+    @staticmethod
+    def _fusionar_item_duplicado(items: list[dict]) -> list[dict]:
+        """
+        Fusiona cuando el LLM divide "X gramos de [plato]" en dos objetos:
+        [{alimento:"pollo saltado", cantidad:1.0, unidad:"porcion"},
+         {alimento:"pollo", cantidad:100, unidad:"g"}]
+        → [{alimento:"pollo saltado", cantidad:100, unidad:"g"}]
+
+        Condición: ítem B es substring del nombre de ítem A Y tiene unidad de peso.
+        """
+        if len(items) < 2:
+            return items
+        _PESOS = {"g", "gr", "gramo", "gramos", "kg", "kilo", "kilogramo", "ml", "cc", "l", "litro"}
+        resultado = list(items)
+        fusionados = set()
+        for i, a in enumerate(items):
+            if i in fusionados:
+                continue
+            nombre_a = _norm(str(a.get("alimento", "")))
+            for j, b in enumerate(items):
+                if j <= i or j in fusionados:
+                    continue
+                nombre_b = _norm(str(b.get("alimento", "")))
+                unidad_b = str(b.get("unidad", "")).lower()
+                # Si B es peso explícito y su nombre es subpalabra del nombre de A
+                if unidad_b in _PESOS and nombre_b and nombre_b in nombre_a and nombre_b != nombre_a:
+                    # Absorber: usar nombre de A con la cantidad/unidad de B
+                    resultado[i] = {**a, "cantidad": b.get("cantidad", a.get("cantidad")), "unidad": unidad_b}
+                    fusionados.add(j)
+                    break
+        return [item for k, item in enumerate(resultado) if k not in fusionados]
+
+    # Mapeo de palabras numéricas a float (para normalizar "dos peras" → pera×2)
+    _NUMEROS_ES: dict[str, float] = {
+        "un": 1, "una": 1, "uno": 1,
+        "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
+        "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
+    }
+
+    @staticmethod
+    def _normalizar_cantidad_en_nombre(items: list[dict]) -> list[dict]:
+        """
+        Detecta cuando el LLM incluyó el número en el nombre del alimento
+        (ej. {alimento:"dos peras", cantidad:1}) y lo separa correctamente
+        → {alimento:"pera", cantidad:2, unidad:"unidad"}.
+        """
+        _NUM = NLPFoodExtractor._NUMEROS_ES
+        resultado = []
+        for item in items:
+            nombre = str(item.get("alimento", "")).strip().lower()
+            partes = nombre.split(maxsplit=1)
+            if len(partes) == 2 and partes[0] in _NUM:
+                num_val = _NUM[partes[0]]
+                # Singularizar el alimento (quitar -s o -as al final si corresponde)
+                food = partes[1]
+                if food.endswith("as") and len(food) > 4:
+                    food = food[:-1]   # "peras" → "pera", "manzanas" → "manzana"
+                elif food.endswith("es") and len(food) > 4:
+                    food = food[:-2]   # "melones" → "melon"
+                elif food.endswith("s") and not food.endswith("ss") and len(food) > 3:
+                    food = food[:-1]   # "huevos" → "huevo"
+                resultado.append({
+                    **item,
+                    "alimento": food,
+                    "cantidad": float(item.get("cantidad", 1)) * num_val,
+                    "unidad": item.get("unidad") if item.get("unidad") != "porcion" else "unidad",
+                })
+            else:
+                resultado.append(item)
+        return resultado
 
     # ─── PASO 2: Buscar alimento en BD por nombre o alias ─────────────────────
     def _buscar_alimento_bd(self, nombre: str) -> Optional[Alimento]:
@@ -736,6 +826,7 @@ class NLPFoodExtractor:
     # alimentos con nombre "tomé un vaso de X" o "comí una porción de Y".
     _RE_NOMBRE_MENSAJE = re.compile(
         r"\b(tom[eé]|com[ií]|beb[ií]|almorcé|almorce|desayun[eé]|cen[eé]|"
+        r"come\s|comes\s|estoy\s+comiendo|voy\s+a\s+comer|"
         r"registra|anota|guard[ao]|agreg[ao]|prob[eé]|me\s+com[ií])\b",
         re.IGNORECASE,
     )
@@ -751,7 +842,7 @@ class NLPFoodExtractor:
             # Guard: rechazar nombres que son el mensaje del usuario (contienen verbos de acción).
             # Previene alimentos como 'tomé un vaso de leche' creados cuando el texto
             # completo del mensaje llega como nombre al pipeline de estimación.
-            if self._RE_NOMBRE_MENSAJE.search(nombre_es):
+            if self._RE_NOMBRE_MENSAJE.search(nombre_es) or len(nombre_es.split()) > 6:
                 logger.warning(
                     "Alimento '%s' rechazado — nombre parece un mensaje de usuario, no un alimento",
                     nombre_es[:80],
@@ -1014,6 +1105,7 @@ class NLPFoodExtractor:
             _verbos_log = (
                 "comi ", "comí ", "almorcé ", "almorce ", "desayuné ", "desayune ",
                 "cené ", "cene ", "tomé ", "tome ", "bebí ", "bebi ", "meriendé ",
+                "come ", "comes ", "estoy comiendo ", "voy a comer ",
                 "registra que comi ", "registra que comí ", "registra que almorce ",
                 "registra que almorcé ", "registra que desayune ", "registra que desayuné ",
                 "registra que tome ", "registra que tomé ", "registra que ",
@@ -1168,7 +1260,8 @@ class NLPFoodExtractor:
         advertencias = []
 
         for item in items_raw:
-            nombre   = str(item.get("alimento", "")).strip()
+            nombre         = str(item.get("alimento", "")).strip()
+            nombre_input   = nombre  # nombre tal como lo extrajo el LLM (antes de resolución)
             cantidad = float(item.get("cantidad", 1.0) or 1.0)
             unidad   = str(item.get("unidad", "porcion")).strip().lower()
             # Remap: si el LLM extrajo un grano en contexto de bebida, usar la bebida
@@ -1343,7 +1436,12 @@ class NLPFoodExtractor:
                 # Cubre platos con "de"/"a la"/adjetivos sin "con"/"y" explícito
                 # (p.ej. "arroz a la naranja", "sopa de mariscos", "ají de gallina").
                 # El plato se persiste en BD para futuras consultas (cache).
-                if not alimento_bd and len(nombre.split()) >= 2:
+                # Guardia: "dos peras", "tres manzanas" → no son platos, son cantidad+alimento.
+                # El normalizador debería haberlo separado, pero como defensa extra se bloquea aquí.
+                _primera_p = nombre.split()[0].lower() if nombre.split() else ""
+                _es_cantidad_alim = _primera_p in NLPFoodExtractor._NUMEROS_ES
+
+                if not alimento_bd and len(nombre.split()) >= 2 and not _es_cantidad_alim:
                     try:
                         from app.services.plato_constructor import crear_plato_dinamico as _cpd
                         _plato_din = await _cpd(self.db, nombre)
@@ -1361,17 +1459,28 @@ class NLPFoodExtractor:
                                 " WHERE p.id=:pid GROUP BY p.id,p.nombre LIMIT 1"
                             ), {"pid": _plato_din.id}).fetchone()
                             if _din_row:
-                                nombre_final = _din_row[1]
+                                nombre_final = str(_din_row[1]).title()
                                 _kcal_d = round(float(_din_row[2] or 0), 1)
                                 _prot_d = round(float(_din_row[3] or 0), 1)
                                 _carb_d = round(float(_din_row[4] or 0), 1)
                                 _gras_d = round(float(_din_row[5] or 0), 1)
                                 _grms_d = float(_din_row[6] or 300.0)
-                                calorias  = round(_kcal_d * cantidad, 1)
-                                proteinas = round(_prot_d * cantidad, 1)
-                                carbos    = round(_carb_d * cantidad, 1)
-                                grasas    = round(_gras_d * cantidad, 1)
-                                gramos    = _grms_d * cantidad
+                                # Si el usuario especificó gramos explícitos (unidad="g"),
+                                # escalar el plato proporcionalmente en vez de multiplicar
+                                # por cantidad (que en ese caso sería los gramos, no porciones).
+                                if _unidad_es_peso and _grms_d > 0:
+                                    _factor = cantidad / _grms_d
+                                    calorias  = round(_kcal_d * _factor, 1)
+                                    proteinas = round(_prot_d * _factor, 1)
+                                    carbos    = round(_carb_d * _factor, 1)
+                                    grasas    = round(_gras_d * _factor, 1)
+                                    gramos    = cantidad  # exactamente los gramos del usuario
+                                else:
+                                    calorias  = round(_kcal_d * cantidad, 1)
+                                    proteinas = round(_prot_d * cantidad, 1)
+                                    carbos    = round(_carb_d * cantidad, 1)
+                                    grasas    = round(_gras_d * cantidad, 1)
+                                    gramos    = _grms_d * cantidad
                                 logger.info(
                                     "[NLPExtractor] Plato dinámico '%s': %.1f kcal",
                                     nombre_final, calorias,
@@ -1382,11 +1491,17 @@ class NLPFoodExtractor:
                                             calorias, proteinas, carbos, grasas,
                                             sin_lista, con_extra_lista, nombre_final,
                                         )
+                                import difflib as _dl_3d
+                                _sim_3d = _dl_3d.SequenceMatcher(
+                                    None, _norm(nombre_input), _norm(nombre_final)
+                                ).ratio()
+                                _confianza_baja_3d = _sim_3d < 0.85
                                 items_calculados.append(ItemExtraido(
                                     alimento=nombre_final, cantidad=cantidad, unidad=unidad,
                                     gramos_totales=gramos, calorias=calorias,
                                     proteinas_g=proteinas, carbohidratos_g=carbos,
                                     grasas_g=grasas, origen="plato_dinamico",
+                                    confianza_baja=_confianza_baja_3d,
                                 ))
                                 continue
                     except Exception as _ep:
@@ -1459,6 +1574,25 @@ class NLPFoodExtractor:
                 advertencias.append(f"No encontré datos nutricionales para '{nombre_final}'.")
                 continue
 
+            # Capitalización uniforme: "pollo saltado" → "Pollo Saltado"
+            nombre_final = nombre_final.title() if nombre_final == nombre_final.lower() else nombre_final
+
+            # Detectar baja confianza:
+            # 1. Groq estimó macros directamente (alimento no encontrado en BD ni USDA)
+            # 2. El nombre resuelto difiere del nombre que el usuario escribió:
+            #    - Para platos dinámicos y alimentos: umbral más estricto (0.85)
+            #      porque el constructor puede "adivinar" platos incorrectos
+            #    - Para BD directa: solo se marca baja si la diferencia es muy grande (<0.60)
+            import difflib as _dl_conf
+            _sim_nombres = _dl_conf.SequenceMatcher(
+                None, _norm(nombre_input), _norm(nombre_final)
+            ).ratio()
+            _umbral = 0.85 if origen in ("plato_dinamico", "groq") else 0.60
+            _confianza_baja = (
+                origen == "groq"
+                or (_sim_nombres < _umbral and origen not in ("bd_combinado", "bd_ingrediente", "regla", "bd"))
+            )
+
             items_calculados.append(ItemExtraido(
                 alimento=nombre_final,
                 cantidad=cantidad,
@@ -1469,6 +1603,7 @@ class NLPFoodExtractor:
                 carbohidratos_g=carbos,
                 grasas_g=grasas,
                 origen=origen,
+                confianza_baja=_confianza_baja,
             ))
 
         if not items_calculados:
