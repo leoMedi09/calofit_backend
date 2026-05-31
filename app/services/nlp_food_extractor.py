@@ -277,6 +277,9 @@ NO_ALIMENTOS: frozenset[str] = frozenset({
     "idea", "pensamiento", "sueno", "silencio", "ruido",
     # Partes del cuerpo (no comestibles en contexto culinario)
     "pelo", "cabello", "unas", "piel", "sudor",
+    # Palabras ofensivas / absurdas en contexto de comida
+    "caca", "orina", "excremento", "heces", "vomito", "basura", "veneno",
+    "veneno", "tóxico", "toxico", "explosivo", "bomba",
 })
 
 # Modificadores ficticios: si acompañan a cualquier sustantivo, el ítem es ficticio.
@@ -1234,7 +1237,36 @@ class NLPFoodExtractor:
         items_raw = await self._llm_extraer_json(mensaje)
         logger.info("[NLPExtractor] LLM extrajo %d items: %s", len(items_raw or []), items_raw)
         if not items_raw:
-            return None
+            # FALLBACK: el LLM no reconoció ningún alimento (ej. "gomitas", "caramelos").
+            # Intentar extraer el nombre directamente del mensaje con regex y enviarlo a
+            # Groq para estimar macros — permite registrar alimentos reales pero poco comunes.
+            _m_fb = (mensaje or "").lower().strip()
+            # Quitar verbo de ingesta al inicio
+            _m_fb = re.sub(
+                r"^(com[ií]|tom[eé]|beb[ií]|almorcé|almorce|desayun[eé]|cen[eé]|"
+                r"registra?\s+(?:que\s+)?(?:com[ií]\s+)?|probé|probe)\s+",
+                "", _m_fb, flags=re.IGNORECASE,
+            ).strip()
+            # Quitar artículos iniciales
+            _m_fb = re.sub(r"^(un[ao]?s?\s+|unas?\s+|algo\s+de\s+)", "", _m_fb).strip()
+            if _m_fb and 2 <= len(_m_fb) <= 40 and not _nombre_es_no_alimento(_m_fb):
+                # Separar "N X" donde N es un dígito: "2 caramelos" → alimento="caramelos", cantidad=2
+                _qty_fb = 1.0
+                _digit_m = re.match(r"^(\d+(?:[.,]\d+)?)\s+(.+)$", _m_fb)
+                if _digit_m:
+                    _qty_fb = float(_digit_m.group(1).replace(",", "."))
+                    _m_fb   = _digit_m.group(2).strip()
+                if not _m_fb or _nombre_es_no_alimento(_m_fb):
+                    return None
+                # Para piezas discretas (candy, galleta, etc.) usar gramos directamente
+                # para evitar que "2 caramelos" = 2 × 100g = 200g (demasiado).
+                # Estimación razonable: ~10g por pieza, max 100g total.
+                _gramos_fb = min(_qty_fb * 10.0, 100.0)
+                logger.info("[NLPExtractor] Fallback regex → '%s' x%.0f (~%.0fg) para Groq", _m_fb, _qty_fb, _gramos_fb)
+                items_raw = [{"alimento": _m_fb, "cantidad": _gramos_fb, "unidad": "g",
+                              "sin": [], "con_extra": []}]
+            else:
+                return None
         # Post-proc: "avena con 2 panes con mermelada" → ["avena", {pan con mermelada, qty:2}]
         items_raw = _separar_con_n_items(items_raw)
 
