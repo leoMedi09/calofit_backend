@@ -56,10 +56,33 @@ def construir_prompt_cliente(
     texto_alergias    = ", ".join(alergias)          or "Ninguna"
     texto_dieta       = ", ".join(preferencias_dieta) or "Omnívoro"
     texto_condiciones = ", ".join(condiciones)        or "Ninguna"
-    restantes         = max(0, calorias_meta - consumo_real + quemadas_real)
+    restantes         = max(0.0, calorias_meta - consumo_real + quemadas_real)  # igual que la UI de la app
     foco              = perfil.ai_strategic_focus or "Bienestar General"
     alimentos_pro     = perfil.forbidden_foods or []
-    alimentos_rec     = perfil.recommended_foods or []
+    alimentos_rec_raw = perfil.recommended_foods or []
+
+    # Filtrar alimentos_rec: eliminar ítems incompatibles con la dieta del usuario.
+    # Si el nutri puso "pescado" en recomendados pero el cliente es Vegano/Vegetariano,
+    # ese ítem NO debe llegar al prompt (causaría contradicción con Regla 10).
+    _conds_dieta_check = [c.lower() for c in (perfil.medical_conditions or [])]
+    _tokens_dieta_prohib: set[str] = set()
+    if any("vegano" in c for c in _conds_dieta_check):
+        _tokens_dieta_prohib.update({
+            "pollo", "pechuga", "gallina", "pato", "pavo", "cabrito",
+            "cerdo", "chancho", "res", "carne", "bistec", "lomo",
+            "pescado", "salmon", "atun", "trucha", "caballa", "mariscos",
+            "leche", "queso", "yogur", "mantequilla", "huevo",
+        })
+    elif any("vegetariano" in c for c in _conds_dieta_check):
+        _tokens_dieta_prohib.update({
+            "pollo", "pechuga", "gallina", "pato", "pavo", "cabrito",
+            "cerdo", "chancho", "res", "carne", "bistec", "lomo",
+            "pescado", "salmon", "atun", "trucha", "caballa", "mariscos",
+        })
+    alimentos_rec = [
+        a for a in alimentos_rec_raw
+        if not any(t in a.lower() for t in _tokens_dieta_prohib)
+    ]
 
     # ── Hora peruana y sugerencia por momento ──
     try:
@@ -387,7 +410,9 @@ def construir_prompt_cliente(
                     m = p['macros']
                     ings = p.get('ingredientes_str', '')
                     lista_platos += (
-                        f"{i+1}. {p['nombre']}\n"
+                        # Bug 2 fix: usar '→ Nombre' en vez de '{i+1}. Nombre'
+                        # para evitar que el LLM use los números como títulos genéricos
+                        f"→ {p['nombre']}\n"
                         f"   Macros: Kcal: {m['calorias']:.0f}, P: {m['proteinas_g']:.1f}g, C: {m['carbohidratos_g']:.1f}g, G: {m['grasas_g']:.1f}g\n"
                         f"   Ingredientes exactos: {ings}\n"
                     )
@@ -533,14 +558,20 @@ def construir_prompt_cliente(
     _conds_all = list(perfil.medical_conditions or [])
     if "Vegano" in _conds_all:
         _reglas_dieta_r10.append(
-            "VEGANO — PROHIBIDO absolutamente: carnes, aves, pescados, mariscos, huevos, "
-            "leche, queso, yogurt, mantequilla y cualquier derivado animal. "
-            "TODAS las opciones deben ser 100% de origen vegetal."
+            "VEGANO — PROHIBIDO absolutamente en CADA INGREDIENTE de CADA PLATO: "
+            "pollo, pechuga, carne, res, cerdo, pato, pavo, cabrito, pescado, camarón, mariscos, "
+            "huevo, leche, queso, yogur, mantequilla y cualquier derivado animal. "
+            "ÚNICAMENTE ingredientes 100% vegetales. "
+            "Fuentes de proteína PERMITIDAS: lentejas, garbanzos, frijoles, pallares, quinua, "
+            "tofu, tempeh, seitán, edamame, maní, semillas de chía, almendras. "
+            "Si un plato tiene cualquier ingrediente animal → descártalo y elige otro."
         )
     elif "Vegetariano" in _conds_all:
         _reglas_dieta_r10.append(
-            "VEGETARIANO — PROHIBIDO: carnes (res, cerdo, pollo, pavo, pato, cabrito), "
-            "pescados y mariscos. Huevos y lácteos SÍ están permitidos."
+            "VEGETARIANO — PROHIBIDO en cualquier ingrediente: carne de res, cerdo, pollo, pavo, "
+            "pato, cabrito, pescado, camarón y mariscos. "
+            "Huevos y lácteos SÍ permitidos. "
+            "Si un plato contiene carne o pescado → descártalo completamente."
         )
     if any("intolerancia" in c.lower() for c in _conds_all):
         _reglas_dieta_r10.append(
@@ -570,12 +601,26 @@ def construir_prompt_cliente(
 
     # ── Bloque Nutricionista (máxima prioridad) ──
     nota = getattr(perfil, "nutri_weekly_note", None)
+    # Resumen de restricción dietética para el bloque del nutricionista
+    _resumen_dieta = ""
+    if "Vegano" in _conds_all:
+        _resumen_dieta = (
+            "\n🚫 DIETA VEGANA ACTIVA — OVERRIDE TOTAL: ningún plato puede contener "
+            "pollo, carne, pescado, camarón, huevo, leche ni derivados animales. "
+            "Esta restricción ANULA cualquier alimento animal en la lista PRIORIZAR.\n"
+        )
+    elif "Vegetariano" in _conds_all:
+        _resumen_dieta = (
+            "\n🚫 DIETA VEGETARIANA ACTIVA — OVERRIDE: ningún plato puede contener "
+            "carne, pollo ni pescado. Esta restricción ANULA esos ítems en PRIORIZAR.\n"
+        )
     bloque_nutri = (
         f"\n⚠️ INSTRUCCIONES OBLIGATORIAS DEL NUTRICIONISTA (NO NEGOCIABLES):\n"
         f"• FOCO: {foco}\n"
         f"• PRIORIZAR: {', '.join(alimentos_rec) if alimentos_rec else 'Sin restricción especial'}\n"
         f"• PROHIBIDOS: {', '.join(alimentos_pro) if alimentos_pro else 'Ninguno'} — NUNCA los sugieras.\n"
         + (f"• META SEMANAL: \"{nota}\"\n" if nota else "")
+        + _resumen_dieta
         + "━" * 60 + "\n"
     )
 
@@ -592,13 +637,21 @@ def construir_prompt_cliente(
         f"{bloque_meta_cumplida}"
         f"\nSTATUS DEL DÍA: Meta: {calorias_meta} kcal | Consumido: {consumo_real} kcal | "
         f"Restante: {restantes:.0f} kcal | Adherencia: {adherencia_pct:.0f}% | {mensaje_fuzzy}."
-        f"\n\nREGLAS DE INTENCIÓN Y FORMATO (OBLIGATORIO):"
+        "\n\nREGLAS DE INTENCIÓN Y FORMATO (OBLIGATORIO):"
+        "\n0. BREVEDAD OBLIGATORIA en modo INFO/CHAT/PROGRESS:"
+        "\n   • Máximo 2-3 oraciones o una lista corta de máximo 4 ítems."
+        "\n   • PROHIBIDO: recetas completas, instrucciones de preparación paso a paso, listas de ingredientes."
+        "\n   • Si recomendas un plato en texto libre: solo nombre + calorías aproximadas. Nada más."
+        "\n   • El usuario pedirá más detalle si lo necesita."
         "\n1. Progreso/dudas → MODO PROGRESS o INFO: solo texto. ¡PROHIBIDO [CALOFIT_HEADER] salvo que pidan comida!"
         "\n2. Piden opciones/recetas → MODO RECIPE: SIEMPRE 2–3 opciones con protocolo CALOFIT completo."
         "\n3. Indica intención: [CALOFIT_INTENT:CATEGORIA] (INFO, RECIPE, PROGRESS, POWER, LOG, ALERT)."
         "\n4. NO uses [CALOFIT_QUESTION_TYPE]."
         "\n5. MODO RECIPE: HEADER→LIST→ACTION→STATS por cada opción. [CALOFIT_LIST] obligatorio (≥3 ingredientes con gramos y kcal)."
-        "\n6. NUNCA nombres genéricos ('Sugerencia 1', 'Opción 2') en [CALOFIT_HEADER]: usa el nombre real del plato."
+        "\n6. USA EL NOMBRE REAL DEL PLATO en [CALOFIT_HEADER]: NUNCA nombres genéricos."
+        "\n   ❌ INCORRECTO: [CALOFIT_HEADER:Sugerencia 1] o [CALOFIT_HEADER:Opción 2]"
+        "\n   ✅ CORRECTO:   [CALOFIT_HEADER:Arroz Con Pollo] o [CALOFIT_HEADER:Lomo Saltado]"
+        "\n   El nombre en CALOFIT_HEADER DEBE SER EXACTAMENTE el nombre del plato de la lista SUGERENCIAS."
         "\n7. PROHIBIDOS los alimentos del Nutricionista aunque el cliente los pida."
         "\n8. COCINA PERUANA: arroz con pollo, cebiche, lomo saltado, ají de gallina, causa, tallarines, etc."
         "\n9. IDENTIDAD LAMBAYEQUE — OBLIGATORIO en sugerencias marinas:"
@@ -646,10 +699,19 @@ async def enriquecer_prompt_con_bd(
                 for obj in objetivos_detectados:
                     pats_completos.extend(_MAP[obj])
                 
+                # Excluir ejercicios culturales/deportivos que no corresponden a gym:
+                # danzas folclóricas, deportes de equipo, actividades al aire libre.
+                _IDS_NO_GYM = (
+                    'huayno_zapateo', 'pichanga_futbol', 'voley_calle',
+                    'trote_ligero', 'subir_escaleras_cerro', 'pilates',
+                )
+                _excl_ids = ", ".join(f"'{eid}'" for eid in _IDS_NO_GYM)
                 rows = db.execute(
                     _sql(
                         "SELECT id, nombre, musculo_principal, met FROM ejercicios "
                         "WHERE (" + " OR ".join(f"musculo_principal ILIKE :p{i}" for i in range(len(pats_completos))) + ") "
+                        f"  AND id NOT IN ({_excl_ids}) "
+                        "  AND tipo NOT IN ('Strongman') "
                         "ORDER BY met DESC NULLS LAST, nombre ASC LIMIT 15"
                     ),
                     {f"p{i}": pats_completos[i] for i in range(len(pats_completos))},
@@ -670,7 +732,9 @@ async def enriquecer_prompt_con_bd(
                         f"3. Si conoces ejercicios mejores que NO están en esta lista, "
                         f"TIENES PERMISO para incluirlos e inventar las instrucciones técnicas necesarias.\n"
                         f"4. NUNCA escribas los códigos `id=...`, `musculo=...` ni `MET=...` en tu respuesta al usuario. Usa SOLO el nombre del ejercicio limpio.\n"
-                        f"5. Asume que el usuario entrena en un GIMNASIO equipado. PRIORIZA el uso de pesas, barras, mancuernas y máquinas. EVITA ejercicios al aire libre como 'subir cerros' o 'trotar en el parque'.\n"
+                        f"5. Asume que el usuario entrena en un GIMNASIO equipado. PRIORIZA el uso de pesas, barras, mancuernas y máquinas.\n"
+                        f"   PROHIBIDO ABSOLUTO en contexto de gym: danzas folclóricas (Huayno, Marinera), deportes de equipo (Pichanga, Vóley),\n"
+                        f"   actividades al aire libre ('subir cerros', 'trotar en el parque'). Estos NO son ejercicios de gym.\n"
                         f"6. SIEMPRE cruza tu rutina con las CONDICIONES médicas del usuario. "
                         f"Descarta CUALQUIER ejercicio (del catálogo o inventado por ti) que le haría daño.\n"
                     )
@@ -920,7 +984,7 @@ def respuesta_fallo_llm(
             "progreso_diario": {
                 "consumido": round(consumo_real, 1),
                 "meta":      round(calorias_meta, 1),
-                "restante":  round(max(0, calorias_meta - consumo_real + quemadas_real), 1),
+                "restante":  round(max(0.0, calorias_meta - consumo_real + quemadas_real), 1),
                 "quemado":   round(quemadas_real, 1),
             },
             "macros": {},

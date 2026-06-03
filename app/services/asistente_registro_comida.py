@@ -171,7 +171,7 @@ _KCAL_MAX_REGISTRO = 1500
 
 # Hard stop: por encima de estos límites el registro se BLOQUEA
 # hasta que el usuario corrija la cantidad.
-_KCAL_HARD_STOP = 2500          # kcal máximas aceptables por comida individual
+_KCAL_HARD_STOP = 3500          # kcal máximas aceptables por comida individual (cuy entero ~2500-3000 kcal)
 _GRAMOS_HARD_STOP = 1000        # gramos máximos por ingrediente (excepto agua/líquidos)
 
 # Alimentos cuyo alto gramaje es razonable (bebidas, sopas, caldos)
@@ -505,18 +505,52 @@ class RegistroComidaHandler:
         )
         _parece_comida = any(
             x in msg_lower
-            for x in ("comi", "comí", "almorcé", "almorce", "desayuné", "desayune",
-                       "cené", "cene", "tomé", "tome", "bebí", "bebi", "meriendé",
-                       "me comi", "me comí", "probé", "probe", "me jalé")
+            for x in (
+                "comi", "comí", "almorcé", "almorce", "desayuné", "desayune",
+                "cené", "cene", "tomé", "tome", "bebí", "bebi", "meriendé",
+                "me comi", "me comí", "probé", "probe", "me jalé",
+                # Bug 1 fix: capturar "acabo de comer", "me acabe de comer", etc.
+                "acabo de comer", "acabe de comer", "acabo de comerme",
+                "me acabo de comer", "me acabe de comer",
+                "acabé de comer", "acabe de tomar", "acabo de tomar",
+            )
         )
 
         pre_extraccion: Optional[dict] = None
         # Reserva de CAPA 0 para platos multi-palabra: solo se usa si CAPA 1 falla.
-        # Esto evita que una estimación LLM de bajo accuracy bloquee el catálogo BD.
         _capa0_fallback: Optional[dict] = None
 
-        # CAPA 0: NLPFoodExtractor
+        # ── PRIORIDAD MÁXIMA: caché de macros recomendados ────────────────────
+        # Si el plato fue recomendado recientemente, usar SUS macros exactos para
+        # que los valores del registro coincidan con lo que se mostró al usuario.
         if not _parece_ejercicio:
+            try:
+                from app.core.cache import get_cached as _gc_pre
+                import unicodedata as _uda_pre
+                _clave_pre = _RE_PREFIJO_IMPERATIVO.sub("", msg_lower).strip()
+                _clave_pre = _uda_pre.normalize("NFC", _clave_pre)
+                _reco_pre  = _gc_pre(f"reco_macros:{perfil.id}:{_clave_pre}")
+                if not _reco_pre:
+                    _alt = _clave_pre.replace("quinoa", "quinua").replace("quinua", "quinoa")
+                    _reco_pre = _gc_pre(f"reco_macros:{perfil.id}:{_alt}")
+                if _reco_pre and float(_reco_pre.get("calorias", 0)) > 0:
+                    pre_extraccion = {
+                        "calorias":        _reco_pre["calorias"],
+                        "proteinas_g":     _reco_pre.get("proteinas_g", 0),
+                        "carbohidratos_g": _reco_pre.get("carbohidratos_g", 0),
+                        "grasas_g":        _reco_pre.get("grasas_g", 0),
+                        "fibra_g": 0, "azucar_g": 0, "sodio_mg": 0,
+                        "es_comida": True, "es_ejercicio": False,
+                        "alimentos_detectados": [_reco_pre.get("nombre", _clave_pre).title()],
+                        "ejercicios_detectados": [],
+                        "calidad_nutricional": "Alta",
+                        "origen": "reco_cache",
+                    }
+            except Exception:
+                pass
+
+        # CAPA 0: NLPFoodExtractor (se omite si el caché de recomendación ya resolvió)
+        if not _parece_ejercicio and not pre_extraccion:
             capa0_result = await self._capa0_nlp(mensaje, msg_lower, _parece_comida, ia_engine, db)
             if capa0_result.get("_final"):
                 return {k: v for k, v in capa0_result.items() if k != "_final"}
@@ -616,8 +650,20 @@ class RegistroComidaHandler:
         if not pre_extraccion and _msg_tiene_porcion_lata(mensaje):
             pre_extraccion = self._capa_lata(mensaje, db)
 
-        # CAPA 1: catálogo platos (incluye CAPA 1.5 — plato_constructor)
+        # ── SIMPLIFICACIÓN: 2 capas limpias ─────────────────────────────────────
+        # Si CAPA 0 resolvió con macros → úsalo directamente
+        # Si CAPA 0 tiene fallback con macros → úsalo
+        # Si no hay nada → devolver None para que consultar() lo maneje con el LLM principal
+        if not pre_extraccion and _capa0_fallback:
+            if float(_capa0_fallback.get("calorias", 0)) > 0:
+                pre_extraccion = _capa0_fallback
+
+        # Si no hay extracción → señal para que consultar() use el LLM principal
         if not pre_extraccion:
+            return {"_delegar_a_llm": True}
+
+        # CAPA 1 eliminada — innecesaria con la simplificación de 2 capas
+        if False:  # desactivado
             intento_platos = await self._capa1_platos(mensaje, perfil, db)
             if intento_platos:
                 pre_extraccion = intento_platos
@@ -995,7 +1041,7 @@ class RegistroComidaHandler:
                 "calorias": extraccion["calorias"], "proteinas_g": extraccion["proteinas_g"],
                 "carbohidratos_g": extraccion["carbohidratos_g"],
                 "grasas_g": extraccion["grasas_g"],
-                "azucar_g": 0, "fibra_g": 0, "sodio_mg": 0, "calidad": "Alta",
+                "azucar_g": 0, "fibra_g": 0, "sodio_mg": 0,
             },
             "mensaje": f"✅ Registré manual: {nombre} — {extraccion['calorias']} kcal.",
         }
@@ -1008,7 +1054,8 @@ class RegistroComidaHandler:
         """CAPA 0: NLPFoodExtractor — Llama-3 extrae JSON, Python calcula desde BD."""
         try:
             from app.services.nlp_food_extractor import (
-                NLPFoodExtractor, contiene_modificador_ficticio, _nombre_es_no_alimento
+                NLPFoodExtractor, contiene_modificador_ficticio, _nombre_es_no_alimento,
+                _ANIMALES_NO_COMESTIBLES,
             )
             extractor = NLPFoodExtractor(ia_engine, db)
 
@@ -1036,6 +1083,20 @@ class RegistroComidaHandler:
                     "mensaje": (
                         f"'{_palabra_base or _msg_base}' no parece ser un alimento. "
                         "¿Quisiste decir otra cosa? Registra una comida o bebida real. 🍽️"
+                    ),
+                }
+
+            # Guard: animales domésticos no comestibles en frases compuestas
+            # ("carne de perro", "filete de gato") — el NLP extractor los bloquea con
+            # continue, lo que retorna None y delega al LLM produciendo respuestas erróneas.
+            _palabras_base_nc = set(re.sub(r"[^a-z\s]", "", _msg_base).split())
+            if _palabras_base_nc & _ANIMALES_NO_COMESTIBLES:
+                return {
+                    "_final": True, "success": False,
+                    "tipo_detectado": "no_alimento_bloqueado", "alimentos": [], "datos": {},
+                    "mensaje": (
+                        "Eso no es un alimento reconocido. "
+                        "Por favor registra una comida o bebida real 🍽️"
                     ),
                 }
 
@@ -1073,6 +1134,7 @@ class RegistroComidaHandler:
                             "gras_g": it.grasas_g,
                             "gramos": it.gramos_totales,
                             "confianza_baja": it.confianza_baja,
+                            "es_liquido": getattr(it, "es_liquido", False),
                         }
                         for it in resultado.items
                     ],
@@ -1852,13 +1914,10 @@ class RegistroComidaHandler:
         momento_reloj = _inferir_momento_dia_por_hora()
         adv_horario   = _advertencia_rango_horario(extraccion.get("calorias", 0), momento)
 
-        # Conflicto temporal: usuario pide "almuerzo" a las 11 PM, etc.
+        # Conflicto temporal desactivado: los usuarios frecuentemente registran
+        # comidas de forma retroactiva (al final del día, horas después de comer).
+        # Mostrar esta advertencia sería incorrecta e innecesaria en ese caso.
         adv_temporal: Optional[str] = None
-        if momento and momento_reloj and momento != momento_reloj:
-            adv_temporal = (
-                f"⚠ Conflicto temporal: registras '{momento}' pero son horas de "
-                f"'{momento_reloj}'. Registrado de todas formas."
-            )
 
         # Veracidad calórica: registro con kcal absurdas alerta al usuario
         kcal_reg = float(extraccion.get("calorias", 0) or 0)
@@ -1894,7 +1953,9 @@ class RegistroComidaHandler:
                 _lineas = []
                 for _m in _macros_items:
                     _g = int(round(_m.get("gramos", 100)))
-                    _unidad_vol = "ml" if _es_alimento_liquido(_m.get("nombre", "")) else "g"
+                    # Bug 4 fix: usar es_liquido del item si está disponible, sino fallback
+                    _item_es_liquido = _m.get("es_liquido", False) or _es_alimento_liquido(_m.get("nombre", ""))
+                    _unidad_vol = "ml" if _item_es_liquido else "g"
                     _lineas.append(
                         f"• {_m['nombre']} ({_g}{_unidad_vol}) — {round(_m['kcal'], 1)} kcal"
                         f" | P:{round(_m['prot_g'], 1)}g"
@@ -2005,7 +2066,7 @@ class RegistroComidaHandler:
                 "fibra_g":         extraccion.get("fibra_g", 0),
                 "sodio_mg":        extraccion.get("sodio_mg", 0),
                 "porcion_g":       extraccion.get("porcion_g") or extraccion.get("gramos"),
-                "calidad":         extraccion.get("calidad_nutricional", "Media"),
+                "calidad":         extraccion.get("calidad_nutricional") or None,
             },
             "mensaje": msg_final,
         }
@@ -2017,11 +2078,11 @@ class RegistroComidaHandler:
             import json
             prompt = (
                 f"El usuario dijo: '{mensaje}'. Identifica el ALIMENTO SIMPLE (no platos complejos). "
-                "IMPORTANTE: Si el alimento NO existe en la gastronomía real (ficticio, mitológico "
-                "o imaginario como 'carne de unicornio', 'huevo de dragón'), devuelve exactamente: "
-                "{\"nombre\":\"__DESCONOCIDO__\",\"calorias\":0,\"proteinas_g\":0,"
-                "\"carbohidratos_g\":0,\"grasas_g\":0,\"porcion_g\":100}\n"
-                "Si el alimento SÍ es real, devuelve SOLO JSON: "
+                "IMPORTANTE — devuelve exactamente {\"nombre\":\"__DESCONOCIDO__\",...} si:"
+                " (1) El alimento NO existe en la gastronomía real (ficticio/mitológico: 'carne de unicornio', 'huevo de dragón')."
+                " (2) Es carne de animal doméstico o no comestible: perro, gato, caballo, rata, serpiente, lobo, mono."
+                "     NUNCA sustituyas por otro alimento similar (ej: NO cambies 'carne de perro' por 'carne de cuy')."
+                " Si el alimento SÍ es real y comestible, devuelve SOLO JSON: "
                 "{\"nombre\":\"...\",\"calorias\":0,\"proteinas_g\":0,"
                 "\"carbohidratos_g\":0,\"grasas_g\":0,\"porcion_g\":100}"
             )
@@ -2044,6 +2105,25 @@ class RegistroComidaHandler:
                     ),
                     "_es_error_ficcion": True,
                 }
+
+            # Bug 5: Guard Python-level — si Groq sustituyó el animal no comestible
+            # por otro alimento (ej: 'perro' → 'Carne De Cuy'), bloquear aquí.
+            try:
+                from app.services.nlp_food_extractor import _ANIMALES_NO_COMESTIBLES as _ANC5
+                _tokens_groq = set(_norm_al(nombre).split())
+                if _tokens_groq & _ANC5:
+                    return {
+                        "success": False,
+                        "tipo_detectado": "animal_no_comestible",
+                        "alimentos": [], "datos": {},
+                        "mensaje": (
+                            f"No es posible registrar '{nombre}': corresponde a un animal "
+                            "que no es apto para consumo humano. ¿Quiso decir otra cosa? 🐾"
+                        ),
+                        "_es_error_ficcion": True,
+                    }
+            except Exception:
+                pass
 
             if data.get("calorias", 0) <= 0:
                 return None

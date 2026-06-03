@@ -23,6 +23,15 @@ import re
 import unicodedata
 import urllib.parse
 import urllib.request
+
+# Importación lazy para evitar import circular — se resuelve en tiempo de llamada
+def _normalizar_voz_comida(texto: str) -> str:
+    """Wrapper lazy de _normalizar_voz del módulo de ejercicios."""
+    try:
+        from app.services.asistente_registro_ejercicio import _normalizar_voz
+        return _normalizar_voz(texto)
+    except Exception:
+        return texto
 from dataclasses import dataclass
 
 
@@ -60,6 +69,21 @@ REGLAS ESTRICTAS:
   Ejemplos de cosas que NO son alimentos: juegos, ropa, libros, música, objetos, emociones,
   materiales (hierro, madera, plástico), actividades (deporte, trabajo, estudio).
   Si el usuario dice "comi juegos frito" → [] porque "juegos" no es comida.
+- REGLA ANTI-FICCIÓN — PALABRAS INVENTADAS: Si el nombre del alimento contiene una palabra
+  que claramente no existe como alimento, ingrediente ni marca en ningún idioma conocido
+  (español, inglés, quechua, italiano, francés, japonés…), devuelve EXACTAMENTE: []
+  NUNCA sustituyas una palabra inventada por un alimento real similar.
+  Ejemplos de palabras inventadas: "florbonix", "zarblak", "frublatex", "glurpix", "snorflax".
+  Si el usuario dice "comí florbonix tostado" → [] porque "florbonix" no es un alimento real.
+  Si el usuario dice "tomé bebida de zorblax" → [] porque "zorblax" no existe.
+  REGLA CLAVE: si tienes dudas sobre si una palabra es un alimento real o una marca, pero suena
+  completamente inventada (sin raíz en ningún idioma), devuelve []. Es mejor rechazar que inventar.
+- REGLA BLOQUEADOR — ANIMALES DOMÉSTICOS/NO COMESTIBLES: Si el alimento mencionado es carne de
+  animal doméstico o no apto para consumo humano en contexto culinario normal, devuelve EXACTAMENTE: []
+  NUNCA sustituyas por otro alimento similar. Lista de animales bloqueados:
+  perro, gato, caballo, rata, ratón, culebra, serpiente, lobo, zorro, mono, loro, paloma doméstica.
+  Ejemplos: "carne de perro" → [] | "comi gato frito" → [] | "bistec de caballo" → []
+  IMPORTANTE: cuy, alpaca, llama y pato SÍ son comestibles en Perú → extraer normalmente.
 - NO calcules calorías. NO sumes nada. SOLO extrae lo que el usuario mencionó.
 - Extrae EXACTAMENTE lo que dijo el usuario, sin agregar ingredientes ni complementos que NO mencionó.
   Si el usuario dijo "pollo al horno", extrae "pollo al horno" — no añadas arroz, verduras ni nada más.
@@ -134,10 +158,16 @@ REGLAS ESTRICTAS:
       "tome 100ml de leche y 3 galletas" → [{alimento:"leche",cantidad:100,unidad:"ml"},{alimento:"galleta",cantidad:3,unidad:"unidad"}]
       "comi 200g de pollo y una manzana" → [{alimento:"pollo",cantidad:200,unidad:"g"},{alimento:"manzana",cantidad:1,unidad:"unidad"}]
       En mensajes mixtos: CADA ítem mantiene SU unidad. El ítem con gramos usa unidad:"g", el ítem con conteo usa unidad:"unidad".
-    Si el usuario especifica ml o litros explícitamente para bebidas (ej: "500ml de gaseosa", "1 litro de agua", "250 ml de jugo") →
-      usa unidad: "ml" y cantidad: <número de ml>. Ejemplo: "tome 500ml de gaseosa"
-      → [{alimento:"gaseosa", cantidad:500, unidad:"ml"}]
-      NUNCA conviertas una cantidad explícita en ml/litros a "vaso" — respeta siempre el volumen indicado.
+    Si el usuario especifica ml o litros explícitamente para bebidas →
+      usa unidad: "ml" y cantidad: <número de ml>. Ejemplos:
+      "tome 500ml de gaseosa" → [{alimento:"gaseosa", cantidad:500, unidad:"ml"}]
+      "tome una jugo de naranja de 200ml" → [{alimento:"jugo de naranja", cantidad:200, unidad:"ml"}]
+      "bebi 250ml de jugo de manzana" → [{alimento:"jugo de manzana", cantidad:250, unidad:"ml"}]
+      NUNCA conviertas ml explícitos a "vaso".
+      REGLA ANTI-DUPLICADO: "jugo de naranja", "jugo de mango", "jugo de piña" son UN SOLO alimento.
+      NUNCA extraigas la fruta por separado si ya está incluida en el nombre del jugo.
+      INCORRECTO: [{alimento:"jugo de naranja"}, {alimento:"naranja"}] ← PROHIBIDO
+      CORRECTO:   [{alimento:"jugo de naranja", cantidad:200, unidad:"ml"}]
 - Usa nombres EXACTOS y genéricos en español. Para bebidas: "agua", "gaseosa", "jugo de naranja".
 - BEBIDAS DE CEREALES/GRANOS: cuando el usuario pide un "vaso de cebada", "taza de cebada" o solo "cebada"
   en contexto de bebida caliente, usa SIEMPRE el nombre "agua de cebada" (no "cebada" a secas ni "cebada con cáscara").
@@ -155,6 +185,14 @@ REGLAS ESTRICTAS:
   [{"alimento":"lomo saltado","con_extra":["gaseosa"]}]  ← PROHIBIDO para bebidas
 - MODIFICADORES: "sin X" → agregar en campo "sin" (strings simples).
   "con extra X" / "con más X" → campo "con_extra" (strings simples, SOLO sólidos: "queso", "huevo extra", "más arroz").
+
+IMPORTANTE — El texto puede venir de transcripción de voz:
+- Sin puntuación: "comí arroz con pollo doscientos gramos y una gaseosa"
+- Números escritos: "setenta gramos", "ciento veinte mililitros", "dos y medio"
+- Muletillas ya eliminadas, pero puede haber variaciones fonéticas
+
+Convierte números escritos a dígitos: "setenta"→70, "ciento veinte"→120, "dos y medio"→2.5
+Ignora muletillas residuales que no sean alimentos.
 
 Responde SOLO con JSON array válido, sin texto adicional, sin markdown.
 
@@ -210,13 +248,29 @@ def _separar_con_n_items(items_raw: list[dict]) -> list[dict]:
 
 # ─── Normalizaciones de texto antes de enviar al LLM ─────────────────────────
 PRE_NORM_PATRONES = [
-    # Conectores temporales que confunden al LLM → reemplazar por " y "
+    # ── Muletillas de VOZ (input hablado transcripto) ─────────────────────────
+    # El asistente recibe mensajes de voz → el texto puede contener muletillas,
+    # dudas y conectores vacíos que confunden al LLM extractor.
+    (r"(?i)^(este|pues|bueno|oye\s+pues)\s*[,.]?\s*", ""),  # muletilla al inicio
+    (r"(?i)\b(mm+h?|eeh?|aah?|uh+|uhm+|hmm+)\b[,.]?\s*", " "),
+    (r"(?i)\bo\s+sea\s+(que\s+)?", " "),
+    (r"(?i)\bcomo\s+que\s+", " "),
+    (r"(?i)\bbueno\s+(?:pues\s+)?(?=\w)", " "),
+    (r"(?i)\bpues\s+(?=\w)", " "),
+    (r"(?i)\bla\s+verdad\s+(?:es\s+)?(?:que\s+)?", " "),
+    (r"(?i)\besto\s+es\b[,.]?\s*", " "),
+    # "y este y" / "este que" → eliminar (relleno de voz)
+    (r"(?i)\by\s+este\s+", " "),
+    (r"(?i)\beste\s+que\s+", " "),
+    # ── Conectores temporales de consumo ──────────────────────────────────────
     (r"(?i)\b(y\s+)?despu[eé]s\s+(com[ií]|tom[eé]|beb[ií])\b", " y "),
     (r"(?i)\b(y\s+)?luego\s+(com[ií]|tom[eé]|beb[ií])\b",     " y "),
     (r"(?i)\btambi[eé]n\s+(com[ií]|tom[eé]|beb[ií])\b",        " y "),
-    # Separador implícito por unidad: "arroz con huevo una taza de avena"
-    # → "arroz con huevo y una taza de avena"
-    # Lookbehind fijo (?<!con) evita romper "arroz con una taza de leche".
+    # "y de tomar/comer/beber X" → " y X"
+    (r"(?i)\by\s+de\s+(?:tom[aáe]r|com[eé]r|beb[eé]r)\s+", " y "),
+    # Hint de volumen al final "como 300ml" → eliminar (causa duplicados)
+    (r"(?i),?\s+(?:como|unos?|unas?)\s+\d+\s*(?:ml|cl|cc|litros?)\s*$", ""),
+    # Separador implícito por unidad: "arroz con huevo una taza de avena" → "... y una taza"
     (r"(?i)(?<![cC][oO][nN])\s+(?=un[ao]?\s+(?:taza|vaso|copa|plato|porci[oó]n)\s+de\s+)", " y "),
     # Redundancias comunes
     (r"(?i)\bun\s+poco\s+de\b",   "medio "),
@@ -248,11 +302,18 @@ NEGACION_PATRONES = [
 ]
 
 # Palabras que claramente NO son alimentos → nunca consultar USDA con ellas
-# Incluye ficción, objetos, materiales, actividades y conceptos abstractos.
+# Incluye ficción, objetos, materiales, actividades, conceptos abstractos
+# y animales domésticos/no aptos para consumo humano.
 NO_ALIMENTOS: frozenset[str] = frozenset({
-    # Ficción / mitología
-    "unicornio", "dragon", "flobonix", "zombie", "alien", "cripton",
+    # Ficción / palabras inventadas (incluir variantes comunes de prueba)
+    "unicornio", "dragon", "flobonix", "florbonix", "zombie", "alien", "cripton",
+    "zarblak", "frublatex", "glurpix", "snorflax", "zorblax",
     "monstruo", "magico", "invisible", "virtual", "digital", "fake",
+    # ── ANIMALES DOMÉSTICOS / NO COMESTIBLES (Bug 5 fix) ─────────────────
+    # CRÍTICO: bloquear sustitución silenciosa (ej: perro → cuy)
+    "perro", "gato", "caballo", "rata", "raton", "culebra",
+    "serpiente", "lobo", "zorro", "mono", "loro", "hamster",
+    # ─────────────────────────────────────────────────────────────────────
     # Materiales y objetos inorgánicos
     "hierro", "acero", "madera", "plastico", "vidrio", "metal", "piedra",
     "cemento", "carbon", "petroleo", "gasolina", "tierra", "arena", "barro",
@@ -279,7 +340,14 @@ NO_ALIMENTOS: frozenset[str] = frozenset({
     "pelo", "cabello", "unas", "piel", "sudor",
     # Palabras ofensivas / absurdas en contexto de comida
     "caca", "orina", "excremento", "heces", "vomito", "basura", "veneno",
-    "veneno", "tóxico", "toxico", "explosivo", "bomba",
+    "veneno", "toxico", "explosivo", "bomba",
+})
+
+# Set específico de animales domésticos no comestibles para bloqueo rápido por token
+# (complementa NO_ALIMENTOS con detección por "carne de X")
+_ANIMALES_NO_COMESTIBLES: frozenset[str] = frozenset({
+    "perro", "gato", "caballo", "rata", "raton", "culebra",
+    "serpiente", "lobo", "zorro", "mono", "loro", "hamster",
 })
 
 # Modificadores ficticios: si acompañan a cualquier sustantivo, el ítem es ficticio.
@@ -401,6 +469,7 @@ class ItemExtraido:
     grasas_g: float
     origen: str          # "bd", "usda", "estimado"
     confianza_baja: bool = False  # True cuando el alimento fue estimado por Groq (no encontrado en BD/USDA)
+    es_liquido: bool = False       # True cuando la unidad es ml/vaso/taza (Bug 4 fix)
 
 
 @dataclass
@@ -515,8 +584,9 @@ class NLPFoodExtractor:
     # ─── PRE-NORMALIZACIÓN del texto antes del LLM ───────────────────────────
     def _pre_normalizar(self, texto: str) -> str:
         """Normaliza conectores temporales, redundancias y marcas comerciales
-        para reducir varianza del LLM antes de enviar al extractor JSON."""
-        t = texto
+        para reducir varianza del LLM antes de enviar al extractor JSON.
+        También aplica normalización de voz: muletillas + números hablados."""
+        t = _normalizar_voz_comida(texto)  # muletillas + "setenta"→70
         for patron, reemplazo in PRE_NORM_PATRONES:
             t = re.sub(patron, reemplazo, t)
         # Marcas comerciales de gaseosas → nombre genérico "gaseosa"
@@ -558,18 +628,22 @@ class NLPFoodExtractor:
     @staticmethod
     def _fusionar_item_duplicado(items: list[dict]) -> list[dict]:
         """
-        Fusiona cuando el LLM divide "X gramos de [plato]" en dos objetos:
-        [{alimento:"pollo saltado", cantidad:1.0, unidad:"porcion"},
-         {alimento:"pollo", cantidad:100, unidad:"g"}]
-        → [{alimento:"pollo saltado", cantidad:100, unidad:"g"}]
+        1) Fusiona cuando el LLM divide "X gramos de [plato]" en dos objetos:
+           [{alimento:"pollo saltado", unidad:"porcion"}, {alimento:"pollo", unidad:"g"}]
+           → [{alimento:"pollo saltado", unidad:"g"}]
+           Condición: ítem B es substring del nombre de ítem A Y tiene unidad de peso.
 
-        Condición: ítem B es substring del nombre de ítem A Y tiene unidad de peso.
+        2) Deduplica cuando el LLM extrae el mismo alimento dos veces con distintas
+           unidades (p.ej. "smoothie X" como vaso Y como 300ml).
+           Se conserva el ítem con unidad más precisa (g/ml > vaso/porcion).
         """
         if len(items) < 2:
             return items
         _PESOS = {"g", "gr", "gramo", "gramos", "kg", "kilo", "kilogramo", "ml", "cc", "l", "litro"}
         resultado = list(items)
-        fusionados = set()
+        fusionados: set[int] = set()
+
+        # ── Paso 1: fusión substring (lógica original) ────────────────────────
         for i, a in enumerate(items):
             if i in fusionados:
                 continue
@@ -579,13 +653,32 @@ class NLPFoodExtractor:
                     continue
                 nombre_b = _norm(str(b.get("alimento", "")))
                 unidad_b = str(b.get("unidad", "")).lower()
-                # Si B es peso explícito y su nombre es subpalabra del nombre de A
                 if unidad_b in _PESOS and nombre_b and nombre_b in nombre_a and nombre_b != nombre_a:
-                    # Absorber: usar nombre de A con la cantidad/unidad de B
                     resultado[i] = {**a, "cantidad": b.get("cantidad", a.get("cantidad")), "unidad": unidad_b}
                     fusionados.add(j)
                     break
-        return [item for k, item in enumerate(resultado) if k not in fusionados]
+
+        items_paso1 = [item for k, item in enumerate(resultado) if k not in fusionados]
+
+        # ── Paso 2: dedup mismo nombre (nuevo) ───────────────────────────────
+        # Cuando el LLM genera duplicados del mismo alimento con distintas unidades,
+        # conservamos el que tiene unidad más precisa (g/ml antes que vaso/porcion).
+        _PESOS_PRECISION = frozenset({"g", "gr", "gramo", "gramos", "ml", "cc"})
+        seen: dict[str, int] = {}  # nombre_norm → índice en `final`
+        final: list[dict] = []
+        for item in items_paso1:
+            k = _norm(str(item.get("alimento", "")))
+            unit = str(item.get("unidad", "")).lower()
+            if k not in seen:
+                seen[k] = len(final)
+                final.append(item)
+            else:
+                # Reemplazar si el nuevo ítem tiene unidad más precisa
+                prev = final[seen[k]]
+                prev_unit = str(prev.get("unidad", "")).lower()
+                if unit in _PESOS_PRECISION and prev_unit not in _PESOS_PRECISION:
+                    final[seen[k]] = item
+        return final
 
     # Mapeo de palabras numéricas a float (para normalizar "dos peras" → pera×2)
     _NUMEROS_ES: dict[str, float] = {
@@ -653,10 +746,26 @@ class NLPFoodExtractor:
         )
         if a3:
             return a3
-        # 4. Fallback amplio: el nombre buscado aparece en cualquier posición.
+        # 4. Bug 3 fix: cuando el nombre tiene ≥2 palabras con "de" (ej: "galleta de avena"),
+        #    priorizar el match que contenga TODAS las palabras clave, no solo la primera.
+        #    Esto evita que "galleta de avena" matchee "Galleta De Soda" por LIKE "%galleta%".
+        palabras_n = [w for w in n.split() if len(w) >= 4 and w not in {"de", "con", "del", "las", "los"}]
+        if len(palabras_n) >= 2:
+            # Requiere que TODAS las palabras clave estén en el nombre normalizado de BD
+            query_multi = self.db.query(Alimento)
+            for pw in palabras_n:
+                query_multi = query_multi.filter(Alimento.nombre_normalizado.like(f"%{pw}%"))
+            a_multi = (
+                query_multi
+                .order_by(_sqlfunc.length(Alimento.nombre_normalizado).asc())
+                .first()
+            )
+            if a_multi:
+                return a_multi
+        # 5. Fallback amplio: el nombre buscado aparece en cualquier posición.
         #    REGLA 6: ORDER BY LENGTH ASC garantiza que "Fruta" (genérico corto) tenga
         #    prioridad sobre "Ensalada de Frutas" o "Mezcla de Frutas" (compuestos largos).
-        a4 = (
+        a5 = (
             self.db.query(Alimento)
             .filter(Alimento.nombre_normalizado.like(f"%{n}%"))
             .order_by(
@@ -665,7 +774,7 @@ class NLPFoodExtractor:
             )
             .first()
         )
-        return a4
+        return a5
 
     # ─── PASO 3b: Aplicar modificadores sin/con_extra ─────────────────────────
     def _gramos_tipicos_ingrediente(self, nombre_ingrediente: str, nombre_plato: str) -> float:
@@ -1038,9 +1147,11 @@ class NLPFoodExtractor:
         # ── Determinar escala según unidad/cantidad del usuario ───────────────
         gramos_std_total = sum(g for _, g in componentes)
 
-        if unidad == "g" and gramos_usuario and gramos_usuario > 0:
-            # Usuario especificó gramos totales → distribuir proporcionalmente
+        _UNIDADES_MASA_O_VOL = {"g", "gr", "gramo", "gramos", "ml", "cc"}
+        if unidad in _UNIDADES_MASA_O_VOL and gramos_usuario and gramos_usuario > 0:
+            # Usuario especificó gramos/ml → distribuir proporcionalmente entre componentes.
             # Ej: "300g pollo al horno con plátano" → escala = 300 / gramos_std_total
+            # Ej: "300ml smoothie de kale con jengibre" → igual (ml ≈ g para bebidas)
             escala = gramos_usuario / gramos_std_total
             gramos_finales = gramos_usuario
         else:
@@ -1322,6 +1433,20 @@ class NLPFoodExtractor:
                 logger.warning("[NLPExtractor] '%s' bloqueado: no es un alimento", nombre)
                 continue
 
+            # Guard Bug 5: bloquear animales domésticos no comestibles a nivel Python
+            # Cubre el caso "carne de perro" donde el token 'perro' está en el nombre
+            _tokens_nombre = set(_norm(nombre).split())
+            if _tokens_nombre & _ANIMALES_NO_COMESTIBLES:
+                _animal_detectado = next(t for t in _tokens_nombre if t in _ANIMALES_NO_COMESTIBLES)
+                logger.warning(
+                    "[NLPExtractor] Animal no comestible detectado: '%s' en '%s' — bloqueado",
+                    _animal_detectado, nombre,
+                )
+                advertencias.append(
+                    f"No es posible registrar '{nombre}': animal no apto para consumo."
+                )
+                continue
+
             # PASO 2: Buscar en catálogo platos (macros desde ingredientes reales)
             alimento_bd = None
             origen = "bd"
@@ -1350,6 +1475,19 @@ class NLPFoodExtractor:
                 "ml", "cc", "l", "litro",
             )
 
+            # Bebidas simples en recipiente (vaso/taza) → siempre usar alimentos,
+            # nunca platos. El plato_constructor puede crear platos con nombres
+            # como "jugo de naranja" con gramos incorrectos (ej. 450g por porción).
+            _BEBIDAS_SIMPLES_KW = frozenset({
+                "jugo", "gaseosa", "chicha", "limonada", "refresco", "cerveza",
+                "agua", "leche", "bebida", "smoothie", "batido", "nectar", "infusion",
+            })
+            _UNIDADES_RECIPIENTE = frozenset({"vaso", "taza", "copa"})
+            _es_bebida_en_recipiente = (
+                unidad in _UNIDADES_RECIPIENTE
+                and any(bk in q_norm for bk in _BEBIDAS_SIMPLES_KW)
+            )
+
             # 1) Exact match. 2) Si falla, similarity ≥ 0.83 sobre top-300.
             _SQL_PLATO = (
                 "SELECT p.id, p.nombre,"
@@ -1365,12 +1503,13 @@ class NLPFoodExtractor:
                 " GROUP BY p.id, p.nombre"
                 " LIMIT 1"
             )
-            plato_row = None if _unidad_es_peso else self.db.execute(_text(_SQL_PLATO), {"q": q_norm}).fetchone()
+            _skip_plato_lookup = _unidad_es_peso or _es_bebida_en_recipiente
+            plato_row = None if _skip_plato_lookup else self.db.execute(_text(_SQL_PLATO), {"q": q_norm}).fetchone()
 
             # Fallback similaridad: si no hay exact match, buscar plato con mayor
             # similitud (≥0.83) para rescatar renombrados del LLM (ej: "huevo entero cocido"
             # cuando el usuario dijo "tortilla de huevo con pan tostado ligero").
-            if not plato_row and not _unidad_es_peso:
+            if not plato_row and not _skip_plato_lookup:
                 import difflib as _diff
                 from app.models.plato import Plato as _Plato
                 _cands = (
@@ -1442,7 +1581,11 @@ class NLPFoodExtractor:
                 # PASO 3b: Plato compuesto — descompone por "con"/"y" y busca cada ingrediente
                 # Flujo por componente: BD (exacto) → USDA → Groq → guarda en BD
                 if not alimento_bd:
-                    gramos_usuario = cantidad if unidad == "g" else None
+                    # Para ml/cc tratar como g (densidad ≈ 1g/ml para bebidas).
+                    # Sin esto, _calcular_macros_plato_combinado usaría escala=300
+                    # para "300ml de smoothie" (300 porciones, resultado absurdo).
+                    _UNIDADES_MASA_O_VOL = {"g", "gr", "gramo", "gramos", "ml", "cc"}
+                    gramos_usuario = cantidad if unidad in _UNIDADES_MASA_O_VOL else None
                     resultado_combinado = await self._calcular_macros_plato_combinado(
                         q_norm, cantidad, unidad, gramos_usuario
                     )
@@ -1625,6 +1768,9 @@ class NLPFoodExtractor:
                 or (_sim_nombres < _umbral and origen not in ("bd_combinado", "bd_ingrediente", "regla", "bd"))
             )
 
+            # Detectar si el ítem es líquido según su unidad (Bug 4 fix)
+            _es_liquido_item = unidad in {"ml", "cc", "l", "litro", "vaso", "taza", "copa", "botella", "jarra"}
+
             items_calculados.append(ItemExtraido(
                 alimento=nombre_final,
                 cantidad=cantidad,
@@ -1636,6 +1782,7 @@ class NLPFoodExtractor:
                 grasas_g=grasas,
                 origen=origen,
                 confianza_baja=_confianza_baja,
+                es_liquido=_es_liquido_item,
             ))
 
         if not items_calculados:

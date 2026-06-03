@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+import re
 from app.services.parsing.contexto_respuesta import inferir_forzar_por_mensaje_usuario
 
 RECOMENDAR_NUTRICION = "recomendar_nutricion"
@@ -152,10 +153,21 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
         "desayuné", "desayune", "almorcé", "almorce", "cené", "cene",
         "comí", "comi ", "tomé ", "tome ", "bebí ", "bebi ",
         "he desayunado", "he almorzado", "he cenado", "he comido", "he tomado",
+        # Frases más naturales
+        "acabo de comer", "acabo de tomar", "acabo de beber",
+        "me comi", "me tomé", "me bebí", "me comí",
+        "termine de comer", "terminé de comer",
+        "ya comi", "ya comí", "ya almorcé", "ya desayuné",
+        # "me hice un desayuno/almuerzo" — construcción coloquial de preparación+consumo
+        "me hice un", "me hice una",
     )
     _TEMPORALES_LOG = ("hoy ", "hoy,", "esta mañana", "esta tarde", "esta noche",
                        "al mediodia", "al mediodía", "ayer ", "en la mañana", "en la noche")
-    _verbos_log_count = sum(1 for v in _VERBOS_LOG if v in m)
+    # Usamos límites de palabra (\b) para evitar coincidencias parciales (ej. darme comidas -> me comi)
+    _verbos_log_count = sum(
+        1 for v in _VERBOS_LOG
+        if m.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", m)
+    )
     _tiene_temporal_log = any(t in m for t in _TEMPORALES_LOG)
     # Una de estas condiciones basta:
     # a) ≥2 verbos de consumo pasado en el mismo mensaje (resumen del día)
@@ -189,20 +201,49 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
     rec_nut = any(
         x in m
         for x in (
-            "qué como",
-            "que como",
-            "qué comer",
-            "que comer",
-            "ideas para comer",
-            "sugerencias de comida",
-            "opciones de almuerzo",
-            "opciones de desayuno",
-            "opciones de cena",
-            "recetas",
-            "receta ",
-            "platos para",
+            "qué como", "que como", "qué comer", "que comer",
+            "ideas para comer", "sugerencias de comida",
+            "opciones de almuerzo", "opciones de desayuno", "opciones de cena",
+            "recetas", "receta ", "platos para",
+            # Frases naturales de hambre/recomendación
+            "tengo hambre", "tengo antojo", "qué puedo comer", "que puedo comer",
+            "me recomiendas comer", "me da hambre", "quiero comer algo",
+            "qué me como", "que me como", "qué hay para comer", "que hay para comer",
+            "busco algo para comer", "dame algo de comer",
         )
     )
+    # Ejercicio registrado: "entrené X", "realicé X", etc.
+    # NOTA: "hice " (genérico) fue eliminado — matcheaba "me hice un desayuno".
+    # Usar solo formas específicas de ejercicio.
+    _EJERCICIO_REGISTRADO = (
+        # Formas genéricas verificadas
+        "hice cardio", "hice pesas", "hice gym", "hice ejercicio",
+        "hice sentadillas", "hice flexiones", "hice abdominales",
+        # Ejercicios específicos de gym (evita "hice " solo que matchea "me hice un desayuno")
+        "hice press", "hice curl", "hice remo", "hice jalon", "hice jalón",
+        "hice dominadas", "hice fondos", "hice burpees", "hice plancha",
+        "hice peso muerto", "hice sentadilla", "hice extensiones",
+        "tiré press", "tire press", "tiré sentadillas",
+        "fui al gym", "fui al gimnasio", "entrené", "entrenei", "entrenei ",
+        "realicé", "realize", "corrí", "corri ", "caminé", "camine ",
+        "nadé", "nade ", "pedalié", "pedalee",
+        "terminé de entrenar", "termine de entrenar",
+        "acabo de entrenar", "acabo de hacer ejercicio",
+    )
+    if any(x in m for x in _EJERCICIO_REGISTRADO) and "?" not in m and fe >= fc:
+        return REGISTRAR_EJERCICIO
+    # Preguntas de permiso/capacidad sobre actividad física → OTRO informativo
+    # "puedo realizar un trote", "se puede trotar", "es bueno correr" — NO son registros
+    _PERMISO_EJ_SYNC = (
+        "puedo realizar", "puedo trotar", "puedo correr", "puedo nadar",
+        "puedo caminar", "puedo jugar", "puedo bailar", "puedo practicar",
+        "puedo ir a ", "se puede trotar", "se puede correr", "se puede nadar",
+        "es bueno trotar", "es bueno correr", "es bueno nadar", "es bueno caminar",
+        "es malo trotar", "es malo correr",
+    )
+    if any(p in m for p in _PERMISO_EJ_SYNC):
+        return OTRO
+
     rec_ex = any(
         x in m
         for x in (
@@ -249,117 +290,111 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
 
 async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
     """
-    Prioriza clasificación semántica vía LLM (Groq); si falla o no hay API, usa reglas por palabras clave.
-    Los verbos imperativos de registro se resuelven antes del LLM para evitar degradación a RECIPE.
+    Clasificación de intención: 4 pre-checks infalibles + LLM 70B para todo lo demás.
+    Reemplaza los ~200 pre-checks anteriores por reglas mínimas y máxima confianza en el LLM.
     """
-    if es_saludo or len((mensaje or "").strip()) < 2:
-        return OTRO
     _m = (mensaje or "").lower().strip()
-    # Pre-check 1: verbos imperativos → nunca pasar al LLM (evita que clasifique como RECIPE)
+    if len(_m) < 2:
+        return OTRO
+
+    # Si viene marcado como saludo, validar que sea un saludo puro (sin peticiones de comida/ejercicio)
+    if es_saludo:
+        _NO_SALUDO_PURO = (
+            "comer", "cenar", "almorzar", "desayunar", "merendar", "comida", "cena", "almuerzo", "desayuno", "plato", "receta",
+            "ejercicio", "entren", "rutina", "pecho", "espalda", "pierna", "hombro", "cardio", "gym", "gimnasio",
+            "dime", "puedo", "quiero", "sugier", "recomiend", "dame", "verdura", "hacer"
+        )
+        if any(k in _m for k in _NO_SALUDO_PURO):
+            es_saludo = False
+
+    if es_saludo:
+        return OTRO
+
+    # ── Pre-check 1: verbos imperativos de registro ──────────────────────────────
     if any(_m.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO):
         return REGISTRAR_NUTRICION
-    # Pre-check 2: verbos de consumo pasado ("tomé", "bebí", "comí"…) + alimento o bebida →
-    # son registros afirmativos, no consultas. Resolverlos antes del LLM evita que los
-    # clasifique como INFO cuando el usuario simplemente informa lo que consumió.
-    _VERBOS_CONSUMO_PASADO = (
-        "comí", "comi ", "tomé ", "tome ", "bebí ", "bebi ",
-        "desayuné", "desayune", "almorcé", "almorce", "cené", "cene",
-        "me tomé", "me tome", "me bebí", "me bebi",
-        # Pretérito perfecto compuesto: "he desayunado/almorzado/cenado/comido"
-        "he desayunado", "he almorzado", "he cenado", "he comido", "he tomado", "he bebido",
+
+    # ── Pre-check 1b: petición de recomendación de comida ───────────────────────
+    # "qué puedo comer", "dime qué almorzar", "dame opciones" → RECOMENDAR_NUTRICION
+    # DEBE ir ANTES del pre-check modal para no ser capturado por "puedo"
+    import unicodedata as _ud
+    _mn = "".join(c for c in _ud.normalize("NFD", _m) if _ud.category(c) != "Mn")
+    _PEDIR_REC_NUT = (
+        "que puedo comer", "que puedo almorzar", "que puedo cenar",
+        "que puedo desayunar", "que puedo merendar",
+        "dime que comer", "dime que almorzar", "dime que cenar",
+        "que me recomiendas comer", "que me recomiendas almorzar",
+        "que comer ahora", "que almorzar hoy", "que cenar hoy",
+        "opciones de comida", "opciones para almorzar", "opciones para cenar",
+        "que puedo comer en este momento",
     )
-    _ALIMENTOS_RAPIDOS = frozenset({
-        "gaseosa", "jugo", "chicha", "limonada", "refresco", "cerveza",
-        "agua", "bebida", "pollo", "arroz", "sopa", "ensalada", "pan",
-        "ceviche", "cebiche", "lomo", "causa", "papa", "avena", "fruta",
-        "fideos", "menestra", "lentejas", "cebada", "quinua", "tamal",
-    })
-    _es_consumo = any(_m.startswith(v) or _m == v.strip() for v in _VERBOS_CONSUMO_PASADO)
-    _tiene_alimento = any(ak in _m for ak in _ALIMENTOS_RAPIDOS)
-    if _es_consumo and _tiene_alimento and "?" not in _m:
-        return REGISTRAR_NUTRICION
-    # También: si el mensaje empieza con verbo de consumo pero el alimento está implícito
-    # (ej. "Tomé un refresco" — "refresco" puede no estar en _ALIMENTOS_RAPIDOS)
-    if any(_m.startswith(v) for v in _VERBOS_CONSUMO_PASADO) and "?" not in _m:
-        return REGISTRAR_NUTRICION
-    # Narración diaria: "Hoy desayuné/almorcé/cené X" — el verbo aparece tras adverbio temporal.
-    # Condición adicional: ≥2 verbos de comida en el mensaje → definitivamente es un log.
-    _TEMPORALES = ("hoy ", "esta mañana", "esta tarde", "esta noche", "al mediodia", "al mediodía", "ayer ")
-    _verbos_en_msg = sum(1 for v in _VERBOS_CONSUMO_PASADO if v.strip() in _m)
-    _tiene_temporal = any(t in _m for t in _TEMPORALES)
-    if ((_tiene_temporal and _verbos_en_msg >= 1) or _verbos_en_msg >= 2) and _tiene_alimento and "?" not in _m:
-        return REGISTRAR_NUTRICION
-    # Pre-check 3: pregunta abierta sobre un alimento específico o categoría.
-    # Casos → respuesta conversacional INFO sin tarjetas RECIPE:
-    # A) "puedo comer/tomar X?", "es saludable X?", "me hace daño X?"
-    # B) "qué vegetales me recomiendas", "qué frutas puedo comer", "qué proteínas me convienen"
-    #    (pregunta sobre categoría de alimento, no pedido de platos completos)
-    _CONSULTA_ALIM = (
-        "puedo comer", "puedo tomar", "puedo beber", "puedo ingerir",
-        "se puede comer", "se puede tomar", "está bien comer", "esta bien comer",
-        "es bueno comer", "es malo comer", "es bueno el", "es malo el",
-        "es buena la", "es mala la", "es saludable", "es dañino", "es danino",
-        "conviene comer", "debo comer", "debería comer", "deberia comer",
-        "me afecta", "me hace daño", "me hace mal", "me hace daño",
-        "puedo consumir", "está permitido", "esta permitido",
+    _EJ_KW = ("ejercicio", "entren", "gym", "rutina", "deporte", "ejercicios")
+    if any(p in _mn for p in _PEDIR_REC_NUT) and not any(e in _mn for e in _EJ_KW):
+        return RECOMENDAR_NUTRICION
+    # Petición de recomendación de ejercicio
+    _PEDIR_REC_EJ = (
+        "que ejercicios puedo", "que ejercicios hago", "dime que ejercicios",
+        "ejercicios segun mi plan", "ejercicios según mi plan",
+        "que ejercicios hacer", "ejercicios para hoy",
     )
-    # El "?" es opcional: "puedo comer carne" también es consulta en español
-    _es_consulta_alim = any(p in _m for p in _CONSULTA_ALIM)
-    # Excluir frases genéricas sin alimento específico: "qué puedo comer?" → sigue siendo recomendar
-    # Normalizar tildes para comparar
-    import unicodedata
-    _mn = "".join(
-        c for c in unicodedata.normalize("NFD", _m) if unicodedata.category(c) != "Mn"
+    if any(p in _mn for p in _PEDIR_REC_EJ):
+        return RECOMENDAR_EJERCICIO
+
+    # ── Pre-check 2: modal de permiso = SIEMPRE pregunta, nunca registro ─────────
+    _MODALES = (
+        "puedo ", "se puede ", "podria ", "podria ",
+        "es bueno ", "es malo ", "es buena ", "es mala ",
+        "seria bueno ", "es recomendable ", "es posible ", "conviene ",
     )
-    _GENERICAS = ("que puedo comer", "que puedo tomar", "que como hoy", "que comer",
-                  "que me recomiendas comer", "que deberia comer")
-    if _es_consulta_alim and not any(g in _mn for g in _GENERICAS):
+    if any(_mn.startswith(p) or f" {p}" in _mn for p in _MODALES):
         return OTRO
 
-    # Pre-check 4: consulta específica de ejercicio basada en perfil.
-    # "qué peso para press banca", "cuántas series de sentadilla", "puedo hacer X con lesión Y"
-    # → respuesta INFO conversacional (no rutina con tarjetas).
-    # Distinto de "dame una rutina de X" que SÍ genera tarjetas.
-    _PARAMS_EJERCICIO = (
-        "que peso", "qué peso", "cuanto peso", "cuánto peso",
-        "cuantas series", "cuántas series", "cuantas repeticiones", "cuántas repeticiones",
-        "cuantos kilos", "cuántos kilos", "con que peso", "con qué peso",
-        "cuanto tiempo", "cuánto tiempo", "cuantos minutos", "cuántos minutos",
-        "puedo hacer", "puedo entrenar", "puedo levantar",
-        "es malo hacer", "es bueno hacer", "es recomendable hacer",
-        "debo hacer", "debería hacer", "deberia hacer",
-        "me recomiendas para hacer", "me conviene hacer",
-        "segun mi perfil", "según mi perfil", "para mi nivel",
-        "teniendo una lesion", "con lesion", "con lesión",
-        "tengo lesion", "tengo lesión",
+    # ── Pre-check 3: verbos de consumo pasado inequívocos ────────────────────────
+    # Usamos límites de palabra (\b) y el texto normalizado _mn para evitar coincidencias parciales
+    _CONSUMO_CLARO_NORM = (
+        "comi", "desayune", "almorce", "cene", "bebi", "me jale",
+        "me comi", "me tome", "acabo de comer", "acabo de tomar", "acabo de beber",
+        "termine de comer", "he desayunado", "he almorzado", "he cenado",
+        "he comido", "he bebido",
     )
-    _PALABRAS_EJERCICIO = (
-        "press", "sentadilla", "sentadillas", "peso muerto", "dominadas",
-        "curl", "remo", "jalon", "jalón", "fondos", "plancha", "burpee",
-        "ejercicio", "entrenamiento", "gym", "gimnasio", "rutina",
-        "series", "repeticiones", "reps", "kilos", "kg",
+    _tiene_consumo = any(
+        _mn.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", _mn)
+        for v in _CONSUMO_CLARO_NORM
     )
-    _CONSULTA_EJ_PARAMS = (
-        "que peso", "cuanto peso", "cuantas series", "cuantas repeticiones",
-        "cuantos kilos", "con que peso", "cuanto tiempo", "cuantos minutos",
-        "puedo hacer", "puedo entrenar", "puedo levantar",
-        "es malo hacer", "es bueno hacer", "debo hacer", "deberia hacer",
-        "teniendo una lesion", "con lesion",
-    )
-    _KEYWORDS_EJ = (
-        "press", "sentadilla", "peso muerto", "dominada", "curl", "remo",
-        "jalon", "fondos", "plancha", "burpee", "ejercicio", "entrenamiento",
-        "gym", "series", "repeticiones", "reps", "kilos", "levantar",
-        "pecho", "espalda", "hombro", "bicep", "tricep", "pierna",
-    )
-    _tiene_param_ej = any(p in _mn for p in _CONSULTA_EJ_PARAMS)
-    _tiene_kw_ej    = any(p in _mn for p in _KEYWORDS_EJ)
-    # "según mi perfil" + pregunta de cantidad/técnica → siempre consulta
-    _segun_perfil   = "segun mi perfil" in _mn or "para mi nivel" in _mn
-    _es_consulta_ej = _tiene_param_ej and (_tiene_kw_ej or _segun_perfil)
-    if _es_consulta_ej:
-        return OTRO
+    if _tiene_consumo and "?" not in _m:
+        return REGISTRAR_NUTRICION
 
+    # ── Pre-check 4: verbos de ejercicio pasado inequívocos ──────────────────────
+    # Usamos límites de palabra (\b) y el texto normalizado _mn para evitar coincidencias parciales
+    _EJ_CLARO_NORM = (
+        "entrene", "entrenei", "corri", "camine", "nade", "fui al gym", "fui al gimnasio",
+        "hice press", "hice sentadilla", "hice curl", "hice dominada", "hice peso muerto",
+        "hice remo", "hice jalon", "hice fondos", "hice cardio", "hice pesas", "hice ejercicio",
+        "hice flexiones", "hice burpees", "hice abdominales", "termine de entrenar",
+        "acabo de entrenar", "acabo de hacer ejercicio", "tire press",
+    )
+    _tiene_ej = any(
+        _mn.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", _mn)
+        for v in _EJ_CLARO_NORM
+    )
+    if _tiene_ej and "?" not in _m:
+        return REGISTRAR_EJERCICIO
+
+    # ── Pre-check 4b: patrón de volumen de ejercicio SIN verbo ───────────────────
+    # "sentadillas 4x12 con 80kg", "press banca 3*10 70kg", "prensa 4×15 100kg"
+    # El usuario reporta series×reps@peso sin usar "hice" explícitamente.
+    import re as _re_vol
+    _NOMBRES_EJ = (
+        "sentadill", "press", "curl", "remo", "jalon", "jalón", "fondos",
+        "prensa", "dominad", "peso muerto", "extensi", "elevaci", "hip thrust",
+        "burpee", "plancha", "abdominal",
+    )
+    _tiene_nombre_ej = any(n in _mn for n in _NOMBRES_EJ)
+    _tiene_volumen   = bool(_re_vol.search(r'\d+\s*[x\*×]\s*\d+', _mn))
+    if _tiene_nombre_ej and _tiene_volumen and "?" not in _m:
+        return REGISTRAR_EJERCICIO
+
+    # ── LLM 70B: clasificación definitiva para todo lo demás ─────────────────────
     try:
         modo_ia = await ia.clasificar_modo_asistente(mensaje)
         if isinstance(modo_ia, str) and modo_ia in MODOS_ASISTENTE:
@@ -368,64 +403,66 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
         pass
     return detectar_modo_funcion(mensaje, False)
 
+# ─── CÓDIGO ELIMINADO (reemplazado por LLM 70B) ──────────────────────────────
+# Las ~200 líneas de pre-checks anteriores (VERBOS_CONSUMO_PASADO, FRASES_INGESTA_NATURAL,
+# ALIMENTOS_RAPIDOS, QUERER_EJERCICIO, PREGUNTAS_PERMISO_EJ, PIDE_LISTA_EJ, etc.)
+# generaban falsos positivos porque cada nuevo caso requería un parche manual.
+# El LLM 70B con un prompt estructurado cubre todos esos casos sin mantenimiento.
+# ─────────────────────────────────────────────────────────────────────────────
 
 def bloque_prompt_modo_funcion(modo: str) -> str:
     """Texto inyectado al LLM para acotar la respuesta a una sola función."""
     modo = (modo or OTRO).strip().lower()
     if modo not in MODOS_ASISTENTE or modo == OTRO:
         return (
-            "\n\n══ FUNCIÓN DEL ASISTENTE (MODO GENERAL) ══\n"
-            "No es una petición clara de las 4 funciones principales. "
-            "Responde con [CALOFIT_INTENT:INFO] o [CALOFIT_INTENT:PROGRESS] según corresponda, "
-            "solo texto conversacional. No generes bloques [CALOFIT_HEADER] de recetas ni rutinas "
-            "salvo que el usuario pida explícitamente comida o entrenamiento en este mismo mensaje.\n"
-            "• Si el usuario pregunta '¿puedo comer/tomar X?', 'puedo comer X', '¿es saludable X?', '¿me hace daño X?': "
-            "PRIMERO revisa su perfil dietético (DIETA y CONDICIONES CLÍNICAS del contexto). "
-            "Si el alimento es incompatible con su dieta (vegano/vegetariano no puede comer carne, "
-            "diabético no puede comer azúcar, etc.) → díselo DIRECTAMENTE: 'No, la [carne/etc.] no es compatible "
-            "con tu perfil [vegano/etc.]'. LUEGO explica por qué (el alimento es de origen animal, contiene azúcar, etc.) "
-            "y si quiere proteína/energía equivalente ofrece UNA alternativa vegetal/adecuada en texto, SIN tarjetas RECIPE. "
-            "Si el alimento SÍ es compatible: responde con calorías aproximadas y si encaja en su objetivo actual. "
-            "NUNCA recomiendes un alimento que viole las restricciones del perfil, aunque el usuario lo pida.\n"
-            "• Si el usuario pregunta sobre parámetros de ejercicio ('qué peso para X', 'cuántas series', "
-            "'puedo hacer X con lesión Y', 'es malo hacer X teniendo Z'): "
-            "PRIMERO revisa su perfil (peso corporal, nivel de actividad, condiciones médicas/lesiones del contexto). "
-            "Responde ESPECÍFICAMENTE: para peso recomendado usa % del peso corporal o regla de progresión "
-            "(ej. '60-70% de tu 1RM estimado'); para lesiones indica qué movimientos EVITAR y qué sustitutos usar; "
-            "para series/reps usa las guías de su perfil de adherencia (A/B/C). "
-            "NO generes una rutina completa — solo responde la duda puntual. "
-            "SIN tarjetas [CALOFIT_HEADER] de ejercicios salvo que el usuario pida una rutina explícitamente.\n"
-            "• Si no entiendes o el mensaje es muy ambiguo: dilo en una frase natural "
-            "(ej. \"No estoy seguro de entenderte bien\"), reformula en tus palabras lo que crees que quiso decir "
-            "y ofrece como máximo 2 interpretaciones concretas en una sola línea (¿querías A o B?). "
-            "No inventes recetas ni rutinas completas si no está claro el pedido."
+            "\n\n══ FUNCIÓN DEL ASISTENTE (MODO CONVERSACIONAL) ══\n"
+            "Responde como un coach amigo: directo, cálido, MUY BREVE.\n\n"
+            "⛔ REGLA #1 — LONGITUD MÁXIMA ABSOLUTA: 2 frases. Máximo 50 palabras en total.\n"
+            "  Cuenta tus palabras. Si llegas a 51, borra hasta quedarte en 50 o menos.\n"
+            "  PROHIBIDO: párrafos largos, listas, explicaciones extensas, múltiples puntos.\n\n"
+            "⛔ REGLA #2 — CIERRE SIN PREGUNTA: la última frase NUNCA es una pregunta.\n"
+            "  PROHIBIDO terminar con '¿...?' de ningún tipo.\n"
+            "  Termina siempre con afirmación, dato concreto o recomendación corta.\n\n"
+            "⛔ REGLA #3 — SIN TAGS: NO escribas [CALOFIT_INTENT], [CALOFIT_HEADER] ni ningún corchete.\n\n"
+            "PLANTILLA SEGÚN TIPO DE PREGUNTA:\n"
+            "• '¿puedo comer X?' → '[Sí/No], [razón en 5 palabras]. [alternativa o tip en 10 palabras].'\n"
+            "  Ejemplo: 'No, el pollo no es vegano. Prueba con tofu o lentejas que tienen buena proteína.'\n"
+            "• '¿puedo trotar/nadar/correr?' → '[Sí/claro/depende]. [beneficio o condición en 10 palabras].'\n"
+            "  Ejemplo: 'Claro, el trote mejora el cardio. Empieza 20 min a ritmo cómodo.'\n"
+            "• Saludo / respuesta corta → 1 frase amigable. Sin preguntas de vuelta.\n"
+            "• Consulta de parámetros de ejercicio → dato puntual + tip. Sin tarjetas.\n"
         )
 
     instrucciones = {
         RECOMENDAR_NUTRICION: (
             "\n\n══ FUNCIÓN ACTUAL (OBLIGATORIA, ÚNICA) ══\n"
             "FUNCION: RECOMENDAR_NUTRICIÓN.\n"
+            "🚨 ANTES DE GENERAR CUALQUIER PLATO — LEE ESTO:\n"
+            "• Revisa DIETA del perfil (bloque ALERGIAS/DIETA/CONDICIONES arriba).\n"
+            "• Si DIETA = 'Vegano': PROHIBIDO ABSOLUTO en TODOS los platos: carne, res, pollo, pechuga, cerdo, "
+            "pato, pavo, pescado, mariscos, huevo, leche, queso, yogur, mantequilla. "
+            "SOLO ingredientes 100% vegetales. Verifica cada ingrediente de cada plato antes de escribirlo.\n"
+            "• Si DIETA = 'Vegetariano': PROHIBIDO: carne, pollo, pescado, mariscos. Huevos y lácteos permitidos.\n"
+            "• kcal por opción ≤ kcal RESTANTES del día (ver STATUS DEL DÍA → Restante). "
+            "Si restante=648 kcal, NINGUNA opción puede superar 648 kcal.\n"
+            "• INCUMPLIR CUALQUIERA DE ESTAS REGLAS ES ERROR GRAVE — invalida toda la respuesta.\n"
             "• DISEÑO ÚNICO: todas las opciones (2–3) con la MISMA plantilla CALOFIT, en este orden por opción:\n"
             "  [CALOFIT_HEADER]…[/CALOFIT_HEADER] → [CALOFIT_JUSTIF]…[/CALOFIT_JUSTIF] → [CALOFIT_LIST]…[/CALOFIT_LIST] → "
             "[CALOFIT_ACTION]…[/CALOFIT_ACTION] → [CALOFIT_STATS]…[/CALOFIT_STATS].\n"
-            "• TEXTO CONVERSACIONAL OBLIGATORIO — escríbelo como UNA sola frase completa que combine TODO:\n"
-            "  1) El momento del día actual (usa el bloque «MOMENTO DEL DÍA» del contexto: desayuno/almuerzo/cena/merienda)\n"
-            "  2) Las calorías restantes del día (usa datos de «PROGRESO DEL DÍA» del contexto)\n"
-            "  3) Las condiciones del perfil relevantes (diabetes, vegano, objetivo, etc.)\n"
-            "  4) Por qué esas condiciones influyen en las opciones elegidas\n"
-            "  FORMATO CORRECTO: 'Para tu [momento], te faltan X kcal. [Condición/objetivo] → elegí [característica].'\n"
-            "  EJEMPLOS CORRECTOS:\n"
-            "  - Desayuno: 'Para tu desayuno, te faltan 2096 kcal. Como tienes diabetes y sigues dieta vegana, elegí "
-            "platos altos en proteína vegetal y carbos de bajo índice glucémico para completar tu balance.'\n"
-            "  - Almuerzo: 'Para tu almuerzo de hoy, aún tienes 1500 kcal disponibles. Con tu objetivo de ganar masa, "
-            "estas opciones altas en proteína y carbohidratos complejos te ayudarán a llegar a tu meta.'\n"
-            "  - Cena: 'Para tu cena, te quedan 450 kcal. Dado que tienes hipertensión, elegí opciones bajas en sodio "
-            "y ligeras para no pasarte de tu límite calórico.'\n"
-            "  - Snack: 'Para tu snack de la mañana, elegí opciones de 100–250 kcal que te sostendrán hasta el almuerzo "
-            "sin elevar el azúcar en sangre, considerando tu diabetes y dieta vegana.'\n"
-            "  PROHIBIDO: texto genérico sin datos del día, sin mencionar el momento del día, sin mencionar condiciones "
-            "del perfil, o que repita solo el objetivo sin los números reales.\n"
-            "  PROHIBIDO para snack: mencionar el déficit calórico total del día (ej: 'te faltan 2355 kcal').\n"
+            "• TEXTO CONVERSACIONAL ANTES DE LAS TARJETAS — OBLIGATORIO y NATURAL:\n"
+            "  Escribe 1-2 frases que combinen de forma FLUIDA (no como plantilla):\n"
+            "    - El momento del día (desayuno/almuerzo/cena/snack del contexto «MOMENTO DEL DÍA»)\n"
+            "    - Las kcal disponibles (de «PROGRESO DEL DÍA» → Restante)\n"
+            "    - Las condiciones del perfil relevantes SI son importantes para las opciones\n"
+            "  CLAVE: varía el inicio y el tono. NO uses siempre el mismo patrón.\n"
+            "  EJEMPLOS de cómo puede sonar (NO los copies literalmente, varía):\n"
+            "  - 'Todavía tienes 1500 kcal para tu almuerzo. Pensé en opciones que te llenan bien sin pasarte.'\n"
+            "  - 'Para el desayuno de hoy te quedan 2000 kcal. Con tu objetivo de ganar masa, estos platos te vienen perfectos.'\n"
+            "  - '450 kcal para la cena — suficiente para algo rico y ligero. Acá van mis sugerencias:'\n"
+            "  - 'Buena pregunta. Para tu snack de ahora te recomiendo algo que te sostenga hasta la cena sin pasarte:'\n"
+            "  - 'Teniendo diabetes, elegí opciones de bajo índice glucémico para tu almuerzo. Te quedan 800 kcal:'\n"
+            "  PROHIBIDO: texto genérico sin datos reales, o que solo repita el objetivo sin números.\n"
+            "  PROHIBIDO para snack: mencionar el déficit total del día (ej: 'te faltan 2355 kcal').\n"
             "• [CALOFIT_JUSTIF] OBLIGATORIO: 1 frase corta vinculando el plato AL DÉFICIT Y CONDICIONES del día "
             "(ej. 'Cubre ~35g de proteína vegetal que te faltan hoy, apto para diabetes', "
             "'Carbos complejos de bajo índice glucémico — ideal para diabetes y tus X kcal restantes'). "
@@ -457,6 +494,13 @@ def bloque_prompt_modo_funcion(modo: str) -> str:
             "• EJEMPLO INCORRECTO (NUNCA hagas esto):\n"
             "Aquí opciones: Tortilla de Huevo 2 huevos (140 kcal) 2 panes (160 kcal)\n"
             "[CALOFIT_HEADER]Sugerencia 1[/CALOFIT_HEADER] ← PROHIBIDO: nombre genérico y opción anterior en texto libre\n"
+            "• ⚠️ LÍMITE CALÓRICO ESTRICTO POR OPCIÓN: antes de escribir cada [CALOFIT_STATS], "
+            "suma las kcal de todos los ingredientes del [CALOFIT_LIST]. "
+            "Si esa suma supera las kcal RESTANTES del día (STATUS DEL DÍA → Restante), "
+            "REDUCE las porciones o cambia el plato hasta que la suma sea ≤ Restante. "
+            "NUNCA muestres una opción cuyas kcal totales superen el Restante. "
+            "Ejemplo: si Restante=648 kcal, el total de ingredientes debe ser ≤648 kcal. "
+            "Si Restante<150 kcal, sugiere solo fruta pequeña, infusión o snack mínimo.\n"
             "• [CALOFIT_LIST] obligatorio: 4–8 líneas, una por ingrediente, con gramos y SOLO kcal entre paréntesis. "
             "  Ejemplo: \"150g pechuga de pollo (240 kcal)\". PROHIBIDO meter macros por ingrediente (ej. \"37g proteína\"). "
             "[CALOFIT_STATS] obligatorio en una sola línea: P: Xg | C: Yg | G: Zg | Cal: Wkcal. "

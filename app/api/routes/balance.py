@@ -117,9 +117,8 @@ async def obtener_balance_hoy(
             "WHERE client_id = :cid AND date(created_at) = :hoy"
         ), {"cid": cliente.id, "hoy": hoy}).scalar() or 0)
 
-    # Restan = Meta − Consumido (la meta ya incluye el factor de actividad;
-    # sumar quemadas doblaría el ejercicio y rompería la coherencia con el % mostrado)
-    calorias_restantes = objetivo_diario - calorias_consumidas
+    # Restan = Meta − Consumido + Quemadas
+    calorias_restantes = objetivo_diario - calorias_consumidas + calorias_quemadas
     
     # Obtener preferencias de alimentos registrados hoy (como proxy de registros)
     from app.models.preferencias import PreferenciaAlimento, PreferenciaEjercicio

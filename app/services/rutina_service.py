@@ -208,6 +208,10 @@ def _consultar_ejercicios(
         WHERE grupo_padre IN ({placeholders_zonas})
           AND nivel       IN ({placeholders_niveles})
           AND tipo        NOT IN ({placeholders_excl})
+          AND id NOT IN (
+            'huayno_zapateo', 'pichanga_futbol', 'voley_calle',
+            'trote_ligero', 'subir_escaleras_cerro'
+          )
         ORDER BY RANDOM()
         LIMIT :lim
     """), params).fetchall()

@@ -44,7 +44,10 @@ class RegistroManualAlimentoRequest(BaseModel):
 
 
 class CalcularEjercicioRequest(BaseModel):
-    texto: str
+    nombre: str
+    series: int = 3
+    reps:   int = 10
+    peso_kg: float = 0.0
 
 
 class RegistroRutinaManualRequest(BaseModel):
@@ -145,6 +148,99 @@ async def registro_manual_alimento(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class AlimentoDirectoItem(BaseModel):
+    nombre: str
+    gramos: float
+    kcal: float
+    proteinas_g: float
+    carbohidratos_g: float
+    grasas_g: float
+
+
+class RegistroDirectoRequest(BaseModel):
+    alimentos: list[AlimentoDirectoItem]
+    texto_original: str = ""
+
+
+@router.post("/registrar-directo")
+async def registrar_macros_directos(
+    body: RegistroDirectoRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Registro directo con macros pre-calculados desde el Registro Inteligente.
+    NO re-estima — usa exactamente los valores calculados en el preview.
+    Garantiza consistencia entre lo que el usuario vio y lo que se guarda.
+    """
+    from app.models.client import Client
+    from app.models.historial import ProgresoCalorias
+    from app.models.comida_registro import ComidaRegistro
+    from app.core.utils import get_peru_date
+    from sqlalchemy import func
+
+    perfil = db.query(Client).filter(Client.email.ilike(current_user.email)).first()
+    if not perfil:
+        raise HTTPException(status_code=404, detail="Perfil no encontrado")
+
+    hoy = get_peru_date()
+    kcal_total  = round(sum(a.kcal          for a in body.alimentos), 1)
+    prot_total  = round(sum(a.proteinas_g   for a in body.alimentos), 1)
+    carb_total  = round(sum(a.carbohidratos_g for a in body.alimentos), 1)
+    grasa_total = round(sum(a.grasas_g      for a in body.alimentos), 1)
+
+    try:
+        # 1. Actualizar progreso_calorias
+        prog = db.query(ProgresoCalorias).filter(
+            ProgresoCalorias.client_id == perfil.id,
+            ProgresoCalorias.fecha == hoy,
+        ).first()
+        if prog:
+            prog.calorias_consumidas      = int((prog.calorias_consumidas or 0)      + kcal_total)
+            prog.proteinas_consumidas     = round((prog.proteinas_consumidas or 0)   + prot_total, 1)
+            prog.carbohidratos_consumidos = round((prog.carbohidratos_consumidos or 0) + carb_total, 1)
+            prog.grasas_consumidas        = round((prog.grasas_consumidas or 0)      + grasa_total, 1)
+        # Si no hay progreso aún no pasa nada — el balance reflejará cuando haga consulta
+
+        # 2. Insertar cada ingrediente en comida_registros
+        for item in body.alimentos:
+            db.add(ComidaRegistro(
+                client_id=perfil.id,
+                fecha=hoy,
+                nombre_alimento=item.nombre,
+                kcal=item.kcal,
+                proteina_g=item.proteinas_g,
+                carbohidratos_g=item.carbohidratos_g,
+                grasas_g=item.grasas_g,
+                tipo_resolucion="manual_exacto",
+                confianza=1.0,
+                texto_original=body.texto_original[:490] if body.texto_original else "",
+            ))
+
+        db.commit()
+
+        return {
+            "success": True,
+            "mensaje": f"✅ Registré {len(body.alimentos)} ingrediente(s) — {round(kcal_total)} kcal totales.",
+            "datos": {
+                "nombre": " + ".join(a.nombre for a in body.alimentos[:3]) + (f" y {len(body.alimentos)-3} más" if len(body.alimentos) > 3 else ""),
+                "alimentos_lista": [a.nombre for a in body.alimentos],
+                "calorias": kcal_total,
+                "proteinas_g": prot_total,
+                "carbohidratos_g": carb_total,
+                "grasas_g": grasa_total,
+            },
+            "balance_actualizado": {
+                "consumido": round(float(prog.calorias_consumidas if prog else kcal_total), 1),
+                "quemado": round(float(prog.calorias_quemadas if prog else 0), 1),
+            },
+        }
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/calcular-ejercicio")
 async def calcular_ejercicio(
     body: CalcularEjercicioRequest,
@@ -153,7 +249,10 @@ async def calcular_ejercicio(
 ):
     try:
         return await asistente_service.calcular_ejercicio_manual(
-            texto=body.texto,
+            nombre=body.nombre,
+            series=body.series,
+            reps=body.reps,
+            peso_kg=body.peso_kg,
             db=db,
             current_user=current_user,
         )

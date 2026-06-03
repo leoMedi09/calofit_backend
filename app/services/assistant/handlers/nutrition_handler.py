@@ -79,24 +79,31 @@ class NutritionHandler(BaseHandler):
         mensaje: str,
         contexto: Dict[str, Any],
     ) -> Dict[str, Any]:
-        perfil = contexto.get("perfil", {})
-        progreso = contexto.get("progreso_hoy", {})
+        perfil    = contexto.get("perfil", {})
+        progreso  = contexto.get("progreso_hoy", {})
         kcal_cons = progreso.get("kcal_consumidas", 0)
         kcal_obj  = self._kcal_objetivo(contexto)
-        deficit   = kcal_obj - kcal_cons
+        restantes = max(0, kcal_obj - kcal_cons)
+
+        condiciones = perfil.get("condiciones_medicas", []) or []
+        lista_negra = perfil.get("lista_negra", []) or []
 
         from app.services.ai.prompts.system_prompts import SystemPrompts
+        from app.services.assistant.handlers.integrated_handler import IntegratedHandler
         perfil_ml  = contexto.get("perfil_ml", "PERFIL_B")
         tono       = self.ml.tono_para_perfil(perfil_ml) if self.ml else ""
         system     = SystemPrompts.con_perfil(perfil_ml, tono)
+        bloque_dieta = IntegratedHandler._bloque_restricciones(condiciones, lista_negra)
+        if bloque_dieta:
+            system = system + "\n\n" + bloque_dieta
 
         contexto_str = (
             f"Hoy ha consumido {kcal_cons:.0f} kcal de {kcal_obj:.0f} kcal objetivo. "
-            f"Déficit: {deficit:.0f} kcal."
+            f"Calorías disponibles: {restantes:.0f} kcal."
         )
         prompt = f"{contexto_str}\n\nPregunta del cliente: {mensaje}"
 
-        texto = await self._texto_llm(prompt=prompt, system=system, max_tokens=350)
+        texto = await self._texto_llm(prompt=prompt, system=system, max_tokens=180)
         if not texto:
             texto = (
                 f"Llevas {kcal_cons:.0f} kcal de {kcal_obj:.0f} kcal objetivo hoy. "
@@ -104,3 +111,4 @@ class NutritionHandler(BaseHandler):
             )
 
         return ResponseParser.texto(mensaje=ResponseParser.limpiar_texto(texto))
+

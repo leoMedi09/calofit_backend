@@ -2584,19 +2584,18 @@ async def procesar_secciones_comida(
                 from unicodedata import normalize as _unorm
                 import unicodedata as _ud
                 _nom_reco = _unorm("NFC", nombre_limpio.lower().strip())
-                set_cached(
-                    f"reco_macros:{_perfil_id}:{_nom_reco}",
-                    {
-                        "calorias":        round(_kcal_final, 1),
-                        "proteinas_g":     round(_prot_final, 1),
-                        "carbohidratos_g": round(_carb_final, 1),
-                        "grasas_g":        round(_gras_final, 1),
-                        "nombre":          nombre_limpio,
-                    },
-                    ttl_seconds=86400,  # 24h
-                )
-            except Exception:
-                pass
+                _cache_key = f"reco_macros:{_perfil_id}:{_nom_reco}"
+                _cache_val = {
+                    "calorias":        round(_kcal_final, 1),
+                    "proteinas_g":     round(_prot_final, 1),
+                    "carbohidratos_g": round(_carb_final, 1),
+                    "grasas_g":        round(_gras_final, 1),
+                    "nombre":          nombre_limpio,
+                }
+                set_cached(_cache_key, _cache_val, ttl_seconds=86400)
+                logger.info("[reco_macros] SET key='%s' kcal=%.1f", _cache_key, _kcal_final)
+            except Exception as _e_cache:
+                logger.warning("[reco_macros] Error al guardar caché: %s", _e_cache)
         # Solo guardar en recent_meals si el nombre es un plato real (no genérico).
         # Nombres como "Sugerencia 1" contaminan la caché y causan lookups incorrectos.
         if not _RE_NOMBRE_GENERICO.match(_norm_nombre_plato(nombre_limpio)):

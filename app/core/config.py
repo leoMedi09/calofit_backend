@@ -21,6 +21,7 @@ class Settings:
                 stacklevel=2,
             )
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     # Timeout HTTP hacia api.groq.com (lectura; prompts largos + 1200 tokens pueden tardar).
     GROQ_TIMEOUT_SEC: float = float(os.getenv("GROQ_TIMEOUT_SEC", "180"))

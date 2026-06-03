@@ -35,6 +35,8 @@ try:
 except ImportError:
     AsyncGroq = None
 
+genai = None  # Gemini eliminado — solo Groq
+
 try:
     import skfuzzy as fuzz
     from skfuzzy import control as ctrl
@@ -85,20 +87,20 @@ class IAService:
     """Motor de IA de CaloFit — Simplificado para Tesis (Random Forest + KNN + Llama-3)."""
 
     def __init__(self):
-        # Groq / Llama-3 (Motor de Lenguaje Natural)
+        # Groq — motor principal (14,400 req/día gratis, 30 RPM)
+        self.groq_client = None
         if AsyncGroq and getattr(settings, "GROQ_API_KEY", None):
-            _t = float(getattr(settings, "GROQ_TIMEOUT_SEC", 180.0) or 180.0)
-            _retries = int(getattr(settings, "GROQ_MAX_RETRIES", 2) or 2)
-            # connect algo generoso en móvil/WiFi inestable; read acorde a prompts grandes.
             self.groq_client = AsyncGroq(
                 api_key=settings.GROQ_API_KEY,
-                timeout=httpx.Timeout(_t, connect=30.0),
-                max_retries=max(0, _retries),
+                timeout=httpx.Timeout(180.0, connect=30.0),
+                max_retries=2,
             )
+            print("✅ Groq Llama-3.3-70B: Motor principal de IA inicializado.")
         else:
-            self.groq_client = None
-            # Evitar emojis aquí: en Windows cp1252 puede lanzar UnicodeEncodeError en tests/CLI.
-            print("Groq no inicializado - modo offline activo.")
+            print("⚠️  Groq no configurado.")
+
+        self.gemini_model = None
+        self.gemini_model_fast = None
 
         # FatSecret (Respaldo de macros)
         self._fs_client_id     = getattr(settings, "FATSECRET_CLIENT_ID", None)
@@ -223,9 +225,7 @@ class IAService:
 
     @staticmethod
     def normalizar_etiqueta_modo_llm(raw: str) -> Optional[str]:
-        """
-        Extrae una etiqueta válida de ``MODOS_ASISTENTE`` desde texto libre del modelo.
-        """
+        """Extrae etiqueta válida del LLM — también detecta equivalentes semánticos."""
         from app.services.asistente_modos import MODOS_ASISTENTE
 
         t = (raw or "").strip().lower()
@@ -233,8 +233,32 @@ class IAService:
             return None
         t = re.sub(r"^```[a-z0-9]*\s*", "", t, flags=re.IGNORECASE)
         t = re.sub(r"\s*```\s*$", "", t).strip()
+
+        # Detección directa de etiquetas exactas
         for modo in sorted(MODOS_ASISTENTE, key=len, reverse=True):
             if re.search(rf"(?<![a-z0-9_]){re.escape(modo)}(?![a-z0-9_])", t, re.IGNORECASE):
+                return modo
+
+        # Mapeo semántico: palabras que el LLM usa en vez de la etiqueta exacta
+        _SEMANTICO = {
+            "registrar_nutricion": [
+                "registro", "registrar", "comida", "comer", "ingesta", "alimento",
+                "nutricion", "nutrición", "log", "anotar", "apuntar",
+            ],
+            "recomendar_nutricion": [
+                "recomienda", "recomendacion", "recomendación", "sugerencia",
+                "opciones", "qué comer", "que comer", "menú", "menu",
+            ],
+            "registrar_ejercicio": [
+                "ejercicio registrado", "actividad física", "actividad fisica",
+                "entrenamiento registrado", "cardio", "workout",
+            ],
+            "recomendar_ejercicio": [
+                "rutina", "ejercicios recomendados", "plan de ejercicio",
+            ],
+        }
+        for modo, palabras in _SEMANTICO.items():
+            if any(p in t for p in palabras):
                 return modo
         return None
 
@@ -254,28 +278,95 @@ class IAService:
         if len(m) < 2:
             return None
         prompt = (
-            "Clasifica el mensaje del usuario en EXACTAMENTE UNA etiqueta. "
-            "Responde solo con esa etiqueta en minúsculas, sin puntuación ni explicación.\n"
-            "Etiquetas permitidas:\n"
-            "recomendar_nutricion | registrar_nutricion | recomendar_ejercicio | registrar_ejercicio | otro\n\n"
-            "Guía:\n"
-            "- recomendar_nutricion: ideas de comida, recetas, qué comer/cenar, menú.\n"
-            "- registrar_nutricion: ya comió / anotar comida (a veces con cantidad).\n"
-            "- recomendar_ejercicio: rutina, qué ejercicio, zona muscular, gym.\n"
-            "- registrar_ejercicio: ya entrenó, series, minutos de cardio.\n"
-            "- otro: saludo, gracias, duda general, mensaje ambiguo o no encaja en las otras.\n\n"
-            f"Mensaje:\n{m[:600]}"
+            "Eres el clasificador de intenciones de CaloFit, app de nutrición y ejercicio en Perú.\n"
+            "Responde ÚNICAMENTE con una de estas 5 palabras (nada más, sin explicación):\n"
+            "  registrar_nutricion | recomendar_nutricion | registrar_ejercicio | recomendar_ejercicio | otro\n\n"
+            "━━ DEFINICIONES ━━\n"
+            "registrar_nutricion — el usuario INFORMA que ya comió/bebió (tiempo pasado)\n"
+            "  Señal clave: verbos pasados (comí, tomé, desayuné, almorcé, cené, bebí, me jalé, me tomé)\n"
+            "  ✓ 'comí arroz con pollo'  ✓ 'desayuné avena con leche'  ✓ 'me jalé un cuy frito con papas'\n"
+            "  ✓ 'almorcé lomo saltado'  ✓ 'tomé un batido después del gym'  ✓ 'cené menestra con arroz'\n\n"
+            "recomendar_nutricion — el usuario PIDE ideas de qué comer (futuro/duda)\n"
+            "  Señal clave: preguntas o expresión de hambre/duda sobre alimentos\n"
+            "  ✓ '¿qué ceno?'  ✓ 'tengo hambre'  ✓ 'dame opciones para almorzar'  ✓ 'qué me recomiendas'\n\n"
+            "registrar_ejercicio — el usuario INFORMA que ya entrenó (tiempo pasado)\n"
+            "  Señal clave: verbos pasados de ejercicio (hice, entrené, corrí, caminé, nadé, fui al gym)\n"
+            "  ✓ 'hice press banca 3x10 con 70 kilos'  ✓ 'entrené piernas hoy'\n"
+            "  ✓ 'corrí 5km en el parque'  ✓ 'fui al gym'  ✓ 'acabo de terminar mi rutina de pecho'\n"
+            "  ✓ 'hola amigo tiré sentadillas con 80kg tres por diez'  ✓ 'hice tres series de dominadas'\n\n"
+            "recomendar_ejercicio — el usuario PIDE ejercicios o EXPRESA deseo de entrenar\n"
+            "  Señal clave: petición de rutina, o 'quiero/necesito + entrenar'\n"
+            "  ✓ 'dame rutina de pecho'  ✓ 'quiero hacer ejercicio para bajar de peso'\n"
+            "  ✓ 'qué ejercicios hago hoy'  ✓ 'arma mi entrenamiento'  ✓ 'necesito empezar a entrenar'\n\n"
+            "otro — preguntas de permiso, saludos, consultas informativas, progreso del día\n"
+            "  Señal clave: 'puedo + infinitivo', 'se puede', 'es bueno/malo', '¿cómo voy?', saludo\n"
+            "  ✓ 'puedo ir a nadar'          → otro  (permiso, NO registro)\n"
+            "  ✓ 'puedo realizar un trote'   → otro  (infinitivo = intención futura, no acción pasada)\n"
+            "  ✓ 'puedo trotar con lesión'   → otro\n"
+            "  ✓ 'se puede nadar todos los días' → otro\n"
+            "  ✓ 'es bueno correr en ayunas' → otro\n"
+            "  ✓ 'puedo comer carbohidratos de noche' → otro\n"
+            "  ✓ '¿cuánto llevo hoy?'        → otro\n"
+            "  ✓ 'hola, cómo estás'          → otro\n"
+            "  ✓ 'cuántas calorías tiene una palta' → otro\n\n"
+            "━━ REGLAS CRÍTICAS ━━\n"
+            "R1. INFINITIVO ≠ PASADO: 'puedo realizar/trotar/nadar' (infinitivo) = otro.\n"
+            "    'realicé/corrí/nadé' (pretérito) = registrar_ejercicio.\n"
+            "R2. MODAL = PERMISO: cualquier 'puedo/se puede/podría/es posible + verbo' = otro.\n"
+            "R3. MEZCLA saludo+acción: 'hola amigo hoy hice press' → clasifica por la ACCIÓN (registrar_ejercicio).\n"
+            "R4. VOZ: ignora muletillas (mmm, este, pues, o sea) y números en palabras (setenta kilos).\n"
+            "R5. AMBIGUO: si no estás seguro, prefiere 'otro' antes que un registro incorrecto.\n\n"
+            f"Mensaje a clasificar: \"{m[:500]}\"\n"
+            "Respuesta (una sola palabra exacta):"
         )
-        raw = await self._llamar_groq(prompt, max_tokens=48, temp=0.05)
+        # Clasificación con 70B — salida ~1 token, ~400 tokens totales por llamada
+        # Consume ~400/6000 TPM del límite 70B → ~15 clasificaciones/min (suficiente para demo)
+        raw = await self._llamar_groq(prompt, max_tokens=10, temp=0.0,
+                                      model="llama-3.3-70b-versatile")
+        if self.es_fallo_respuesta_llm(raw):
+            # Fallback al 8B si el 70B falla (rate limit, timeout)
+            raw = await self._llamar_groq(prompt, max_tokens=10, temp=0.0)
         if self.es_fallo_respuesta_llm(raw):
             return None
         return IAService.normalizar_etiqueta_modo_llm(raw)
 
-    async def _llamar_groq(self, prompt: str, max_tokens: int = 800, temp: float = 0.7) -> str:
-        if not self.groq_client: return "[Modo Offline]"
+    async def _llamar_gemini(self, prompt: str, fast: bool = False) -> str:
+        """Llama a Gemini 2.0 Flash."""
+        if not self.gemini_model:
+            return "[Modo Offline — configura GEMINI_API_KEY]"
+        try:
+            loop = asyncio.get_event_loop()
+            resp = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: self.gemini_model.generate_content(prompt)),
+                timeout=30.0
+            )
+            return resp.text.strip()
+        except asyncio.TimeoutError:
+            return FALLBACK_MSG_IA_TIMEOUT
+        except Exception as e:
+            err = str(e).lower()
+            if "429" in err or "quota" in err or "exhausted" in err:
+                print(f"[Gemini] Cuota agotada — espera 1 minuto: {e}")
+                return FALLBACK_MSG_RATE_LIMIT
+            if "timeout" in err:
+                return FALLBACK_MSG_IA_TIMEOUT
+            print(f"[Gemini] Error inesperado: {e}")
+            return FALLBACK_MSG_IA_TIMEOUT
+
+    async def _llamar_groq(self, prompt: str, max_tokens: int = 800, temp: float = 0.7,
+                           model: str | None = None) -> str:
+        """
+        Motor de IA con selección de modelo:
+        - llama-3.1-8b-instant (default): 200,000 TPM — respuestas principales, NLP, macros
+        - llama-3.3-70b-versatile (model param): clasificación de intención solamente
+          (~10 tokens output → ~400 tokens por llamada → ~15 clasificaciones/min)
+        """
+        if not self.groq_client:
+            return "[Modo Offline]"
+        modelo = model or "llama-3.1-8b-instant"
         try:
             r = await self.groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+                model=modelo,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
                 temperature=temp,
@@ -283,11 +374,9 @@ class IAService:
             return r.choices[0].message.content.strip()
         except Exception as e:
             err = str(e).lower()
-            if "timed out" in err or "timeout" in err or isinstance(e, (httpx.ReadTimeout, httpx.ConnectTimeout)):
+            if "timed out" in err or "timeout" in err:
                 return FALLBACK_MSG_IA_TIMEOUT
-            # Rate limit de Groq (429) — no exponer el error técnico al usuario
-            if "429" in err or "rate_limit" in err or "rate limit" in err or "token" in err and "limit" in err:
-                print(f"[Groq] Rate limit alcanzado: {e}")
+            if "429" in err or "rate_limit" in err or "rate limit" in err:
                 return FALLBACK_MSG_RATE_LIMIT
             return f"[Error: {e}]"
 
