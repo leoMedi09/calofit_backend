@@ -280,6 +280,17 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
     if rec_ex and rec_nut:
         return OTRO
 
+    # Si contiene intenciones claras de recetas o técnicas, forzar a OTRO
+    _RECETA_O_TECNICA = (
+        "como se hace", "como se prepara", "como hacer", "receta de", "como cocinar",
+        "ingredientes de", "preparacion de", "tecnica de", "como realizar",
+        "como ejecutar", "pasos para", "forma correcta", "preparar "
+    )
+    import unicodedata as _ud_rec
+    _mn_rec = "".join(c for c in _ud_rec.normalize("NFD", m) if _ud_rec.category(c) != "Mn")
+    if any(k in _mn_rec for k in _RECETA_O_TECNICA):
+        return OTRO
+
     inf = inferir_forzar_por_mensaje_usuario(mensaje)
     if inf == "comida":
         return RECOMENDAR_NUTRICION
@@ -347,6 +358,15 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
         "seria bueno ", "es recomendable ", "es posible ", "conviene ",
     )
     if any(_mn.startswith(p) or f" {p}" in _mn for p in _MODALES):
+        return OTRO
+
+    # ── Pre-check 2b: recetas y técnicas = SIEMPRE conversacional (OTRO) ─────────
+    _RECETA_O_TECNICA = (
+        "como se hace", "como se prepara", "como hacer", "receta de", "como cocinar",
+        "ingredientes de", "preparacion de", "tecnica de", "como realizar",
+        "como ejecutar", "pasos para", "forma correcta", "preparar "
+    )
+    if any(k in _mn for k in _RECETA_O_TECNICA):
         return OTRO
 
     # ── Pre-check 3: verbos de consumo pasado inequívocos ────────────────────────

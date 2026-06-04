@@ -684,9 +684,17 @@ async def respuesta_chat_llm(
         "como cocinar", "cómo cocinar",
     ))
     _es_tecnica = any(k in _m_lower for k in (
-        "tecnica de", "técnica de", "como hacer una", "cómo hacer una",
-        "como realizar", "cómo realizar", "como se hace una", "cómo se hace una",
-        "como ejecutar", "pasos para", "forma correcta",
+        "tecnica de", "técnica de",
+        "como hacer una", "cómo hacer una",
+        "como hacer el", "cómo hacer el",
+        "como hago el", "cómo hago el",
+        "como hago una", "cómo hago una",
+        "como se hace el", "cómo se hace el",
+        "como realizar", "cómo realizar",
+        "como ejecutar", "como ejecutar",
+        "pasos para", "forma correcta",
+        "explicame como", "explícame cómo",
+        "ensenme como", "enséñame cómo",
     ))
     # Detección de consulta calórica: "cuántas kcal tiene X", "cuánto tiene de X"
     # Para estas preguntas, calculamos con _PROMPT_COMIDA (mismo engine que registro)
