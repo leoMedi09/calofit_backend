@@ -81,6 +81,14 @@ def create_express_patient(
             detail="Este correo ya está registrado como staff en el sistema."
         )
 
+    # 1.5 Comprobar si el DNI ya existe
+    if db.query(Client).filter(Client.dni == client_data.dni).first():
+        raise HTTPException(
+            status_code=400,
+            detail="Este DNI ya está registrado como paciente en el sistema."
+        )
+
+
     # 2. Generar el usuario incompleto y vincular con Firebase
     try:
         # Importación rápida para evitar dependencias circulares
