@@ -325,7 +325,8 @@ class AsistenteService:
         _KW_ACCION  = ("comí", "comi", "hice", "fui al", "corrí", "corri",
                        "almorcé", "almorce", "desayuné", "desayune", "cené", "cene",
                        "registra", "anota", "tomé", "tome ", "bebí", "bebi",
-                       "entrené", "entrenei")
+                       "entrené", "entrenei",
+                       "correr", "trotar", "caminar", "nadar", "salí", "sali", "ejercicio", "entrenar")
         # Patrones de respuesta conversacional — NO son saludos aunque contengan "gracias"
         _KW_RESPUESTA = (
             "bien gracias", "sí gracias", "si gracias", "ok gracias",

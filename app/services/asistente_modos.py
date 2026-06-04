@@ -229,6 +229,9 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
         "nadé", "nade ", "pedalié", "pedalee",
         "terminé de entrenar", "termine de entrenar",
         "acabo de entrenar", "acabo de hacer ejercicio",
+        "sali a correr", "salí a correr", "sali a trotar", "salí a trotar",
+        "sali a caminar", "salí a caminar", "sali a entrenar", "salí a entrenar",
+        "correr durante", "trotar durante", "caminar durante",
     )
     if any(x in m for x in _EJERCICIO_REGISTRADO) and "?" not in m and fe >= fc:
         return REGISTRAR_EJERCICIO
@@ -313,7 +316,9 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
         _NO_SALUDO_PURO = (
             "comer", "cenar", "almorzar", "desayunar", "merendar", "comida", "cena", "almuerzo", "desayuno", "plato", "receta",
             "ejercicio", "entren", "rutina", "pecho", "espalda", "pierna", "hombro", "cardio", "gym", "gimnasio",
-            "dime", "puedo", "quiero", "sugier", "recomiend", "dame", "verdura", "hacer"
+            "dime", "puedo", "quiero", "sugier", "recomiend", "dame", "verdura", "hacer",
+            "correr", "corrí", "corri", "trotar", "troté", "trote", "caminar", "caminé", "camine",
+            "nadar", "nadé", "nade", "bicicleta", "salí", "sali", "pesa", "pesas", "pesos", "comi", "comí", "tomar", "tome", "tomé"
         )
         if any(k in _m for k in _NO_SALUDO_PURO):
             es_saludo = False
@@ -392,6 +397,9 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
         "hice remo", "hice jalon", "hice fondos", "hice cardio", "hice pesas", "hice ejercicio",
         "hice flexiones", "hice burpees", "hice abdominales", "termine de entrenar",
         "acabo de entrenar", "acabo de hacer ejercicio", "tire press",
+        "sali a correr", "salí a correr", "sali a trotar", "salí a trotar",
+        "sali a caminar", "salí a caminar", "sali a entrenar", "salí a entrenar",
+        "correr durante", "trotar durante", "caminar durante",
     )
     _tiene_ej = any(
         _mn.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", _mn)
