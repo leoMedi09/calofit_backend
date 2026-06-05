@@ -13,9 +13,42 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import unicodedata
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# ── Guardia anti-no-alimento ──────────────────────────────────────────────────
+# Capa 1: palabras que NUNCA son comida — bloqueo inmediato sin importar el verbo.
+#   Ejemplos: "pan con caca", "jugo de orina", "caldo de veneno", "pan con puchaina"
+_BLOQUEO_ABSOLUTO: frozenset[str] = frozenset({
+    # Desechos corporales
+    "caca", "orina", "excremento", "heces", "vomito", "feces", "moco",
+    # Sustancias peligrosas
+    "veneno", "toxico", "explosivo", "bomba", "gasolina", "cloro",
+    # Jerga / insultos peruanos y latinos (no son alimentos)
+    "puchaina", "pucha", "carajo", "mierda", "huevada", "wevada",
+    "cojuda", "cojudo", "idiota", "estupido", "imbecil", "pendejo",
+    "chingada", "verga", "puta", "cabron", "basura", "bosta",
+    # Palabras sin sentido en contexto de comida
+    "broma", "chiste", "jajaja", "jaja", "lol", "xd",
+})
+
+# Capa 2: palabras no-comestibles que se bloquean cuando van acompañadas
+# de un verbo explícito de ingesta ("quiero comer papel", "me como una piedra").
+_RE_INTENTO_COMER = re.compile(
+    r"\b(quiero\s+comer|quiero\s+tomar|voy\s+a\s+comer|voy\s+a\s+tomar|"
+    r"puedo\s+comer|puedo\s+tomar|me\s+voy\s+a\s+comer|me\s+como\s+un|"
+    r"me\s+como\s+una|me\s+como|registra\s+que\s+com[ií])\b",
+    re.IGNORECASE,
+)
+
+def _deaccent(s: str) -> str:
+    """Quita tildes para comparación con NO_ALIMENTOS (sin tildes)."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s)
+        if unicodedata.category(c) != "Mn"
+    )
 
 # Verbos de ingesta en pasado — redirigen al handler directo (sin LLM)
 # cuando el modo ya fue clasificado como REGISTRAR_NUTRICION.
@@ -342,6 +375,30 @@ class AsistenteService:
         )
         if not es_saludo:
             asyncio.create_task(self._analizar_salud_background(mensaje, perfil, db))
+
+        # ── Guardia anti-no-alimento (2 capas) ───────────────────────────────
+        _tokens_norm = set(_deaccent(msg_limpio).split())
+
+        # Capa 1: bloqueo absoluto — palabras que nunca son comida (caca, veneno, etc.)
+        _item_abs = next((t for t in _tokens_norm if t in _BLOQUEO_ABSOLUTO), None)
+
+        # Capa 2: no-alimentos + verbo explícito de ingesta (papel, madera, hierro...)
+        _item_verb = None
+        if not _item_abs and _RE_INTENTO_COMER.search(msg_limpio):
+            from app.services.nlp_food_extractor import NO_ALIMENTOS
+            _item_verb = next((t for t in _tokens_norm if t in NO_ALIMENTOS), None)
+
+        _item_no_comida = _item_abs or _item_verb
+        if _item_no_comida:
+            _resp = _build_response(
+                perfil, "CHAT", "OTRO",
+                calorias_meta, consumo_real, quemadas_real, plan_hoy_data,
+                f"'{_item_no_comida.capitalize()}' no es un alimento. "
+                f"Solo puedo ayudarte con comidas y bebidas reales. "
+                f"¿Qué comida o ejercicio puedo registrar por ti?"
+            )
+            _resp["_blocked"] = True  # señal para no guardar en historial BD
+            return _resp
 
         # Modo funcional + guard rails
         modo_funcion = await resolver_modo_funcion(self.ia, mensaje, es_saludo)

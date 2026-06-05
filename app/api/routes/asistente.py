@@ -67,26 +67,75 @@ class GuardarSugerenciaRequest(BaseModel):
     nota: str = ""
 
 
+# ── helpers de memoria conversacional ──────────────────────────────────────
+
+def _cargar_historial_bd(client_id: int, db: Session, limite: int = 14) -> list:
+    """Devuelve los últimos `limite` mensajes de chat_historial como lista [{role, content}]."""
+    from sqlalchemy import text as _t
+    rows = db.execute(_t(
+        "SELECT rol, contenido FROM chat_historial "
+        "WHERE client_id = :cid ORDER BY created_at DESC LIMIT :n"
+    ), {"cid": client_id, "n": limite}).fetchall()
+    # Viene en orden DESC, invertir para cronológico
+    return [{"role": r.rol, "content": r.contenido} for r in reversed(rows)]
+
+
+def _guardar_turno_bd(client_id: int, mensaje_user: str, texto_asistente: str, db: Session):
+    """Persiste un turno completo (user + assistant) en chat_historial."""
+    from sqlalchemy import text as _t
+    try:
+        db.execute(_t(
+            "INSERT INTO chat_historial (client_id, rol, contenido) VALUES (:cid, :rol, :cont)"
+        ), {"cid": client_id, "rol": "user", "cont": mensaje_user[:2000]})
+        db.execute(_t(
+            "INSERT INTO chat_historial (client_id, rol, contenido) VALUES (:cid, :rol, :cont)"
+        ), {"cid": client_id, "rol": "assistant", "cont": texto_asistente[:2000]})
+        # Mantener solo los últimos 100 mensajes por usuario (50 turnos)
+        db.execute(_t(
+            "DELETE FROM chat_historial WHERE client_id = :cid AND id NOT IN ("
+            "  SELECT id FROM chat_historial WHERE client_id = :cid "
+            "  ORDER BY created_at DESC LIMIT 100)"
+        ), {"cid": client_id})
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 @router.post("/consultar")
 async def consultar_asistente(
     request: ChatRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """
-    Chat principal del Asistente CaloFit para clientes.
-    Responde consultas de nutrición, recetas, rutinas y progreso diario.
-    """
+    """Chat principal con memoria conversacional persistida en BD."""
     try:
+        cliente = db.query(Client).filter(Client.email == current_user.email).first()
+
+        # Enriquecer historial: BD (sesiones anteriores) + sesión actual del frontend
+        historial_bd = _cargar_historial_bd(cliente.id, db) if cliente else []
+        historial_sesion = request.historial or []
+        # Combinar: historial BD como contexto base, sesión actual encima (sin duplicar)
+        historial_combinado = (historial_bd + historial_sesion)[-20:] if historial_bd else historial_sesion
+
         resultado = await asistente_service.consultar(
             mensaje=request.mensaje,
             db=db,
             current_user=current_user,
-            historial=request.historial,
+            historial=historial_combinado,
             contexto_manual=request.contexto_manual,
             override_ia=request.override_ia,
             consulta_id=request.consulta_id,
         )
+
+        # Persistir el nuevo turno en BD (no guardar turnos bloqueados por guardia)
+        if cliente and not resultado.get("_blocked"):
+            texto_resp = (
+                resultado.get("respuesta_estructurada", {}).get("texto_conversacional", "")
+                or resultado.get("respuesta", "")
+            )
+            if texto_resp:
+                _guardar_turno_bd(cliente.id, request.mensaje, texto_resp, db)
+
         return resultado
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -94,6 +143,31 @@ async def consultar_asistente(
         print(f"❌ ERROR EN /consultar: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/historial")
+async def obtener_historial_chat(
+    limite: int = 30,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Devuelve los últimos mensajes del chat para restaurar conversación entre sesiones."""
+    from sqlalchemy import text as _t
+    cliente = db.query(Client).filter(Client.email == current_user.email).first()
+    if not cliente:
+        return []
+    rows = db.execute(_t(
+        "SELECT rol, contenido, created_at FROM chat_historial "
+        "WHERE client_id = :cid ORDER BY created_at DESC LIMIT :n"
+    ), {"cid": cliente.id, "n": min(limite, 60)}).fetchall()
+    return [
+        {
+            "role": r.rol,
+            "content": r.contenido,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in reversed(rows)
+    ]
 
 
 @router.post("/log-inteligente")

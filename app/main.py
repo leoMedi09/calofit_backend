@@ -23,6 +23,20 @@ with engine.connect() as connection:
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS session_duration FLOAT DEFAULT 1.0;"))
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nutri_weekly_note TEXT;"))
         connection.execute(text("DROP TABLE IF EXISTS platos_recomendados CASCADE;"))
+        # Memoria conversacional persistida
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS chat_historial (
+                id SERIAL PRIMARY KEY,
+                client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+                rol VARCHAR(20) NOT NULL,
+                contenido TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+        """))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_chat_historial_client "
+            "ON chat_historial(client_id, created_at DESC)"
+        ))
         connection.commit()
         print("Migraciones manuales aplicadas correctamente.")
     except Exception as e:

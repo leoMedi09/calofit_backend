@@ -438,15 +438,22 @@ async def _buscar_o_crear_alimento_async(
         try:
             from app.services.ia_service import ia_engine
             prompt = (
-                f"Eres un nutricionista experto. Dame los macronutrientes por 100g de: '{nombre_es}'.\n"
-                f"Responde SOLO JSON válido:\n"
-                f'{{"calorias_100g":<n>,"proteina_100g":<n>,"carbohidratos_100g":<n>,"grasas_100g":<n>}}'
+                f"Eres un nutricionista experto. Evalúa si '{nombre_es}' es un alimento real comestible.\n"
+                f"Si NO es alimento real (jerga, insulto, objeto inanimado, palabra sin sentido culinario): "
+                f'responde exactamente: {{"es_alimento":false}}\n'
+                f"Si SÍ es alimento real, responde SOLO JSON con macros por 100g:\n"
+                f'{{"es_alimento":true,"calorias_100g":<n>,"proteina_100g":<n>,'
+                f'"carbohidratos_100g":<n>,"grasas_100g":<n>}}'
             )
-            resp = await ia_engine._llamar_groq(prompt=prompt, max_tokens=120, temp=0.1)
+            resp = await ia_engine._llamar_groq(prompt=prompt, max_tokens=150, temp=0.05)
             resp = re.sub(r"```(?:json)?", "", resp).strip().strip("`")
             m = re.search(r"\{.*\}", resp, re.DOTALL)
             if m:
                 data = json.loads(m.group(0))
+                # Groq confirmó que no es alimento → detener pipeline
+                if not data.get("es_alimento", True):
+                    logger.warning("Groq rechazó '%s' como no-alimento", nombre_es)
+                    return None
                 if float(data.get("calorias_100g", 0)) > 0:
                     macros = {
                         "calorias_100g":      round(float(data.get("calorias_100g", 0)), 1),
