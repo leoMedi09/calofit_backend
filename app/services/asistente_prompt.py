@@ -111,6 +111,34 @@ def construir_prompt_cliente(
             momento_comida, sugerencia_horaria = m, s
             break
 
+    # ── Detección de intención explícita del usuario (override del reloj) ──
+    # Si el usuario menciona "cenar" a las 3pm, tratarlo como cena, no almuerzo.
+    _msg_low_hora = mensaje_usuario.lower() if mensaje_usuario else ""
+    _INTENT_COMIDA = {
+        "CENA":     (["cenar", "cena", "noche"],
+                     "El usuario pidió CENA explícitamente. "
+                     "PROHIBIDO absolutamente: cebiches, arroces contundentes, lomos saltados, "
+                     "jalea, ají de gallina, seco. "
+                     "SOLO opciones ligeras de noche: ensaladas, sopas, pescado a la plancha, "
+                     "menestras con vegetales, causa pequeña, huevo. Máximo 520 kcal por plato."),
+        "DESAYUNO": (["desayunar", "desayuno", "mañana"],
+                     "El usuario pidió DESAYUNO. "
+                     "Opciones: avena, pan con huevo, tamalito, quinua, frutas, yogurt. "
+                     "PROHIBIDO: almuerzos pesados, cebiches, segundos de fondo. Máximo 480 kcal."),
+        "ALMUERZO": (["almorzar", "almuerzo", "mediodía", "mediodia"],
+                     "El usuario pidió ALMUERZO. "
+                     "Platos contundentes permitidos: seco, arroz con pollo, cebiche, lomo saltado, menú. "
+                     "Rango 400–900 kcal."),
+        "SNACK":    (["merienda", "snack", "media tarde", "media mañana", "antojo"],
+                     "El usuario pidió SNACK/MERIENDA. "
+                     "Solo opciones pequeñas: fruta, yogurt, canchita, sándwich pequeño. Máximo 300 kcal."),
+    }
+    for _momento_intent, (_keywords, _sugerencia_intent) in _INTENT_COMIDA.items():
+        if any(kw in _msg_low_hora for kw in _keywords):
+            momento_comida = _momento_intent
+            sugerencia_horaria = _sugerencia_intent
+            break
+
     bloque_hora = (
         f"\nMOMENTO DEL DÍA (hora Perú): {momento_comida} — reloj local {hora_txt}. "
         f"OBLIGATORIO para MODO RECIPE: las 2–3 opciones deben encajar con este momento. "
@@ -390,7 +418,8 @@ def construir_prompt_cliente(
                 if kw in msg_low:
                     ingrediente_clave = valor
                     break
-                
+
+            # momento_comida ya refleja la intención explícita del usuario (detectada al inicio).
             platos = rec.recomendar(
                 client_id=perfil.id,
                 deficit_kcal=hi_i,
@@ -635,9 +664,34 @@ def construir_prompt_cliente(
         f"{bloque_perfil_ml}{bloque_reco_ml}"
         f"{bloque_justificacion}"
         f"{bloque_meta_cumplida}"
+        "\n\n📋 HISTORIAL DE CONVERSACIÓN — USO ESTRICTAMENTE SILENCIOSO:"
+        "\n• El historial es SOLO contexto técnico de fondo. NUNCA lo menciones en tu respuesta."
+        "\n• FRASES ABSOLUTAMENTE PROHIBIDAS (cualquier variante):"
+        "\n  ✗ 'te hablé', 'te dije', 'te comenté', 'te expliqué', 'te mencioné'"
+        "\n  ✗ 'hemos hablado', 'hablamos antes', 'anteriormente', 'en nuestra conversación'"
+        "\n  ✗ 'recuerdas', '¿te acuerdas', 'como acordamos', 'como quedamos'"
+        "\n  ✗ 'nuestra última conversación', 'la última vez', 'antes te dije'"
+        "\n  ✗ 'recuerdo que', 'ya sé que', 'sé que antes'"
+        "\n• Responde SIEMPRE como si fuera el PRIMER mensaje del usuario. Sin referencias al pasado."
+        "\n• Si el usuario usa 'antes me dijiste' o 'recuerdas que', entonces SÍ puedes mencionar el historial brevemente."
         f"\nSTATUS DEL DÍA: Meta: {calorias_meta} kcal | Consumido: {consumo_real} kcal | "
         f"Restante: {restantes:.0f} kcal | Adherencia: {adherencia_pct:.0f}% | {mensaje_fuzzy}."
         "\n\nREGLAS DE INTENCIÓN Y FORMATO (OBLIGATORIO):"
+        "\n⛔ REGLA OFF-TOPIC (PRIORIDAD MÁXIMA — verificar PRIMERO):"
+        "\n   Si el mensaje NO está relacionado con nutrición, ejercicio, salud, alimentación o bienestar físico"
+        "\n   (ejemplos: política, tecnología, entretenimiento, relaciones, tareas, preguntas de cultura general),"
+        "\n   responde ÚNICAMENTE esta frase exacta: 'Solo puedo ayudarte con nutrición y ejercicio."
+        " ¿Tienes alguna consulta sobre tu alimentación o entrenamiento?'"
+        "\n   PROHIBIDO: dar información, continuar el tema, hacer preguntas de seguimiento. Solo esa frase y nada más."
+        "\n✅ REGLA PREGUNTA DIRECTA (sí/no o dato simple):"
+        "\n   Si el usuario pregunta '¿puedo comer/tomar X?', '¿es bueno X?', '¿está bien X?', '¿cuánto tiene X?':"
+        "\n   → PROHIBIDO ABSOLUTO: recetas, ingredientes, pasos de preparación, listas, tags CALOFIT."
+        "\n   → SOLO texto plano, máximo 2 frases personalizadas al perfil del usuario."
+        "\n   Frase 1: sí/no/con moderación + razón vinculada a su condición médica o meta."
+        "\n   Frase 2 (opcional): alternativa concreta acorde a su perfil."
+        "\n   Ejemplo correcto (diabético vegano, pregunta por arroz con pollo):"
+        "\n   'Puedes comerlo adaptado: usa tofu en vez de pollo y arroz integral para no disparar el azúcar.'"
+        "\n   Ejemplo incorrecto: dar receta completa con ingredientes y pasos de preparación."
         "\n0. BREVEDAD OBLIGATORIA en modo INFO/CHAT/PROGRESS:"
         "\n   • Máximo 2-3 oraciones o una lista corta de máximo 4 ítems."
         "\n   • PROHIBIDO: recetas completas, instrucciones de preparación paso a paso, listas de ingredientes."

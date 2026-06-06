@@ -571,81 +571,148 @@ async def respuesta_recomendacion_llm(
         )
         return await ia_engine._llamar_groq(prompt, max_tokens=300, temp=0.7)
 
-    # ── Recomendación de COMIDA: lista curada + rotación programática ────────────
-    # No depende del LLM para el formato — garantiza 3 bullets siempre limpios.
-    import random as _random
+    # ── Recomendación de COMIDA: generada por LLM con contexto real ──────────────
+    import re as _re_reco
+    from datetime import datetime as _dt_reco
 
-    # Catálogos por tipo de dieta
-    _PLATOS_VEGANO = [
-        ("Causa de palmito",          380), ("Causa de champiñones",      310),
-        ("Seco de lentejas",           420), ("Guiso de garbanzos",         390),
-        ("Locro de zapallo",           350), ("Sopa de quinua",             260),
-        ("Chaufa de tofu",             480), ("Ceviche de palmito",         330),
-        ("Pepián de quinua",           410), ("Hummus con verduras",        230),
-        ("Arroz con menestras",        400), ("Ensalada de quinua con mango",250),
-        ("Tacu tacu de frijoles",      450), ("Crema de zapallo",           280),
-        ("Saltado de tofu con arroz",  490),
-    ]
-    _PLATOS_NORMAL = [
-        ("Ceviche de pescado",         280), ("Lomo saltado",               720),
-        ("Arroz con pollo",            650), ("Causa de pollo",             380),
-        ("Sopa de pollo",              350), ("Ají de gallina",             550),
-        ("Arroz con leche",            220), ("Seco de res",                700),
-        ("Pollo a la plancha con arroz",580),("Estofado de pollo",          620),
-        ("Ensalada de pollo",          320), ("Milanesa con papas",         680),
-    ]
+    # 1. Detectar momento del día desde el mensaje del usuario
+    _MOMENTO_KEYWORDS_RECO = {
+        "CENA":      ["cenar", "cena", "noche", "nocturno"],
+        "DESAYUNO":  ["desayunar", "desayuno", "mañana", "madrugada"],
+        "ALMUERZO":  ["almorzar", "almuerzo", "mediodía", "mediodia", "tarde"],
+        "MERIENDA":  ["merienda", "snack", "media tarde", "media mañana", "antojo"],
+    }
+    _msg_low_reco = mensaje.lower() if mensaje else ""
+    momento_reco = None
+    for _m_key, _kws in _MOMENTO_KEYWORDS_RECO.items():
+        if any(kw in _msg_low_reco for kw in _kws):
+            momento_reco = _m_key
+            break
+    if not momento_reco:
+        _hora = _dt_reco.now().hour
+        if 5 <= _hora < 10:
+            momento_reco = "DESAYUNO"
+        elif 10 <= _hora < 15:
+            momento_reco = "ALMUERZO"
+        elif 15 <= _hora < 19:
+            momento_reco = "MERIENDA"
+        else:
+            momento_reco = "CENA"
 
-    # Detectar dieta restringida revisando TANTO diet_type COMO medical_conditions
-    # (el usuario puede tener "Vegano" en condiciones médicas, no en diet_type)
-    _condiciones_list = getattr(perfil, "medical_conditions", None) or []
-    _condiciones_str  = " ".join(_condiciones_list).lower()
-    es_vegano = (
-        "vegano"       in dieta.lower() or "vegetariano"  in dieta.lower()
-        or "vegano"    in _condiciones_str or "vegetariano" in _condiciones_str
+    # 2. Restricciones por momento del día
+    _RESTRICCIONES_MOMENTO_RECO = {
+        "CENA": (
+            "Cena ligera (máx 520 kcal). "
+            "PROHIBIDO absolutamente: cebiches, tiraditos, arroz con pato/pollo/cabrito, "
+            "lomo saltado, ají de gallina, seco de res/cabrito, jalea, chicharrón. "
+            "SOLO: sopas ligeras, ensaladas, menestras con vegetales, pescado a la plancha, "
+            "huevo sancochado, causa pequeña, crema de verduras."
+        ),
+        "DESAYUNO": (
+            "Desayuno energético (máx 450 kcal). "
+            "Opciones: avena con fruta, huevos revueltos, pan integral con palta, "
+            "kiwicha, mazamorra, jugo natural, quinua con leche, plátano con maní."
+        ),
+        "ALMUERZO": (
+            "Almuerzo completo (500-900 kcal). "
+            "Puede incluir platos de fondo lambayecanos: cebiche, arroz con pollo/pato, "
+            "seco, lomo saltado, guisos, sudados, causas, arroces con menestras."
+        ),
+        "MERIENDA": (
+            "Merienda/snack ligero (máx 300 kcal). "
+            "Frutas, yogur, galletas integrales, maní, frutos secos, barra de cereal, té."
+        ),
+    }
+    restricciones_momento_reco = _RESTRICCIONES_MOMENTO_RECO.get(momento_reco, "")
+
+    # 3. Detectar preferencia de ingrediente específico en el mensaje
+    _ing_match = _re_reco.search(
+        r'(?:con|de|que\s+tenga|a\s+base\s+de)\s+([a-záéíóúüñ][a-záéíóúüñ\s]{1,25})',
+        _msg_low_reco,
     )
-    es_vegetariano_solo = (
-        not ("vegano" in dieta.lower() or "vegano" in _condiciones_str)
-        and ("vegetariano" in dieta.lower() or "vegetariano" in _condiciones_str)
+    pref_ingrediente_reco = ""
+    if _ing_match:
+        _ing_detectado = _ing_match.group(1).strip().rstrip('.,?')
+        _PALABRAS_IGNORAR = {"hoy", "comer", "ti", "mi", "algo", "uno", "plato", "poco"}
+        if _ing_detectado not in _PALABRAS_IGNORAR and len(_ing_detectado) > 2:
+            pref_ingrediente_reco = (
+                f"El usuario pidió algo con: **{_ing_detectado}**. "
+                f"Al menos 1 de los 3 platos debe incluir ese ingrediente."
+            )
+
+    # 4. Restricción de dieta
+    _condiciones_list_reco = getattr(perfil, "medical_conditions", None) or []
+    _condiciones_str_reco = " ".join(_condiciones_list_reco).lower()
+    es_vegano_reco = (
+        "vegano" in dieta.lower() or "vegetariano" in dieta.lower()
+        or "vegano" in _condiciones_str_reco or "vegetariano" in _condiciones_str_reco
+    )
+    restriccion_dieta_reco = (
+        "VEGANO/VEGETARIANO: PROHIBIDO carnes, pollo, pescado, mariscos, lácteos animales. "
+        "Solo plantas, legumbres, granos, frutas, tofu, soja, hongos."
+    ) if es_vegano_reco else (
+        "Omnívoro: carnes, pescados, aves, mariscos y vegetales son válidos."
     )
 
-    if es_vegano and not es_vegetariano_solo:
-        catalogo = _PLATOS_VEGANO          # solo 100% vegetal
-    elif es_vegetariano_solo:
-        # Vegetariano: puede comer huevos/lácteos pero no carne/pescado
-        catalogo = _PLATOS_VEGANO          # usar vegano por seguridad (son todos válidos)
-    else:
-        catalogo = _PLATOS_NORMAL + _PLATOS_VEGANO
-
-    # Filtrar por calorías disponibles (platos que quepan en el restante)
-    disponibles = [(n, k) for n, k in catalogo if k <= max(restante, 200)]
-    if len(disponibles) < 3:
-        disponibles = catalogo  # usar todos si hay poco restante
-
-    # Evitar repetir platos del historial reciente
-    _ya_recomendados: set = set()
+    # 5. Extraer platos ya recomendados del historial para evitar repetición
+    _ya_sugeridos_txt = ""
     if historial:
-        import re as _re_hist
-        for m in (historial or [])[-8:]:
-            txt = m.get("content", "")
-            for n, _ in catalogo:
-                if n.lower() in txt.lower():
-                    _ya_recomendados.add(n)
+        _RE_BULLET_HIST = _re_reco.compile(r'-\s*([^\(]+)\s*\(~?\d+\s*kcal\)', _re_reco.IGNORECASE)
+        _ya_vistos = []
+        for _hm in (historial or [])[-10:]:
+            _ya_vistos += _RE_BULLET_HIST.findall(_hm.get("content", ""))
+        if _ya_vistos:
+            _ya_sugeridos_txt = (
+                f"PLATOS YA RECOMENDADOS (NO repetir): {', '.join(_ya_vistos[:6])}.\n\n"
+            )
 
-    novedosos = [(n, k) for n, k in disponibles if n not in _ya_recomendados]
-    if len(novedosos) < 3:
-        novedosos = disponibles  # si todos fueron recomendados, resetear
+    # 6. Prompt al LLM
+    _prompt_reco_comida = (
+        f"Eres nutricionista del gimnasio World Light Lambayeque. "
+        f"Propón EXACTAMENTE 3 platos peruanos (preferiblemente lambayecanos) para {perfil.first_name}.\n\n"
+        f"PERFIL:\n"
+        f"- Objetivo: {objetivo}\n"
+        f"- Dieta: {restriccion_dieta_reco}\n"
+        f"- Condiciones: {condiciones}\n"
+        f"- Calorías restantes del día: {round(restante)} kcal\n"
+        f"- Momento: {momento_reco}\n\n"
+        f"REGLAS PARA {momento_reco}:\n{restricciones_momento_reco}\n\n"
+        + (f"PREFERENCIA: {pref_ingrediente_reco}\n\n" if pref_ingrediente_reco else "")
+        + _ya_sugeridos_txt
+        + "FORMATO DE RESPUESTA (exactamente 3 líneas, nada más):\n"
+        "- Nombre del plato (~XXX kcal)\n"
+        "- Nombre del plato (~XXX kcal)\n"
+        "- Nombre del plato (~XXX kcal)\n\n"
+        "NO agregues explicaciones, recetas ni texto extra. Solo las 3 líneas."
+    )
 
-    seleccionados = _random.sample(novedosos, min(3, len(novedosos)))
+    respuesta_llm_reco = await ia_engine._llamar_groq(
+        _prompt_reco_comida, max_tokens=120, temp=0.5
+    )
 
-    # Cachear macros para consistencia registro ↔ recomendación
-    for nombre, kcal_val in seleccionados:
-        cache_macros(nombre, {"nombre": nombre, "kcal": float(kcal_val),
-                              "prot_g": 0, "carb_g": 0, "grasa_g": 0})
+    # 6. Parsear bullets del LLM y cachear macros
+    _RE_BULLET_RECO = _re_reco.compile(
+        r'-\s*(.+?)\s*\(~?(\d+)\s*kcal\)', _re_reco.IGNORECASE
+    )
+    _platos_parseados = _RE_BULLET_RECO.findall(respuesta_llm_reco or "")
 
-    # Intro breve contextual
-    intro = "Opciones para ti:"
-    bullets = '\n'.join(f'- {n} (~{k} kcal)' for n, k in seleccionados)
-    return f"{intro}\n{bullets}"
+    if _platos_parseados:
+        for _nombre_p, _kcal_p in _platos_parseados[:3]:
+            _nombre_p = _nombre_p.strip()
+            cache_macros(_nombre_p, {
+                "nombre": _nombre_p,
+                "kcal": float(_kcal_p),
+                "prot_g": 0.0,
+                "carb_g": 0.0,
+                "grasa_g": 0.0,
+            })
+        bullets = '\n'.join(
+            f'- {n.strip()} (~{k} kcal)' for n, k in _platos_parseados[:3]
+        )
+        return f"Opciones para ti:\n{bullets}"
+
+    # 7. Fallback: retornar respuesta del LLM tal como vino
+    return respuesta_llm_reco or "No pude generar recomendaciones en este momento."
 
 
 async def respuesta_chat_llm(
@@ -676,6 +743,55 @@ async def respuesta_chat_llm(
         condiciones=", ".join(getattr(perfil, "medical_conditions", None) or []) or "ninguna",
         objetivo=getattr(perfil, "goal", "mantener peso") or "mantener peso",
     )
+    # ── Intercept "puedo comer/tomar X?" — respuesta corta sin receta ────────────
+    import re as _re_puedo
+    _RE_PUEDO_COMER = _re_puedo.compile(
+        r'^(puedo|se\s+puede|puedo\s+yo|puede\s+uno)\s+'
+        r'(comer|tomar|beber|ingerir|comerme|tomarme)\s+\S',
+        _re_puedo.IGNORECASE,
+    )
+    if _RE_PUEDO_COMER.match(mensaje.strip()):
+        _conds_raw   = getattr(perfil, "medical_conditions", None) or []
+        _objetivo    = getattr(perfil, "goal", "mantener peso") or "mantener peso"
+        # Detectar restricciones dietéticas desde medical_conditions (donde realmente viven)
+        _es_vegano   = any("vegano" in c.lower() for c in _conds_raw)
+        _es_vegetariano = any("vegetariano" in c.lower() for c in _conds_raw)
+        _tiene_diabetes = any("diabetes" in c.lower() for c in _conds_raw)
+        # Construir bloque de restricciones claro y explícito
+        _restricciones = []
+        if _es_vegano:
+            _restricciones.append("VEGANO: PROHIBIDO todo producto animal (pollo, carne, pescado, huevo, lácteos)")
+        elif _es_vegetariano:
+            _restricciones.append("VEGETARIANO: PROHIBIDO carne, pollo y pescado")
+        if _tiene_diabetes:
+            _restricciones.append("DIABETES: evitar azúcares refinados y alimentos de alto índice glucémico")
+        otras = [c for c in _conds_raw if not any(
+            k in c.lower() for k in ("vegano", "vegetariano", "diabetes")
+        )]
+        if otras:
+            _restricciones.append(f"Otras condiciones: {', '.join(otras)}")
+        _bloque_restricciones = "\n".join(f"- {r}" for r in _restricciones) or "- Sin restricciones especiales"
+
+        _prompt_perm = (
+            f"Eres un coach nutricional amigable. Perfil del usuario:\n"
+            f"{_bloque_restricciones}\n"
+            f"Objetivo: {_objetivo}\n\n"
+            f"Pregunta del usuario: '{mensaje}'\n\n"
+            f"Responde como un amigo que sabe de nutrición: tono cálido y directo.\n"
+            f"Máximo 2 frases cortas (≤35 palabras en total):\n"
+            f"  Frase 1: respuesta clara (sí/no/con moderación) + razón según su perfil.\n"
+            f"  IMPORTANTE: si el alimento viola una restricción (vegano/vegetariano/diabetes),\n"
+            f"  esa restricción es la razón principal.\n"
+            f"  Frase 2 (opcional): alternativa concreta — DEBE cumplir TODAS las mismas restricciones.\n"
+            f"  Si el usuario es vegano y el alimento es pescado, NO sugieras otro tipo de pescado ni carne.\n"
+            f"  Sugiere solo alternativas 100% compatibles con su dieta (ej: tofu, legumbres, soja).\n\n"
+            f"PROHIBIDO: recetas, listas, pasos de preparación, párrafos largos.\n"
+            f"PROHIBIDO: comillas dobles o simples alrededor de las frases.\n"
+            f"PROHIBIDO: mencionar el nombre del usuario."
+        )
+        _raw_perm = await ia_engine._llamar_groq(_prompt_perm, max_tokens=100, temp=0.5)
+        return _limpiar_markdown(_raw_perm)
+
     # Recetas y técnicas de ejercicio requieren más tokens para una respuesta completa
     _m_lower = mensaje.lower()
     _es_receta = any(k in _m_lower for k in (

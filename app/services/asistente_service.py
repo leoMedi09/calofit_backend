@@ -50,6 +50,62 @@ def _deaccent(s: str) -> str:
         if unicodedata.category(c) != "Mn"
     )
 
+
+# ── Guardia off-topic ─────────────────────────────────────────────────────────
+# Señales de que el mensaje SÍ es sobre nutrición/ejercicio/salud.
+# Si el mensaje contiene alguna de estas palabras → pasa al pipeline normal.
+_SEÑALES_NUTRICION: frozenset[str] = frozenset({
+    # Acciones de comida
+    "comer", "comi", "como", "tomar", "tome", "beber", "bebi",
+    "desayunar", "almorzar", "cenar", "merendar",
+    # Comidas y grupos
+    "comida", "alimento", "plato", "receta", "ingrediente", "dieta",
+    "desayuno", "almuerzo", "cena", "merienda", "snack", "postre",
+    # Macros y nutrición
+    "caloria", "kcal", "proteina", "carbohidrato", "grasa", "fibra",
+    "vitamina", "mineral", "nutricion", "macro",
+    # Alimentos peruanos comunes
+    "arroz", "pollo", "ceviche", "lomo", "causa", "sopa", "papa",
+    "quinua", "verdura", "fruta", "leche", "queso", "huevo", "pan",
+    "pescado", "carne", "ensalada", "yogur", "avena", "menestra",
+    # Ejercicio y gym
+    "ejercicio", "entren", "gym", "gimnasio", "rutina", "cardio",
+    "pesas", "correr", "caminar", "nadar", "trotar", "sentadilla",
+    "press", "musculo", "fuerza", "cardio", "series", "reps",
+    # Salud y metas
+    "peso", "bajar", "subir", "adelgazar", "engordar", "masa",
+    "salud", "plan", "meta", "progreso", "balance", "calorias",
+    "diabetes", "hipertension", "vegano", "vegetariano", "alergia",
+    # Verbos relacionados al asistente
+    "registra", "anota", "guarda", "recomienda", "sugiere",
+})
+
+# Patrones que delatan preguntas de conocimiento general (off-topic)
+_RE_OFFTOPIC = re.compile(
+    r"\b(capital\s+de|presidente\s+de|quien\s+(es|fue|invento|descubrio|gano)|"
+    r"cuando\s+(naci|fue\s+fundad|ocurri|empezo|termino)|historia\s+de\s+\w+\s+(pais|ciudad|guerra|mundo)|"
+    r"cuanto\s+(es|son)\s+\d+\s*([\+\-\*\/x]|\s*por\s*|\s*entre\s*|\s*mas\s*|\s*menos\s*)\s*\d+|"
+    r"en\s+que\s+(ano|pais|ciudad|continente)\s+(queda|esta|nacio|se\s+ubica)|"
+    r"cual\s+es\s+(la\s+)?(capital|moneda|bandera|idioma|poblacion)\s+de|"
+    r"(pelicula|cancion|serie|actor|actriz|director|libro|autor|novela)\s+(de|del|que)|"
+    r"como\s+se\s+llama\s+el\s+(pais|presidente|rey|lider)|"
+    r"dime\s+(algo\s+sobre|un\s+chiste|un\s+poema|una\s+historia))\b",
+    re.IGNORECASE,
+)
+
+_RESPUESTA_OFFTOPIC = (
+    "Solo puedo ayudarte con nutrición, alimentación y ejercicio. "
+    "¿Tienes alguna consulta sobre tu dieta o entrenamiento?"
+)
+
+def _es_offtopic(msg_norm: str) -> bool:
+    """Devuelve True si el mensaje es claramente off-topic (sin señales nutricionales)."""
+    tokens = set(msg_norm.split())
+    if tokens & _SEÑALES_NUTRICION:
+        return False  # tiene señal de nutrición → on-topic
+    return bool(_RE_OFFTOPIC.search(msg_norm))
+
+
 # Verbos de ingesta en pasado — redirigen al handler directo (sin LLM)
 # cuando el modo ya fue clasificado como REGISTRAR_NUTRICION.
 # Ejemplos: "Temprano comí pan con pollo", "Almorcé lomo saltado con su gaseosa"
@@ -399,6 +455,17 @@ class AsistenteService:
             )
             _resp["_blocked"] = True  # señal para no guardar en historial BD
             return _resp
+
+        # ── Guardia off-topic (Python puro, sin llamar al LLM) ───────────────
+        _msg_norm = _deaccent(msg_limpio)
+        if not es_saludo and _es_offtopic(_msg_norm):
+            _resp_ot = _build_response(
+                perfil, "INFO", "OTRO",
+                calorias_meta, consumo_real, quemadas_real, plan_hoy_data,
+                _RESPUESTA_OFFTOPIC,
+            )
+            _resp_ot["_blocked"] = True  # no guardar en historial BD
+            return _resp_ot
 
         # Modo funcional + guard rails
         modo_funcion = await resolver_modo_funcion(self.ia, mensaje, es_saludo)

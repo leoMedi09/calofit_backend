@@ -16,15 +16,13 @@ import logging
 import random
 import re
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 import asyncio
-import json
 
 from app.core.utils import get_peru_date
-from app.models import Plato, PlatoIngrediente, Alimento
 from app.models.historial_recomendacion import HistorialRecomendacion
 from app.services.nutrition.plate.plate_builder import PlatoBuilder
 
@@ -164,10 +162,19 @@ def _tiene_ingrediente(nombre: str, ingredientes_str: str, ing_clave: str) -> bo
 # Si el nombre normalizado del plato contiene alguna de estas palabras,
 # se excluye automáticamente de cena, desayuno y snack.
 _KEYWORDS_SOLO_ALMUERZO = frozenset({
-    "arroz con pato", "arroz con cabrito", "lomo saltado", "seco de res",
-    "seco de cabrito", "jalea", "pollo a la brasa", "chicharron de cerdo",
-    "aji de gallina", "causa ferreñafana", "tallarin saltado", "sopa seca",
-    "sudado de pescado", "caldo de gallina", "arroz con pollo",
+    # Guisos y segundos contundentes
+    "arroz con pato", "arroz con cabrito", "arroz con pollo",
+    "lomo saltado", "seco de res", "seco de cabrito", "seco de pollo",
+    "aji de gallina", "ají de gallina",
+    "pollo a la brasa", "chicharron de cerdo", "chicharrón",
+    "tallarin saltado", "tallarín saltado", "sopa seca",
+    "carapulcra", "pepian", "pepián",
+    # Fritos y parrillas pesadas
+    "jalea", "sudado de pescado", "caldo de gallina",
+    # Cebiches y tiraditos: platos de mediodía en cultura lambayecana
+    "cebiche", "ceviche", "tiradito",
+    # Causas de fondo (la causa rellena es almuerzo; snack ok en porciones pequeñas)
+    "causa ferreñafana", "causa rellena",
 })
 
 # ─── Platos ligeros → válidos para cena/desayuno/snack pero NO almuerzo ──────
@@ -293,7 +300,7 @@ class RecomendadorPlatosConfiables:
         mezclados = alta_similitud + media_similitud + baja_similitud
 
         # 4. Seleccionar N con diversidad de tipo
-        seleccionados = self._seleccionar_con_diversidad(mezclados, n, rng)
+        seleccionados = self._seleccionar_con_diversidad(mezclados, n)
 
         # 5. FALLBACK: Si no hay suficientes platos, usar LLM para crear nuevos
         if len(seleccionados) < n and self.plate_builder:
@@ -539,7 +546,6 @@ class RecomendadorPlatosConfiables:
         self,
         candidatos: List[Dict],
         n: int,
-        rng: random.Random,
     ) -> List[Dict]:
         """
         Selecciona N platos garantizando variedad de tipo.

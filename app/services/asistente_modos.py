@@ -161,14 +161,11 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
         # "me hice un desayuno/almuerzo" — construcción coloquial de preparación+consumo
         "me hice un", "me hice una",
     )
-    _TEMPORALES_LOG = ("hoy ", "hoy,", "esta mañana", "esta tarde", "esta noche",
-                       "al mediodia", "al mediodía", "ayer ", "en la mañana", "en la noche")
     # Usamos límites de palabra (\b) para evitar coincidencias parciales (ej. darme comidas -> me comi)
     _verbos_log_count = sum(
         1 for v in _VERBOS_LOG
         if m.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", m)
     )
-    _tiene_temporal_log = any(t in m for t in _TEMPORALES_LOG)
     # Una de estas condiciones basta:
     # a) ≥2 verbos de consumo pasado en el mismo mensaje (resumen del día)
     # b) adverbio temporal + ≥1 verbo de consumo pasado + alimento
@@ -445,6 +442,11 @@ def bloque_prompt_modo_funcion(modo: str) -> str:
         return (
             "\n\n══ FUNCIÓN DEL ASISTENTE (MODO CONVERSACIONAL) ══\n"
             "Responde como un coach amigo: directo, cálido, MUY BREVE.\n\n"
+            "🚫 REGLA #0 — OFF-TOPIC (VERIFICAR PRIMERO, ANTES DE CUALQUIER OTRA REGLA):\n"
+            "  Si el mensaje NO está relacionado con nutrición, ejercicio, salud o bienestar físico\n"
+            "  (política, tecnología, entretenimiento, geografía, tareas escolares, relaciones, etc.),\n"
+            "  responde ÚNICAMENTE: 'Solo puedo ayudarte con nutrición y ejercicio.'\n"
+            "  NADA MÁS. Sin información, sin preguntas, sin seguimiento del tema.\n\n"
             "⛔ REGLA #1 — LONGITUD MÁXIMA ABSOLUTA: 2 frases. Máximo 50 palabras en total.\n"
             "  Cuenta tus palabras. Si llegas a 51, borra hasta quedarte en 50 o menos.\n"
             "  PROHIBIDO: párrafos largos, listas, explicaciones extensas, múltiples puntos.\n\n"
@@ -453,8 +455,16 @@ def bloque_prompt_modo_funcion(modo: str) -> str:
             "  Termina siempre con afirmación, dato concreto o recomendación corta.\n\n"
             "⛔ REGLA #3 — SIN TAGS: NO escribas [CALOFIT_INTENT], [CALOFIT_HEADER] ni ningún corchete.\n\n"
             "PLANTILLA SEGÚN TIPO DE PREGUNTA:\n"
-            "• '¿puedo comer X?' → '[Sí/No], [razón en 5 palabras]. [alternativa o tip en 10 palabras].'\n"
-            "  Ejemplo: 'No, el pollo no es vegano. Prueba con tofu o lentejas que tienen buena proteína.'\n"
+            "• '¿puedo comer X?' / '¿puedo tomar X?' (incluso si X es un plato específico como 'arroz con pollo') →\n"
+            "  ⛔ PROHIBIDO ABSOLUTO: recetas, ingredientes, pasos de preparación, listas de ningún tipo.\n"
+            "  ⛔ PROHIBIDO ABSOLUTO: [CALOFIT_HEADER], [CALOFIT_LIST], [CALOFIT_ACTION], [CALOFIT_STATS] o cualquier tag.\n"
+            "  ✅ SOLO texto plano, máximo 2 frases:\n"
+            "     Frase 1: sí/no/con moderación + razón vinculada a su condición médica o meta.\n"
+            "     Frase 2 (opcional): una alternativa o ajuste concreto acorde a su perfil.\n"
+            "  Ejemplo (diabético vegano, pregunta por arroz con pollo):\n"
+            "  'Puedes comerlo adaptado: usa tofu o champiñones en vez de pollo, y arroz integral para no disparar el azúcar.'\n"
+            "  Ejemplo (diabético, pregunta por golosinas):\n"
+            "  'No es ideal con tu diabetes; elevan el azúcar rápido. Si quieres algo dulce, prueba un plátano maduro.'\n"
             "• '¿puedo trotar/nadar/correr?' → '[Sí/claro/depende]. [beneficio o condición en 10 palabras].'\n"
             "  Ejemplo: 'Claro, el trote mejora el cardio. Empieza 20 min a ritmo cómodo.'\n"
             "• Saludo / respuesta corta → 1 frase amigable. Sin preguntas de vuelta.\n"

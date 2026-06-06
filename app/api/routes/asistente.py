@@ -69,14 +69,37 @@ class GuardarSugerenciaRequest(BaseModel):
 
 # ── helpers de memoria conversacional ──────────────────────────────────────
 
-def _cargar_historial_bd(client_id: int, db: Session, limite: int = 14) -> list:
-    """Devuelve los últimos `limite` mensajes de chat_historial como lista [{role, content}]."""
+def _cargar_historial_bd(client_id: int, db: Session, limite: int = 8) -> list:
+    """
+    Devuelve los últimos `limite` mensajes de chat_historial como lista [{role, content}],
+    SOLO si el último mensaje es de las últimas 2 horas (misma sesión activa).
+    Si el usuario no ha hablado en más de 2 horas, devuelve [] para evitar
+    que el LLM mezcle temas de sesiones anteriores.
+    """
     from sqlalchemy import text as _t
+    from datetime import datetime, timezone, timedelta
+
+    # Verificar cuándo fue el último mensaje
+    last_row = db.execute(_t(
+        "SELECT created_at FROM chat_historial "
+        "WHERE client_id = :cid ORDER BY created_at DESC LIMIT 1"
+    ), {"cid": client_id}).fetchone()
+
+    if not last_row:
+        return []
+
+    # Usar UTC para comparar (la BD guarda en UTC)
+    last_ts = last_row.created_at
+    if last_ts.tzinfo is None:
+        last_ts = last_ts.replace(tzinfo=timezone.utc)
+    now_utc = datetime.now(timezone.utc)
+    if (now_utc - last_ts) > timedelta(hours=2):
+        return []  # Sesión expirada — no contaminar con contexto viejo
+
     rows = db.execute(_t(
         "SELECT rol, contenido FROM chat_historial "
         "WHERE client_id = :cid ORDER BY created_at DESC LIMIT :n"
     ), {"cid": client_id, "n": limite}).fetchall()
-    # Viene en orden DESC, invertir para cronológico
     return [{"role": r.rol, "content": r.contenido} for r in reversed(rows)]
 
 
@@ -111,11 +134,10 @@ async def consultar_asistente(
     try:
         cliente = db.query(Client).filter(Client.email == current_user.email).first()
 
-        # Enriquecer historial: BD (sesiones anteriores) + sesión actual del frontend
-        historial_bd = _cargar_historial_bd(cliente.id, db) if cliente else []
+        # Solo historial de la sesión actual (últimos 6 mensajes enviados por Flutter).
+        # El historial BD está desactivado — causaba que el LLM dijera "como recordarás..." y similares.
         historial_sesion = request.historial or []
-        # Combinar: historial BD como contexto base, sesión actual encima (sin duplicar)
-        historial_combinado = (historial_bd + historial_sesion)[-20:] if historial_bd else historial_sesion
+        historial_combinado = historial_sesion
 
         resultado = await asistente_service.consultar(
             mensaje=request.mensaje,
