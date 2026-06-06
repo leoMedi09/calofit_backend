@@ -378,6 +378,11 @@ def actualizar_perfil_cliente(
             setattr(cliente, field, value)
             print(f"✅ {field}: {old_value} → {value}")
 
+    # Si el usuario guarda campos clave del perfil → marcar como completo
+    _COMPLETION_FIELDS = {"first_name", "weight", "height", "birth_date", "gender"}
+    if _COMPLETION_FIELDS & set(update_data.keys()):
+        cliente.is_profile_complete = True
+
     try:
         db.commit()
         db.refresh(cliente)
