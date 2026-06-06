@@ -75,7 +75,7 @@ def read_root():
     return {"message": "Asistente CaloFit Operativo en Gimnasio World Light"}
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health_check_root():
     return {"status": "OK", "version": "1.0.0"}
 
