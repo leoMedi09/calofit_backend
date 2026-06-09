@@ -271,6 +271,25 @@ async def obtener_seguimiento_semanal(
         for pd in db.query(PlanDiario).filter(PlanDiario.plan_id == plan_activo.id).all():
             plan_por_dia[pd.dia_numero] = float(pd.calorias_dia)
 
+    # Metas de macros: usar metas_usuario si existen, derivar de kcal si no
+    from app.models.meta_usuario import MetaUsuario
+    meta_usuario = db.query(MetaUsuario).filter(
+        MetaUsuario.client_id == cliente.id
+    ).order_by(MetaUsuario.id.desc()).first()
+
+    def _macro_metas(kcal_obj: float) -> tuple:
+        if meta_usuario:
+            return (
+                float(meta_usuario.proteinas_g),
+                float(meta_usuario.carbohidratos_g),
+                float(meta_usuario.grasas_g),
+            )
+        return (
+            round(kcal_obj * 0.30 / 4, 1),
+            round(kcal_obj * 0.45 / 4, 1),
+            round(kcal_obj * 0.25 / 9, 1),
+        )
+
     # semana_offset=0 → últimos 7 días hasta hoy
     # semana_offset=-1 → los 7 días de la semana anterior, etc.
     hoy = get_peru_date()
@@ -329,6 +348,7 @@ async def obtener_seguimiento_semanal(
         if hay_ejercicio:
             dias_con_ejercicio += 1
 
+        prot_meta, carb_meta, gras_meta = _macro_metas(kcal_objetivo)
         resultado_dias.append({
             "fecha": fecha_dia.isoformat(),
             "dia_etiqueta": dia_label,
@@ -339,6 +359,9 @@ async def obtener_seguimiento_semanal(
             "proteinas_g": round(float(progreso.proteinas_consumidas or 0), 1) if progreso else 0.0,
             "carbohidratos_g": round(float(progreso.carbohidratos_consumidos or 0), 1) if progreso else 0.0,
             "grasas_g": round(float(progreso.grasas_consumidas or 0), 1) if progreso else 0.0,
+            "proteinas_meta_g": prot_meta,
+            "carbohidratos_meta_g": carb_meta,
+            "grasas_meta_g": gras_meta,
             "hay_registro": hay_registro,
             "hay_ejercicio": hay_ejercicio,
             "adherencia_pct": adherencia_pct,

@@ -48,8 +48,9 @@ Responde SOLO con JSON válido (sin explicaciones, sin texto extra):
 {{
   "alimentos": [
     {{
-      "nombre": "Nombre específico del alimento/plato",
+      "nombre": "Nombre específico del alimento/plato (singular)",
       "es_real": true,
+      "cantidad": número,
       "porcion_g": número,
       "kcal": número,
       "prot_g": número,
@@ -73,8 +74,10 @@ Responde SOLO con JSON válido (sin explicaciones, sin texto extra):
 3. SIEMPRE incluye todos los alimentos/bebidas reales del mensaje.
 4. MÉTODO DE COCCIÓN cambia kcal: FRITO (absorbe aceite) ≠ COCIDO ≠ CRUDO.
 5. prot_total = Σ prot_g. carb_total = Σ carb_g. grasa_total = Σ grasa_g.
-6. CANTIDADES: multiplica correctamente. "dos paltas" = 2 × peso_una_palta.
+6. CANTIDADES: "dos panes con pollo" → UN solo ítem {{nombre:"Pan con Pollo", cantidad:2, kcal: total×2}}. NUNCA separes en Pan ×2 + Pollo por separado — el "con" indica un combo, no ingredientes sueltos. kcal/macros son TOTALES ya multiplicados. nombre siempre en singular.
 7. kcal debe ser consistente con P/C/G: verifica que ≈ 4×P + 4×C + 9×G.
+8. Si no se menciona cantidad explícita → cantidad:1.
+9. COMBOS "X con Y": "pan con pollo", "arroz con leche", "tostada con mermelada" → UN ítem cada uno. NO descomponer en ingredientes.
 """
 
 _PROMPT_EJERCICIO = _IDENTIDAD + """
@@ -331,7 +334,15 @@ async def registrar_comida_llm(
     # Preferir macros si dan algún valor positivo; fallback a kcal_llm solo si macros=0
     kcal = kcal_desde_macros if kcal_desde_macros > 0 else kcal_llm
     alimentos_raw = datos.get("alimentos", [])
-    nombres = [a["nombre"] for a in alimentos_raw if a.get("nombre")]
+    # Construir nombres con multiplicador ×N para mostrar en chat y balance
+    def _nombre_con_cantidad(a: dict) -> str:
+        n = a.get("nombre", "")
+        try:
+            q = int(float(a.get("cantidad", 1) or 1))
+        except (TypeError, ValueError):
+            q = 1
+        return f"{n} ×{q}" if q > 1 else n
+    nombres = [_nombre_con_cantidad(a) for a in alimentos_raw if a.get("nombre")]
 
     # Actualizar progreso_calorias (totales del día)
     from app.core.utils import get_peru_date
@@ -343,27 +354,37 @@ async def registrar_comida_llm(
     prog.grasas_consumidas        = round((prog.grasas_consumidas or 0) + grasa, 1)
 
     # Insertar en comida_registros (fuente del Balance screen)
+    # Cuando cantidad > 1, insertar N entradas individuales con macros/N cada una.
+    # Así Flutter agrupa por nombre y muestra la viñeta ×N con el diálogo de borrado
+    # que ya permite elegir cuántas porciones eliminar (stepper −/+).
     from app.models.comida_registro import ComidaRegistro
     n_items = max(1, len(alimentos_raw))
     for item in alimentos_raw:
         nombre_item = item.get("nombre", nombres[0] if nombres else "Alimento")
-        k_item = round(float(item.get("kcal", kcal / n_items)), 1)
-        p_item = round(float(item.get("prot_g", prot / n_items)), 1)
-        c_item = round(float(item.get("carb_g", carb / n_items)), 1)
-        g_item = round(float(item.get("grasa_g", grasa / n_items)), 1)
-        registro = ComidaRegistro(
-            client_id=perfil.id,
-            fecha=hoy,
-            nombre_alimento=nombre_item,
-            kcal=k_item,
-            proteina_g=p_item,
-            carbohidratos_g=c_item,
-            grasas_g=g_item,
-            tipo_resolucion="llm_estimado",
-            confianza=0.85,
-            texto_original=mensaje[:490],
-        )
-        db.add(registro)
+        try:
+            cantidad_item = int(float(item.get("cantidad", 1) or 1))
+        except (TypeError, ValueError):
+            cantidad_item = 1
+        cantidad_item = max(1, cantidad_item)
+        # Macros por porción unitaria
+        k_item = round(float(item.get("kcal", kcal / n_items)) / cantidad_item, 1)
+        p_item = round(float(item.get("prot_g", prot / n_items)) / cantidad_item, 1)
+        c_item = round(float(item.get("carb_g", carb / n_items)) / cantidad_item, 1)
+        g_item = round(float(item.get("grasa_g", grasa / n_items)) / cantidad_item, 1)
+        for _ in range(cantidad_item):
+            registro = ComidaRegistro(
+                client_id=perfil.id,
+                fecha=hoy,
+                nombre_alimento=nombre_item,
+                kcal=k_item,
+                proteina_g=p_item,
+                carbohidratos_g=c_item,
+                grasas_g=g_item,
+                tipo_resolucion="llm_estimado",
+                confianza=0.85,
+                texto_original=mensaje[:490],
+            )
+            db.add(registro)
 
     db.commit()
 
