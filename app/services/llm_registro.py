@@ -77,7 +77,13 @@ Responde SOLO con JSON válido (sin explicaciones, sin texto extra):
 6. CANTIDADES: "dos panes con pollo" → UN solo ítem {{nombre:"Pan con Pollo", cantidad:2, kcal: total×2}}. NUNCA separes en Pan ×2 + Pollo por separado — el "con" indica un combo, no ingredientes sueltos. kcal/macros son TOTALES ya multiplicados. nombre siempre en singular.
 7. kcal debe ser consistente con P/C/G: verifica que ≈ 4×P + 4×C + 9×G.
 8. Si no se menciona cantidad explícita → cantidad:1.
-9. COMBOS "X con Y": "pan con pollo", "arroz con leche", "tostada con mermelada" → UN ítem cada uno. NO descomponer en ingredientes.
+9. COMBOS "X con Y": "pan con pollo", "arroz con leche", "tostada con mermelada" → UN ítem cada uno. NO descomponer en ingredientes. ⚠️ Esto incluye SIEMPRE "arroz con [cualquier carne/proteína]" (pato, pollo, pavo, res, chancho, mariscos, etc.) y cualquier "[base de carbohidrato] con [proteína/guarnición]" (papa con, tallarines con, puré con, menestra con, etc.) — son UN plato de fondo único con su propia guarnición, jamás dos ítems separados (NO generes "Arroz" + "Pato" como ítems independientes; genera UN ítem "Arroz con Pato").
+10. ⚠️ "cantidad" es SOLO el número de PORCIONES/UNIDADES discretas (ej: "dos panes"→2, "tres galletas"→3). NUNCA pongas un valor en gramos/mililitros en "cantidad". Si el mensaje dice "150g de arroz", "200 gramos de pollo", "300ml de jugo", "2 kg de pollo", "1.5 kilos de papa" → eso va en "porcion_g" (convierte kg a gramos: 1 kg = 1000g) y "cantidad" sigue siendo 1. kcal/macros deben corresponder al total de "porcion_g" (ej: 2 kg de pollo a la plancha = 2000g ≈ 3300 kcal, NO uses una porción estándar de 100-300g cuando el usuario especificó kilos). "cantidad" jamás debe ser mayor a 10.
+11. PORCIONES POR DEFECTO (si el usuario NO especifica gramos/cantidad):
+    - PLATO DE FONDO / almuerzo completo (arroz con algo, lomo saltado, seco, ají de gallina, tallarines, guisos, frituras con guarnición, causas rellenas): porción 350-450g → 600-1000 kcal. Proteínas magras (pollo, pescado, pavo) ≈600-750 kcal; proteínas grasas (pato, cerdo, res, chicharrón) ≈800-1000 kcal. NUNCA estimes un plato de fondo en menos de 600 kcal.
+    - BEBIDAS (jugo, limonada, gaseosa, chicha): 200-300 ml.
+    - PAN/SÁNDWICH individual: 1 unidad ≈ 150-250 kcal base + relleno.
+    - ENSALADA/ENTRADA/SOPA: 150-350 kcal.
 """
 
 _PROMPT_EJERCICIO = _IDENTIDAD + """
@@ -239,6 +245,19 @@ PREGUNTAS SIMPLES: máximo 2-3 oraciones directas.
   Vegano: adapta con tofu/palmito manteniendo la base.
 - Usa el historial para dar continuidad a la conversación.
 - PROHIBIDO terminar con pregunta a menos que el usuario pida consejo explícito.
+
+⛔ PERSONA GRAMATICAL (CRÍTICO):
+  Las comidas/ejercicios del historial son del USUARIO, no tuyos. Refiérete a ellas SIEMPRE
+  en SEGUNDA PERSONA ("almorzaste", "cenaste", "registraste", "comiste").
+  PROHIBIDO usar primera persona para acciones del usuario ("Almorcé", "Cené", "Hice").
+  ✓ "Almorzaste causa ferreñafana y cenaste un cebiche de caballa."
+  ✗ "Almorcé causa ferreñafana y cenaste un cebiche de caballa." ← mezcla de personas, incorrecto.
+
+⛔ BALANCE VS META (CRÍTICO):
+  Si consumido > meta → el usuario YA EXCEDIÓ su meta. Dilo de forma directa y sin contradicciones
+  ("ya superaste tu meta por X kcal, ten cuidado"). NUNCA digas que "está cumpliendo su objetivo"
+  si el consumo es mayor a la meta — son afirmaciones contradictorias.
+  Si consumido <= meta → puedes decir cuánto le queda disponible.
 """
 
 
@@ -333,6 +352,25 @@ async def registrar_comida_llm(
     kcal_llm = round(float(datos.get("kcal_total", 0)), 1)
     # Preferir macros si dan algún valor positivo; fallback a kcal_llm solo si macros=0
     kcal = kcal_desde_macros if kcal_desde_macros > 0 else kcal_llm
+
+    # Tope de sanidad: cantidades absurdas (ej. "50 kg de arroz") generan totales
+    # de macros irreales. Si el total supera el tope, escalar proporcionalmente
+    # a un máximo razonable y avisar al usuario.
+    _KCAL_MAX_RAZONABLE = 5000
+    _factor_cap = 1.0
+    advertencia_cantidad = None
+    if kcal > _KCAL_MAX_RAZONABLE:
+        _factor_cap = _KCAL_MAX_RAZONABLE / kcal
+        kcal  = round(kcal * _factor_cap, 1)
+        prot  = round(prot * _factor_cap, 1)
+        carb  = round(carb * _factor_cap, 1)
+        grasa = round(grasa * _factor_cap, 1)
+        advertencia_cantidad = (
+            f"⚠️ La cantidad indicada parece excesiva — registré un máximo razonable "
+            f"de {round(kcal)} kcal. Si en verdad comiste esa cantidad, regístralo en "
+            f"porciones separadas a lo largo del día."
+        )
+
     alimentos_raw = datos.get("alimentos", [])
     # Construir nombres con multiplicador ×N para mostrar en chat y balance
     def _nombre_con_cantidad(a: dict) -> str:
@@ -365,12 +403,16 @@ async def registrar_comida_llm(
             cantidad_item = int(float(item.get("cantidad", 1) or 1))
         except (TypeError, ValueError):
             cantidad_item = 1
-        cantidad_item = max(1, cantidad_item)
-        # Macros por porción unitaria
-        k_item = round(float(item.get("kcal", kcal / n_items)) / cantidad_item, 1)
-        p_item = round(float(item.get("prot_g", prot / n_items)) / cantidad_item, 1)
-        c_item = round(float(item.get("carb_g", carb / n_items)) / cantidad_item, 1)
-        g_item = round(float(item.get("grasa_g", grasa / n_items)) / cantidad_item, 1)
+        # Tope de seguridad: "cantidad" es el número de porciones discretas
+        # (ej. "dos panes"). Si el LLM confunde gramos con cantidad
+        # (ej. "150g de arroz" → cantidad:150), nunca debe insertar más de
+        # 10 filas por ítem.
+        cantidad_item = max(1, min(cantidad_item, 10))
+        # Macros por porción unitaria (aplicando el mismo tope de sanidad que los totales)
+        k_item = round(float(item.get("kcal", kcal / n_items)) * _factor_cap / cantidad_item, 1)
+        p_item = round(float(item.get("prot_g", prot / n_items)) * _factor_cap / cantidad_item, 1)
+        c_item = round(float(item.get("carb_g", carb / n_items)) * _factor_cap / cantidad_item, 1)
+        g_item = round(float(item.get("grasa_g", grasa / n_items)) * _factor_cap / cantidad_item, 1)
         for _ in range(cantidad_item):
             registro = ComidaRegistro(
                 client_id=perfil.id,
@@ -430,6 +472,7 @@ async def registrar_comida_llm(
             "carbohidratos_g": carb,
             "grasas_g": grasa,
             "alerta_dieta": alerta_dieta,
+            "advertencia_cantidad": advertencia_cantidad,
         },
         "balance_actualizado": {
             "consumido": round(consumido, 1),
@@ -440,6 +483,7 @@ async def registrar_comida_llm(
         "mensaje": (
             f"✅ Registré: {nombres_str} — {round(kcal)} kcal. "
             f"Llevas {round(consumido)} de {round(meta)} kcal hoy."
+            + (f"\n\n{advertencia_cantidad}" if advertencia_cantidad else "")
         ),
         "alerta_dieta": alerta_dieta,
     }
@@ -764,6 +808,12 @@ async def respuesta_chat_llm(
         condiciones=", ".join(getattr(perfil, "medical_conditions", None) or []) or "ninguna",
         objetivo=getattr(perfil, "goal", "mantener peso") or "mantener peso",
     )
+    # ── Intercept "qué hora es" — hora real de Perú, sin pasar por el LLM ────────
+    _m_lower_hora = mensaje.lower().strip()
+    if any(k in _m_lower_hora for k in ("qué hora es", "que hora es", "qué hora son", "que hora son")):
+        from app.core.utils import get_peru_now
+        return f"Son las {get_peru_now().strftime('%H:%M')} (hora de Perú)."
+
     # ── Intercept "puedo comer/tomar X?" — respuesta corta sin receta ────────────
     import re as _re_puedo
     _RE_PUEDO_COMER = _re_puedo.compile(
@@ -811,7 +861,17 @@ async def respuesta_chat_llm(
             f"PROHIBIDO: mencionar el nombre del usuario."
         )
         _raw_perm = await ia_engine._llamar_groq(_prompt_perm, max_tokens=100, temp=0.5)
-        return _limpiar_markdown(_raw_perm)
+        _resultado_perm = _limpiar_markdown(_raw_perm)
+        # El LLM a veces ignora "PROHIBIDO mencionar el nombre" — quitar
+        # "{Nombre}, " si quedó al inicio de la respuesta.
+        _nombre_escaped = _re_puedo.escape(perfil.first_name or "")
+        if _nombre_escaped:
+            _resultado_perm = _re_puedo.sub(
+                rf'^{_nombre_escaped},\s*', '', _resultado_perm, flags=_re_puedo.IGNORECASE
+            )
+            if _resultado_perm:
+                _resultado_perm = _resultado_perm[0].upper() + _resultado_perm[1:]
+        return _resultado_perm
 
     # Recetas y técnicas de ejercicio requieren más tokens para una respuesta completa
     _m_lower = mensaje.lower()
@@ -885,6 +945,11 @@ async def respuesta_chat_llm(
     # Para recetas: añadir saltos de línea antes de secciones clave
     if _es_receta:
         import re as _re_fmt
+        # El LLM a veces ignora "NO intro" y antepone un resumen del historial.
+        # Si "Ingredientes:" no está al inicio, descartar todo lo anterior.
+        _idx_ing = resultado.lower().find("ingredientes:")
+        if _idx_ing > 0:
+            resultado = resultado[_idx_ing:]
         # Separar "Ingredientes:" y "Preparación:" en líneas propias
         resultado = _re_fmt.sub(r'\s*(Ingredientes:)', r'\n\nIngredientes:', resultado)
         resultado = _re_fmt.sub(r'\s*(Preparaci[oó]n:)', r'\n\nPreparación:', resultado)
