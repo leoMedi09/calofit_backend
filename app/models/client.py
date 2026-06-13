@@ -23,6 +23,8 @@ class Client(Base):
     )
     
     flutter_uid = Column(String, unique=True, nullable=True, index=True)  # ✅ UID de Firebase/Flutter para vincular usuario con perfil de salud
+    fcm_token = Column(String, nullable=True)  # 🆕 Token de push notifications (Firebase Cloud Messaging)
+    notificaciones_activas = Column(Boolean, nullable=True, default=True)  # 🆕 Switch para recordatorios diarios
     
     birth_date = Column(Date, nullable=True)  # Fecha de nacimiento
     weight = Column(Float)  # Peso actual (kg)

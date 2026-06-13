@@ -22,6 +22,8 @@ with engine.connect() as connection:
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS workout_type VARCHAR DEFAULT 'Cardio';"))
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS session_duration FLOAT DEFAULT 1.0;"))
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nutri_weekly_note TEXT;"))
+        connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS fcm_token VARCHAR;"))
+        connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS notificaciones_activas BOOLEAN DEFAULT TRUE;"))
         connection.execute(text("DROP TABLE IF EXISTS platos_recomendados CASCADE;"))
         # Memoria conversacional persistida
         connection.execute(text("""
@@ -69,6 +71,12 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # ✅ REMOVER REGISTRO DIRECTO - YA ESTÁ EN api_router
 # app.include_router(clientes_router, prefix="/clientes", tags=["clientes"])
+
+@app.on_event("startup")
+def iniciar_notificaciones():
+    from app.core.notification_scheduler import iniciar_scheduler
+    iniciar_scheduler()
+
 
 @app.get("/")
 def read_root():

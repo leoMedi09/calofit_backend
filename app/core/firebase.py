@@ -1,5 +1,5 @@
 import firebase_admin
-from firebase_admin import credentials, auth, storage
+from firebase_admin import credentials, auth, storage, messaging
 import os
 import json
 from app.core.config import settings
@@ -68,3 +68,28 @@ def upload_to_firebase(file_bytes: bytes, remote_path: str, content_type: str = 
     except Exception as e:
         print(f"❌ Error al subir a Firebase Storage: {e}")
         return None
+
+
+def send_push_notification(
+    token: str,
+    title: str,
+    body: str,
+    data: dict | None = None,
+) -> bool:
+    """
+    Envía una notificación push a un dispositivo via Firebase Cloud Messaging.
+    Retorna True si se envió correctamente, False en caso de error
+    (ej. token inválido/expirado).
+    """
+    try:
+        message = messaging.Message(
+            notification=messaging.Notification(title=title, body=body),
+            data={k: str(v) for k, v in (data or {}).items()},
+            token=token,
+        )
+        response = messaging.send(message)
+        print(f"✅ Push enviado: {response}")
+        return True
+    except Exception as e:
+        print(f"❌ Error al enviar push notification: {e}")
+        return False
