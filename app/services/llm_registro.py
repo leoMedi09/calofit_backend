@@ -758,25 +758,63 @@ async def respuesta_recomendacion_llm(
         f"IDENTIDAD PESCADOS: si sugieres pescado, usa especies de Lambayeque "
         f"(Caballa, Lisa, Mero, Tollo, Pescado Salpreso, Pescado Blanco). "
         f"PROHIBIDO sugerir Atún o Salmón (no son típicos de la zona).\n\n"
+        f"COHERENCIA CULINARIA: cada plato debe ser una preparación real y realista de la "
+        f"gastronomía peruana, con UNA sola proteína principal (no mezcles pollo+mariscos+res "
+        f"en un mismo plato salvo que sea un tipo de plato tradicionalmente mixto, ej. jalea, "
+        f"parrillada, chaufa). Las kcal indicadas deben corresponder al tipo de plato: "
+        f"entradas/causas/ensaladas ~250-450 kcal, sopas/cremas ~150-400 kcal, "
+        f"platos de fondo ~400-900 kcal.\n\n"
         + (f"{objetivo_proteina_reco}\n\n" if objetivo_proteina_reco else "")
         + (f"PREFERENCIA: {pref_ingrediente_reco}\n\n" if pref_ingrediente_reco else "")
         + _ya_sugeridos_txt
         + "FORMATO DE RESPUESTA (exactamente 3 líneas, nada más):\n"
-        "- Nombre del plato (~XXX kcal)\n"
-        "- Nombre del plato (~XXX kcal)\n"
-        "- Nombre del plato (~XXX kcal)\n\n"
+        "- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+        "- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+        "- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n\n"
+        "Los gramos de proteína (P), carbohidratos (C) y grasa (G) deben ser "
+        "estimaciones nutricionales reales y coherentes con las kcal indicadas.\n"
         "NO agregues explicaciones, recetas ni texto extra. Solo las 3 líneas."
     )
 
     respuesta_llm_reco = await ia_engine._llamar_groq(
-        _prompt_reco_comida, max_tokens=120, temp=0.5
+        _prompt_reco_comida, max_tokens=180, temp=0.5
     )
 
-    # 6. Parsear bullets del LLM y cachear macros
-    # No depende de que el LLM use "- " al inicio: captura cualquier texto
-    # (sin paréntesis ni saltos de línea) que termine en "(~XXX kcal)".
+    # 6. Parsear bullets del LLM y cachear macros reales (no hardcodeados)
+    # Intento 1: el LLM incluyó kcal + P/C/G en el mismo bullet.
+    _RE_BULLET_MACROS = _re_reco.compile(
+        r'([^()\n]{3,80}?)\s*\(~?(\d+(?:\.\d+)?)\s*kcal[,;]?\s*'
+        r'P\s*:?\s*(\d+(?:\.\d+)?)\s*g[,;]?\s*'
+        r'C\s*:?\s*(\d+(?:\.\d+)?)\s*g[,;]?\s*'
+        r'G\s*:?\s*(\d+(?:\.\d+)?)\s*g\)',
+        _re_reco.IGNORECASE
+    )
+    _platos_con_macros = _RE_BULLET_MACROS.findall(respuesta_llm_reco or "")
+
+    if _platos_con_macros:
+        _platos_limpios = []
+        for _nombre_p, _kcal_p, _p_p, _c_p, _g_p in _platos_con_macros[:3]:
+            _nombre_p = _re_reco.sub(r'^[\s\-•*\d.\)]+', '', _nombre_p).strip()
+            p_f, c_f, g_f = float(_p_p), float(_c_p), float(_g_p)
+            k_f = round(4 * p_f + 4 * c_f + 9 * g_f, 1) or float(_kcal_p)
+            cache_macros(_nombre_p, {
+                "nombre": _nombre_p,
+                "kcal": k_f,
+                "prot_g": p_f,
+                "carb_g": c_f,
+                "grasa_g": g_f,
+            })
+            _platos_limpios.append((_nombre_p, k_f))
+        bullets = '\n'.join(
+            f'- {n} (~{k:.0f} kcal)' for n, k in _platos_limpios
+        )
+        return f"Opciones para ti:\n{bullets}"
+
+    # Intento 2 (fallback): el LLM no incluyó P/C/G — extraer solo nombre+kcal
+    # y estimar macros reales con _PROMPT_COMIDA por cada plato (sin valores
+    # hardcodeados).
     _RE_BULLET_RECO = _re_reco.compile(
-        r'([^()\n]{3,80}?)\s*\(~?(\d+)\s*kcal\)', _re_reco.IGNORECASE
+        r'([^()\n]{3,80}?)\s*\(~?(\d+(?:\.\d+)?)\s*kcal\)', _re_reco.IGNORECASE
     )
     _platos_parseados = _RE_BULLET_RECO.findall(respuesta_llm_reco or "")
 
@@ -784,16 +822,31 @@ async def respuesta_recomendacion_llm(
         _platos_limpios = []
         for _nombre_p, _kcal_p in _platos_parseados[:3]:
             _nombre_p = _re_reco.sub(r'^[\s\-•*\d.\)]+', '', _nombre_p).strip()
+            _kcal_f = float(_kcal_p)
+            p_f = c_f = g_f = 0.0
+            try:
+                _raw_macro = await ia_engine._llamar_groq(
+                    _PROMPT_COMIDA.format(mensaje=_nombre_p), max_tokens=300, temp=0.0
+                )
+                _d_macro = _parse_json(_raw_macro)
+                _items = (_d_macro or {}).get("alimentos") or []
+                if _items:
+                    p_f = float(_items[0].get("prot_g", 0) or 0)
+                    c_f = float(_items[0].get("carb_g", 0) or 0)
+                    g_f = float(_items[0].get("grasa_g", 0) or 0)
+                    _kcal_f = round(4 * p_f + 4 * c_f + 9 * g_f, 1) or _kcal_f
+            except Exception as e:
+                logger.warning("[Reco] No se pudo estimar macros de '%s': %s", _nombre_p, e)
             cache_macros(_nombre_p, {
                 "nombre": _nombre_p,
-                "kcal": float(_kcal_p),
-                "prot_g": 0.0,
-                "carb_g": 0.0,
-                "grasa_g": 0.0,
+                "kcal": _kcal_f,
+                "prot_g": p_f,
+                "carb_g": c_f,
+                "grasa_g": g_f,
             })
-            _platos_limpios.append((_nombre_p, _kcal_p))
+            _platos_limpios.append((_nombre_p, _kcal_f))
         bullets = '\n'.join(
-            f'- {n} (~{k} kcal)' for n, k in _platos_limpios
+            f'- {n} (~{k:.0f} kcal)' for n, k in _platos_limpios
         )
         return f"Opciones para ti:\n{bullets}"
 
