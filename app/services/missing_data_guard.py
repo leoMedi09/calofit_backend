@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional
 
-from app.services.asistente_modos import (
+from app.services.asistente.asistente_modos import (
     RECOMENDAR_EJERCICIO,
     RECOMENDAR_NUTRICION,
     REGISTRAR_EJERCICIO,

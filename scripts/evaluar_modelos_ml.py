@@ -115,7 +115,7 @@ def evaluar_knn():
         print(f"  Scaler cargado ✅")
 
     from app.core.database import SessionLocal
-    from app.services.asistente_recomendaciones import AsistenteRecomendaciones
+    from app.services.asistente.asistente_recomendaciones import AsistenteRecomendaciones
 
     db = SessionLocal()
     asistente = AsistenteRecomendaciones()

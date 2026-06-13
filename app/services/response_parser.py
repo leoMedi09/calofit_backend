@@ -1,7 +1,7 @@
 import re
 from typing import Dict, List, Optional
 
-from app.services.asistente_modos import intent_prioritario_para_parser
+from app.services.asistente.asistente_modos import intent_prioritario_para_parser
 
 
 def _sin_asteriscos(texto: str) -> str:

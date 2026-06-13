@@ -226,7 +226,7 @@ class IAService:
     @staticmethod
     def normalizar_etiqueta_modo_llm(raw: str) -> Optional[str]:
         """Extrae etiqueta válida del LLM — también detecta equivalentes semánticos."""
-        from app.services.asistente_modos import MODOS_ASISTENTE
+        from app.services.asistente.asistente_modos import MODOS_ASISTENTE
 
         t = (raw or "").strip().lower()
         if not t:
@@ -564,7 +564,7 @@ Reglas:
 
         if ejercicio_detectado:
             # Misma duración y fórmula que en tarjetas POWER (ACSM: MET×3.5×kg/200×min).
-            from app.services.asistente_ejercicio import parse_duracion_minutos
+            from app.services.asistente.asistente_ejercicio import parse_duracion_minutos
             from app.services.ejercicios_service import ejercicios_service
 
             duracion_min = parse_duracion_minutos(texto_lower, default=45.0)
@@ -588,7 +588,7 @@ Reglas:
             }
 
         # PASO 1b: "hice X … min/series" con vocabulario de gimnasio → ejercicio (no CENAN/LLM comida)
-        from app.services.asistente_ejercicio import (
+        from app.services.asistente.asistente_ejercicio import (
             extraccion_ejercicio_fallback_fuerza,
             frase_registro_actividad_fisica,
             frase_vocabulario_gimnasio,

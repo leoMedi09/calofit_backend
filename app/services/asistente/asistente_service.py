@@ -197,21 +197,21 @@ from app.core.cache import get_consulta_cached
 from app.core.utils import get_peru_date
 from app.models.client import Client
 from app.models.historial import AlertaSalud, ProgresoCalorias
-from app.services.asistente_ejercicio import (
+from app.services.asistente.asistente_ejercicio import (
     es_payload_ejercicio,
     procesar_secciones_ejercicio,
     registrar_ejercicio_desde_payload_tarjeta,
 )
-from app.services.asistente_modos import (
+from app.services.asistente.asistente_modos import (
     OTRO, RECOMENDAR_EJERCICIO, REGISTRAR_EJERCICIO, REGISTRAR_NUTRICION,
     _VERBOS_IMPERATIVOS_REGISTRO, resolver_modo_funcion,
 )
-from app.services.asistente_nutricion import (
+from app.services.asistente.asistente_nutricion import (
     procesar_secciones_comida,
     registrar_comida_desde_payload_tarjeta,
 )
-from app.services.asistente_plan import obtener_plan_hoy
-from app.services.asistente_prompt import (
+from app.services.asistente.asistente_plan import obtener_plan_hoy
+from app.services.asistente.asistente_prompt import (
     clasificar_intencion_respuesta,
     construir_prompt_cliente,
     detectar_intencion_principal,
@@ -221,12 +221,12 @@ from app.services.asistente_prompt import (
     respuesta_fallo_llm,
     respuesta_info_faltante,
 )
-from app.services.asistente_registro_comida import (
+from app.services.asistente.asistente_registro_comida import (
     registrar_desde_cache,
     registro_comida_handler,
 )
-from app.services.asistente_registro_ejercicio import registro_ejercicio_handler
-from app.services.asistente_respuesta_normalize import enriquecer_respuesta_estructurada
+from app.services.asistente.asistente_registro_ejercicio import registro_ejercicio_handler
+from app.services.asistente.asistente_respuesta_normalize import enriquecer_respuesta_estructurada
 from app.services.ia_service import ia_engine
 from app.services.missing_data_guard import (
     detectar_faltantes,
@@ -587,7 +587,7 @@ class AsistenteService:
             respuesta_recomendacion_llm,
             respuesta_chat_llm,
         )
-        from app.services.asistente_modos import RECOMENDAR_NUTRICION, RECOMENDAR_EJERCICIO
+        from app.services.asistente.asistente_modos import RECOMENDAR_NUTRICION, RECOMENDAR_EJERCICIO
 
         _hist_limpio = [
             {"role": m.get("role", "user"),
@@ -819,7 +819,7 @@ class AsistenteService:
         except Exception:
             plan_hoy_data = {"calorias_dia": 0, "proteinas_g": 0, "carbohidratos_g": 0, "grasas_g": 0}
 
-        from app.services.asistente_ejercicio import frase_registro_actividad_fisica, frase_vocabulario_gimnasio
+        from app.services.asistente.asistente_ejercicio import frase_registro_actividad_fisica, frase_vocabulario_gimnasio
         if frase_registro_actividad_fisica(mensaje) or frase_vocabulario_gimnasio(mensaje):
             return await registro_ejercicio_handler.registrar(mensaje, perfil, db, self.ia)
         return await registro_comida_handler.registrar(mensaje, perfil, plan_hoy_data, db, self.ia)
@@ -847,7 +847,7 @@ class AsistenteService:
         peso_corporal = float(getattr(perfil, "weight", None) or 70.0)
 
         # Buscar MET en el catálogo interno
-        from app.services.asistente_ejercicio import resolver_met_mets_gym
+        from app.services.asistente.asistente_ejercicio import resolver_met_mets_gym
         _, met = resolver_met_mets_gym(nombre.lower())
         if not met:
             met = 5.0  # fuerza genérica

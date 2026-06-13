@@ -28,7 +28,7 @@ import urllib.request
 def _normalizar_voz_comida(texto: str) -> str:
     """Wrapper lazy de _normalizar_voz del módulo de ejercicios."""
     try:
-        from app.services.asistente_registro_ejercicio import _normalizar_voz
+        from app.services.asistente.asistente_registro_ejercicio import _normalizar_voz
         return _normalizar_voz(texto)
     except Exception:
         return texto
@@ -51,7 +51,7 @@ from sqlalchemy.orm import Session
 from app.models.alimento import Alimento
 from app.models.alimento_alias import AlimentoAlias
 from app.models.alimento_unidad import AlimentoUnidad
-from app.services.asistente_nutricion import coherencia_proteina_platos
+from app.services.asistente.asistente_nutricion import coherencia_proteina_platos
 from app.services.nutricional_result import validar_macros_atwater
 from app.core.logging_config import get_logger
 

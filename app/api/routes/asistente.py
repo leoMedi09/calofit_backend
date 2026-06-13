@@ -7,7 +7,7 @@ Endpoints:
   POST /confirmar-registro → Confirmar registro desde tarjeta interactiva (consulta_id)
 
 Toda la lógica de negocio está delegada a:
-  app.services.asistente_service.AsistenteService
+  app.services.asistente.asistente_service.AsistenteService
 """
 
 import traceback
@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.api.routes.auth import get_current_user
-from app.services.asistente_service import asistente_service
+from app.services.asistente.asistente_service import asistente_service
 from app.models.historial import SugerenciaGuardada
 from app.models.client import Client
 

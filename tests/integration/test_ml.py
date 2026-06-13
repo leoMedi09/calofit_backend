@@ -4,7 +4,7 @@ logging.disable(logging.CRITICAL)
 
 from app.core.database import SessionLocal
 from app.models.client import Client
-from app.services.asistente_recomendaciones import recomendaciones_handler
+from app.services.asistente.asistente_recomendaciones import recomendaciones_handler
 
 db = SessionLocal()
 try:

@@ -23,7 +23,7 @@ from app.models.historial import ProgresoCalorias
 
 from app.core.logging_config import get_logger
 from app.services.alimentos_db_service import AlimentosDBService, _norm as _norm_al
-from app.services.asistente_nutricion import (
+from app.services.asistente.asistente_nutricion import (
     advertencia_alimentos_prohibidos,
     registrar_preferencias_alimentos,
     verificar_conflicto_macros,
@@ -732,7 +732,7 @@ class RegistroComidaHandler:
                 # Si no está en BD local → intentar USDA/FatSecret/Groq + guardar en BD
                 if not pre_extraccion and _nombre_c0:
                     try:
-                        from app.services.asistente_nutricion import _buscar_o_crear_alimento_async
+                        from app.services.asistente.asistente_nutricion import _buscar_o_crear_alimento_async
                         _al_pipeline = await _buscar_o_crear_alimento_async(
                             db, _norm_al(_nombre_lookup), _nombre_lookup
                         )
@@ -837,7 +837,7 @@ class RegistroComidaHandler:
                     # CAPA 2-3-Groq: si no está en BD, llamar pipeline completo
                     if not _al_obj:
                         try:
-                            from app.services.asistente_nutricion import _buscar_o_crear_alimento_async
+                            from app.services.asistente.asistente_nutricion import _buscar_o_crear_alimento_async
                             _q_norm = _norm_al(_q)
                             _al_obj = await _buscar_o_crear_alimento_async(db, _q_norm, _q)
                             if _al_obj:
@@ -1299,7 +1299,7 @@ class RegistroComidaHandler:
                             "Fast-path historial: '%s' → plato id=%s '%s' (score=%.2f)",
                             _msg_clean_hist, _hr.plato_id, _hr.nombre_plato, _score_hist,
                         )
-                        from app.services.asistente_nutricion import _cargar_ingredientes_bd
+                        from app.services.asistente.asistente_nutricion import _cargar_ingredientes_bd
                         _desglose_h, _desglose_total_h = [], ""
                         try:
                             _kcal_h = round(float(_row_hist[2] or 0), 1)
@@ -1629,7 +1629,7 @@ class RegistroComidaHandler:
                     plato_nuevo = await crear_plato_dinamico(db, items[0])
                     if plato_nuevo:
                         macros = plato_nuevo.calcular_macros()
-                        from app.services.asistente_nutricion import _cargar_ingredientes_bd
+                        from app.services.asistente.asistente_nutricion import _cargar_ingredientes_bd
                         desglose_d, desglose_total_d = [], ""
                         try:
                             desglose_d = _cargar_ingredientes_bd(db, plato_nuevo.id)
@@ -1757,7 +1757,7 @@ class RegistroComidaHandler:
 
         desglose: list[str] = []
         desglose_total = ""
-        from app.services.asistente_nutricion import _cargar_ingredientes_bd
+        from app.services.asistente.asistente_nutricion import _cargar_ingredientes_bd
         for _row, _qty in matched:
             # row[7]=True → alimento simple (Caso B2), NO llamar _cargar_ingredientes_bd
             # porque row[0] es alimento_id, no plato_id — causaría desglose del plato incorrecto
@@ -2180,11 +2180,11 @@ def registrar_desde_cache(payload: dict, perfil, db: Session) -> dict:
     Compartido por consultar() y registrar_por_nlp() cuando reciben un consulta_id.
     """
     from app.core.utils import get_peru_date
-    from app.services.asistente_ejercicio import (
+    from app.services.asistente.asistente_ejercicio import (
         es_payload_ejercicio,
         registrar_ejercicio_desde_payload_tarjeta,
     )
-    from app.services.asistente_nutricion import registrar_comida_desde_payload_tarjeta
+    from app.services.asistente.asistente_nutricion import registrar_comida_desde_payload_tarjeta
 
     hoy      = get_peru_date()
     progreso = db.query(ProgresoCalorias).filter(

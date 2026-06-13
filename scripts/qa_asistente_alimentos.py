@@ -25,7 +25,7 @@ sys.path.insert(0, "/app")
 # ── Imports del proyecto ──────────────────────────────────────────────────────
 from app.core.database import SessionLocal
 from app.models.client import Client
-from app.services.asistente_registro_comida import registro_comida_handler
+from app.services.asistente.asistente_registro_comida import registro_comida_handler
 from app.services.ia_service import ia_engine
 
 

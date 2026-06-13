@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.utils import get_peru_date
 from app.models.historial import ProgresoCalorias
-from app.services.asistente_ejercicio import (
+from app.services.asistente.asistente_ejercicio import (
     aplicar_extraccion_nlp_ejercicio_a_progreso,
     extraccion_ejercicio_fallback_fuerza,
     frase_registro_actividad_fisica,

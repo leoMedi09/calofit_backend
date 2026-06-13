@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import text as _sql
 from sqlalchemy.orm import Session
 
-from app.services.asistente_recomendaciones import RecomendacionesHandler
+from app.services.asistente.asistente_recomendaciones import RecomendacionesHandler
 
 # ── Configuración de sustituciones por lesión ──────────────────────────────────
 

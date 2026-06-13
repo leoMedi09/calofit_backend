@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.api.routes.auth import get_current_user
 from app.core.database import get_db
-from app.services.asistente_registro_ejercicio import registro_ejercicio_handler
+from app.services.asistente.asistente_registro_ejercicio import registro_ejercicio_handler
 from app.services.rutina_service import generar_rutina_inteligente
 
 router = APIRouter()

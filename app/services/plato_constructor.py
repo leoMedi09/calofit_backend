@@ -1636,7 +1636,7 @@ async def crear_plato_dinamico(
     # FIREWALL: esta función solo crea Plato + PlatoIngrediente.
     # Llama a _buscar_o_crear_alimento_async() (solo alimentos).
     # NUNCA es llamada desde _buscar_o_crear_alimento_async() — no hay recursión.
-    from app.services.asistente_nutricion import _buscar_o_crear_alimento_async
+    from app.services.asistente.asistente_nutricion import _buscar_o_crear_alimento_async
     import difflib
 
     nombre_plato = _sanitizar_nombre_plato(nombre_plato)

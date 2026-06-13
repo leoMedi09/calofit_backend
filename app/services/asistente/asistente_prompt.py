@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.cache import get_user_recent_meals
 from app.models.preferencias import PreferenciaAlimento
-from app.services.asistente_modos import bloque_prompt_modo_funcion
+from app.services.asistente.asistente_modos import bloque_prompt_modo_funcion
 from app.services.ml_service import ml_perfil, ml_recomendador
 from app.services.response_parser import sanear_texto_conversacional_recipe
 
@@ -798,7 +798,7 @@ async def enriquecer_prompt_con_bd(
     # DB-hint para platos mencionados en el mensaje
     if modo_funcion in ("recomendar_nutricion", "responder_consulta", "otro"):
         try:
-            from app.services.asistente_nutricion import (
+            from app.services.asistente.asistente_nutricion import (
                 _norm_nombre_plato as _nn,
                 _buscar_plato_bd_por_nombre as _buscar_bd,
                 _extraer_platos_del_mensaje as _extraer_platos,
@@ -967,7 +967,7 @@ async def rescue_nlp_log(
         return
     try:
         import uuid
-        from app.services.asistente_nutricion import (
+        from app.services.asistente.asistente_nutricion import (
             _limpiar_nombre_plato_bd,
             add_user_recent_meal,
             set_consulta_cached,
