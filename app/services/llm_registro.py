@@ -638,7 +638,7 @@ async def respuesta_recomendacion_llm(
 
     # ── Recomendación de COMIDA: generada por LLM con contexto real ──────────────
     import re as _re_reco
-    from datetime import datetime as _dt_reco
+    from app.core.utils import get_peru_now as _get_peru_now_reco
 
     # 1. Detectar momento del día desde el mensaje del usuario
     _MOMENTO_KEYWORDS_RECO = {
@@ -654,7 +654,7 @@ async def respuesta_recomendacion_llm(
             momento_reco = _m_key
             break
     if not momento_reco:
-        _hora = _dt_reco.now().hour
+        _hora = _get_peru_now_reco().hour
         if 5 <= _hora < 10:
             momento_reco = "DESAYUNO"
         elif 10 <= _hora < 15:
@@ -705,6 +705,19 @@ async def respuesta_recomendacion_llm(
                 f"Al menos 1 de los 3 platos debe incluir ese ingrediente."
             )
 
+    # 3.5. Detectar objetivo de PROTEÍNA en el mensaje
+    _objetivo_proteina_match = _re_reco.search(
+        r'prote[ií]na|prote[ií]co|masa muscular|ganar m[uú]sculo|aumentar m[uú]sculo|volumen muscular',
+        _msg_low_reco,
+    )
+    objetivo_proteina_reco = (
+        "OBJETIVO PROTEÍNA: el usuario quiere AUMENTAR SU CONSUMO DE PROTEÍNA. "
+        "Los 3 platos DEBEN tener una fuente proteica principal y abundante "
+        "(pollo, pescado, res, huevo, menestras, quinua, lácteos) — mínimo ~20g de proteína cada uno. "
+        "PROHIBIDO proponer ensaladas o guarniciones sin proteína significativa "
+        "(ej: ensalada de solo lechuga/tomate/papa, pachamanca solo de verduras)."
+    ) if _objetivo_proteina_match else ""
+
     # 4. Restricción de dieta
     _condiciones_list_reco = getattr(perfil, "medical_conditions", None) or []
     _condiciones_str_reco = " ".join(_condiciones_list_reco).lower()
@@ -742,6 +755,10 @@ async def respuesta_recomendacion_llm(
         f"- Calorías restantes del día: {round(restante)} kcal\n"
         f"- Momento: {momento_reco}\n\n"
         f"REGLAS PARA {momento_reco}:\n{restricciones_momento_reco}\n\n"
+        f"IDENTIDAD PESCADOS: si sugieres pescado, usa especies de Lambayeque "
+        f"(Caballa, Lisa, Mero, Tollo, Pescado Salpreso, Pescado Blanco). "
+        f"PROHIBIDO sugerir Atún o Salmón (no son típicos de la zona).\n\n"
+        + (f"{objetivo_proteina_reco}\n\n" if objetivo_proteina_reco else "")
         + (f"PREFERENCIA: {pref_ingrediente_reco}\n\n" if pref_ingrediente_reco else "")
         + _ya_sugeridos_txt
         + "FORMATO DE RESPUESTA (exactamente 3 líneas, nada más):\n"
@@ -756,14 +773,17 @@ async def respuesta_recomendacion_llm(
     )
 
     # 6. Parsear bullets del LLM y cachear macros
+    # No depende de que el LLM use "- " al inicio: captura cualquier texto
+    # (sin paréntesis ni saltos de línea) que termine en "(~XXX kcal)".
     _RE_BULLET_RECO = _re_reco.compile(
-        r'-\s*(.+?)\s*\(~?(\d+)\s*kcal\)', _re_reco.IGNORECASE
+        r'([^()\n]{3,80}?)\s*\(~?(\d+)\s*kcal\)', _re_reco.IGNORECASE
     )
     _platos_parseados = _RE_BULLET_RECO.findall(respuesta_llm_reco or "")
 
     if _platos_parseados:
+        _platos_limpios = []
         for _nombre_p, _kcal_p in _platos_parseados[:3]:
-            _nombre_p = _nombre_p.strip()
+            _nombre_p = _re_reco.sub(r'^[\s\-•*\d.\)]+', '', _nombre_p).strip()
             cache_macros(_nombre_p, {
                 "nombre": _nombre_p,
                 "kcal": float(_kcal_p),
@@ -771,8 +791,9 @@ async def respuesta_recomendacion_llm(
                 "carb_g": 0.0,
                 "grasa_g": 0.0,
             })
+            _platos_limpios.append((_nombre_p, _kcal_p))
         bullets = '\n'.join(
-            f'- {n.strip()} (~{k} kcal)' for n, k in _platos_parseados[:3]
+            f'- {n} (~{k} kcal)' for n, k in _platos_limpios
         )
         return f"Opciones para ti:\n{bullets}"
 
