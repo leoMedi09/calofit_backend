@@ -75,9 +75,9 @@ Responde SOLO con JSON válido (sin explicaciones, sin texto extra):
 4. MÉTODO DE COCCIÓN cambia kcal: FRITO (absorbe aceite) ≠ COCIDO ≠ CRUDO.
 5. prot_total = Σ prot_g. carb_total = Σ carb_g. grasa_total = Σ grasa_g.
 6. CANTIDADES: "dos panes con pollo" → UN solo ítem {{nombre:"Pan con Pollo", cantidad:2, kcal: total×2}}. NUNCA separes en Pan ×2 + Pollo por separado — el "con" indica un combo, no ingredientes sueltos. kcal/macros son TOTALES ya multiplicados. nombre siempre en singular.
-7. kcal debe ser consistente con P/C/G: verifica que ≈ 4×P + 4×C + 9×G.
+7. kcal debe ser consistente con P/C/G: verifica que ≈ 4×P + 4×C + 9×G. ⚠️ prot_g, carb_g, grasa_g y kcal son SIEMPRE para el "porcion_g" TOTAL de ese ítem, NUNCA valores de referencia por 100g sin escalar. Si "porcion_g" es menor a 100, los macros DEBEN ser proporcionalmente menores que los valores típicos por 100g de ese alimento (ej: si 100g de maní tienen ~26g de proteína, 28g de maní deben tener ~7g de proteína, NO 26g).
 8. Si no se menciona cantidad explícita → cantidad:1.
-9. COMBOS "X con Y": "pan con pollo", "arroz con leche", "tostada con mermelada" → UN ítem cada uno. NO descomponer en ingredientes. ⚠️ Esto incluye SIEMPRE "arroz con [cualquier carne/proteína]" (pato, pollo, pavo, res, chancho, mariscos, etc.) y cualquier "[base de carbohidrato] con [proteína/guarnición]" (papa con, tallarines con, puré con, menestra con, etc.) — son UN plato de fondo único con su propia guarnición, jamás dos ítems separados (NO generes "Arroz" + "Pato" como ítems independientes; genera UN ítem "Arroz con Pato").
+9. COMBOS "X con Y": "pan con pollo", "arroz con leche", "tostada con mermelada", "pan con queso" → UN ítem cada uno. NO descomponer en ingredientes ni generar ítems extra para componentes ya incluidos en el combo. ⚠️ Esto incluye SIEMPRE "arroz con [cualquier carne/proteína]" (pato, pollo, pavo, res, chancho, mariscos, etc.) y cualquier "[base] con [proteína/guarnición/topping]" (papa con, tallarines con, puré con, menestra con, pan con, tostada con, etc.) — son UN ítem único con todos sus componentes incluidos en sus macros, jamás ítems separados (NO generes "Arroz" + "Pato", ni "Pan" + "Queso", ni "Arroz con Pollo" + "Pollo" como ítems independientes; genera UN ítem "Arroz con Pato", "Pan con Queso", "Arroz con Pollo" respectivamente, con macros que ya incluyen TODOS los componentes mencionados).
 10. ⚠️ "cantidad" es SOLO el número de PORCIONES/UNIDADES discretas (ej: "dos panes"→2, "tres galletas"→3). NUNCA pongas un valor en gramos/mililitros en "cantidad". Si el mensaje dice "150g de arroz", "200 gramos de pollo", "300ml de jugo", "2 kg de pollo", "1.5 kilos de papa" → eso va en "porcion_g" (convierte kg a gramos: 1 kg = 1000g) y "cantidad" sigue siendo 1. kcal/macros deben corresponder al total de "porcion_g" (ej: 2 kg de pollo a la plancha = 2000g ≈ 3300 kcal, NO uses una porción estándar de 100-300g cuando el usuario especificó kilos). "cantidad" jamás debe ser mayor a 10.
 11. PORCIONES POR DEFECTO (SOLO si el usuario NO especifica ninguna cantidad, unidad ni gramaje — ver regla 12 si sí especifica):
     - PLATO DE FONDO / almuerzo completo (arroz con algo, lomo saltado, seco, ají de gallina, tallarines, guisos, frituras con guarnición, causas rellenas): porción 350-450g → 600-1000 kcal. Proteínas magras (pollo, pescado, pavo) ≈600-750 kcal; proteínas grasas (pato, cerdo, res, chicharrón) ≈800-1000 kcal. NUNCA estimes un plato de fondo en menos de 600 kcal.
@@ -85,6 +85,7 @@ Responde SOLO con JSON válido (sin explicaciones, sin texto extra):
     - PAN/SÁNDWICH individual: 1 unidad ≈ 150-250 kcal base + relleno.
     - ENSALADA/ENTRADA/SOPA: 150-350 kcal.
 12. UNIDADES COTIDIANAS: si el usuario usa medidas caseras (rebanada/tajada/lonja/rodaja, trozo/pedazo, cucharada/cucharadita, taza, vaso, puñado, plato/porción), convierte a "porcion_g" REAL según ESE alimento específico y la cantidad mencionada — usa tu conocimiento nutricional para estimar el peso típico de esa medida para ese alimento (ej: una rebanada/rodaja de un tubérculo o pan es delgada, ~15-40g; una cucharada de una salsa/crema es ~15-20g; un vaso/taza de líquido es ~200-250ml; un puñado es ~25-40g). La unidad/cantidad EXPLÍCITA del usuario SIEMPRE tiene prioridad sobre las porciones por defecto de la regla 11 — NUNCA asumas un "plato completo" si el usuario especificó una porción menor (ej: "dos rebanadas de papa sancochada" es una porción pequeña de papa, NO un plato entero de papa a la huancaina).
+13. MODIFICADORES DE TAMAÑO: "medio/media" → ~50% de la porción base (de la regla 11 o de una porción estándar de ese alimento); "un cuarto de" → ~25%; "porción/plato pequeño(a)" → ~60-70%; "porción/plato grande" → ~130-160%; "porción/plato mediano(a)" → 100% (base normal). Aplica ese porcentaje TANTO a "porcion_g" COMO a kcal/prot_g/carb_g/grasa_g de forma proporcional (ej: "medio vaso de leche" → ~120ml y la mitad de las kcal/macros de un vaso completo; "porción pequeña de causa de pollo" → ~60-70% del porcion_g y kcal de una causa de pollo normal, NO la porción completa).
 """
 
 _PROMPT_EJERCICIO = _IDENTIDAD + """
@@ -326,6 +327,31 @@ async def registrar_comida_llm(
 
     # Validar que hay alimentos con macros
     _items = datos.get("alimentos", [])
+
+    # ── Modificadores de tamaño ("medio", "porción pequeña/grande") ──────────
+    # El LLM tiende a ignorar estos modificadores y devolver la porción
+    # estándar. Se corrige escalando porcion_g/kcal/macros del único ítem
+    # detectado (no aplica a mensajes con varios alimentos para no escalar
+    # ítems que no llevan el modificador).
+    _msg_low_porcion = mensaje.lower() if mensaje else ""
+    _factor_porcion = None
+    if re.search(r'\bmedi[oa]\b|\bmitad\b', _msg_low_porcion):
+        _factor_porcion = 0.5
+    elif re.search(r'\bun cuarto\b|\bcuarta parte\b|\b1/4\b', _msg_low_porcion):
+        _factor_porcion = 0.25
+    elif re.search(r'porci[oó]n (chica|pequeñ[ao])|plato (chico|pequeñ[oa])', _msg_low_porcion):
+        _factor_porcion = 0.65
+    elif re.search(r'porci[oó]n (grande|extra)|plato grande|doble porci[oó]n', _msg_low_porcion):
+        _factor_porcion = 1.4
+
+    if _factor_porcion and len(_items) == 1:
+        _it = _items[0]
+        for _campo in ("porcion_g", "kcal", "prot_g", "carb_g", "grasa_g"):
+            if _it.get(_campo) is not None:
+                _it[_campo] = round(float(_it[_campo]) * _factor_porcion, 1)
+        for _campo_total in ("prot_total", "carb_total", "grasa_total", "kcal_total"):
+            if datos.get(_campo_total) is not None:
+                datos[_campo_total] = round(float(datos[_campo_total]) * _factor_porcion, 1)
     _prot_items  = sum(float(a.get("prot_g",  0) or 0) for a in _items)
     _carb_items  = sum(float(a.get("carb_g",  0) or 0) for a in _items)
     _grasa_items = sum(float(a.get("grasa_g", 0) or 0) for a in _items)
