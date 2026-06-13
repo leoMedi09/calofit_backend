@@ -1,3 +1,0 @@
-"""
-API del Asistente.
-"""
