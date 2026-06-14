@@ -248,6 +248,11 @@ def _separar_con_n_items(items_raw: list[dict]) -> list[dict]:
 
 # ─── Normalizaciones de texto antes de enviar al LLM ─────────────────────────
 PRE_NORM_PATRONES = [
+    # ── Voz Android: "gramos" se transcribe a veces como "G"/"g" suelto ───────
+    # Ej: "comi 50 G de pollo saltado" → "comi 50 gramos de pollo saltado"
+    # Sin esto, el LLM no reconoce "G" como unidad de gramos y produce
+    # macros distintos/erróneos vs. decir "gramos" explícitamente.
+    (r"(?i)\b(\d+(?:[.,]\d+)?)\s*g\s+de\b", r"\1 gramos de"),
     # ── Muletillas de VOZ (input hablado transcripto) ─────────────────────────
     # El asistente recibe mensajes de voz → el texto puede contener muletillas,
     # dudas y conectores vacíos que confunden al LLM extractor.
