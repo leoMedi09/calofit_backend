@@ -290,10 +290,11 @@ async def obtener_seguimiento_semanal(
             round(kcal_obj * 0.25 / 9, 1),
         )
 
-    # semana_offset=0 → últimos 7 días hasta hoy
-    # semana_offset=-1 → los 7 días de la semana anterior, etc.
+    # semana_offset=0 → semana actual (Lun-Dom)
+    # semana_offset=-1 → semana anterior (Lun-Dom), etc.
     hoy = get_peru_date()
-    fecha_fin = hoy + timedelta(weeks=semana_offset)
+    lunes_actual = hoy - timedelta(days=hoy.isoweekday() - 1)
+    lunes_semana = lunes_actual + timedelta(weeks=semana_offset)
     dias_labels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 
     resultado_dias = []
@@ -303,9 +304,9 @@ async def obtener_seguimiento_semanal(
     mejor_dia = None
     mejor_adherencia = -1.0
 
-    for i in range(6, -1, -1):
-        fecha_dia = fecha_fin - timedelta(days=i)
-        dia_iso = fecha_dia.isoweekday()  # 1=Lun ... 7=Dom
+    for i in range(7):
+        fecha_dia = lunes_semana + timedelta(days=i)
+        dia_iso = i + 1  # 1=Lun ... 7=Dom
         dia_label = dias_labels[dia_iso - 1]
 
         kcal_objetivo = plan_por_dia.get(dia_iso, objetivo_base)
@@ -365,6 +366,7 @@ async def obtener_seguimiento_semanal(
             "hay_registro": hay_registro,
             "hay_ejercicio": hay_ejercicio,
             "adherencia_pct": adherencia_pct,
+            "porcentaje_consumo": round(kcal_consumidas / kcal_objetivo * 100.0, 1) if kcal_objetivo > 0 else 0.0,
         })
 
     dias_con_consumo = [d for d in resultado_dias if d["hay_registro"]]
@@ -372,7 +374,8 @@ async def obtener_seguimiento_semanal(
         sum(d["kcal_consumidas"] for d in dias_con_consumo) / len(dias_con_consumo), 1
     ) if dias_con_consumo else 0.0
 
-    fecha_inicio = fecha_fin - timedelta(days=6)
+    fecha_inicio = lunes_semana
+    fecha_fin = lunes_semana + timedelta(days=6)
     return {
         "dias": resultado_dias,
         "rango": {

@@ -334,6 +334,72 @@ def get_patient_progress(
         "today_summary": today_summary,
     }
 
+
+@router.get("/cliente/{id}/registro-diario")
+def get_patient_daily_log(
+    id: int,
+    fecha: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Devuelve el detalle de comidas y ejercicios registrados por el cliente en una fecha dada (default: hoy, hora Perú)."""
+    check_is_nutri(current_user)
+
+    client = db.query(Client).filter(Client.id == id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    if current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"] and client.assigned_nutri_id != current_user.id:
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver este paciente")
+
+    from app.models.comida_registro import ComidaRegistro
+    from app.core.utils import get_peru_date
+    from sqlalchemy import text as _sql
+
+    fecha_consulta = datetime.strptime(fecha, "%Y-%m-%d").date() if fecha else get_peru_date()
+
+    comidas = db.query(ComidaRegistro).filter(
+        ComidaRegistro.client_id == id,
+        ComidaRegistro.fecha == fecha_consulta,
+    ).order_by(ComidaRegistro.created_at.asc()).all()
+
+    comidas_list = [{
+        "id": c.id,
+        "nombre": c.nombre_alimento,
+        "momento": c.momento,
+        "gramos": c.gramos,
+        "kcal": c.kcal,
+        "proteina_g": c.proteina_g,
+        "carbohidratos_g": c.carbohidratos_g,
+        "grasas_g": c.grasas_g,
+        "hora": c.created_at,
+    } for c in comidas]
+
+    ejercicios = db.execute(_sql(
+        "SELECT ejercicio, series, reps, peso_kg, created_at, "
+        "       calorias_quemadas, session_duration_min, intensity "
+        "FROM workout_logs WHERE client_id = :cid AND DATE(created_at) = :fecha "
+        "ORDER BY created_at ASC"
+    ), {"cid": id, "fecha": fecha_consulta}).fetchall()
+
+    ejercicios_list = [{
+        "ejercicio": e.ejercicio,
+        "series": e.series,
+        "reps": e.reps,
+        "peso_kg": e.peso_kg,
+        "calorias_quemadas": e.calorias_quemadas,
+        "session_duration_min": e.session_duration_min,
+        "intensity": e.intensity,
+        "hora": e.created_at,
+    } for e in ejercicios]
+
+    return {
+        "fecha": fecha_consulta,
+        "comidas": comidas_list,
+        "ejercicios": ejercicios_list,
+    }
+
+
 @router.get("/cliente/{id}/sugerir-estrategia")
 async def suggest_strategic_guide(
     id: int,

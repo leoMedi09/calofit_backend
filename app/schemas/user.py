@@ -57,6 +57,13 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     profile_picture_url: Optional[str] = None
 
+class StaffSelfUpdate(BaseModel):
+    """Campos que un miembro del staff puede actualizar sobre sí mismo (sin tocar rol/permisos)."""
+    first_name: Optional[str] = None
+    last_name_paternal: Optional[str] = None
+    last_name_maternal: Optional[str] = None
+    email: Optional[EmailStr] = None
+
 class UserResponse(BaseModel):
     id: int
     first_name: Optional[str] = None

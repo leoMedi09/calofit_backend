@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.user import User
 from app.core.security import security
-from app.schemas.user import UserCreate
+from app.schemas.user import UserCreate, StaffSelfUpdate
 from app.api.routes.auth import get_current_user
 from app.core.local_storage import local_storage
 from datetime import datetime 
@@ -97,5 +97,34 @@ async def leer_mi_perfil(current_user: User = Depends(get_current_user)):
             "peso_kg": getattr(current_user, "weight", None),
             "talla_m": getattr(current_user, "height", None),
             "condiciones": getattr(current_user, "medical_conditions", [])
+        }
+    }
+
+
+@router.put("/me")
+async def actualizar_mi_perfil(
+    datos: StaffSelfUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Permite a un miembro del staff (nutri/entrenador/admin) actualizar sus propios datos personales."""
+    if datos.email and datos.email != current_user.email:
+        existente = db.query(User).filter(User.email == datos.email, User.id != current_user.id).first()
+        if existente:
+            raise HTTPException(status_code=400, detail="El correo electrónico ya está registrado")
+
+    for campo, valor in datos.model_dump(exclude_unset=True).items():
+        setattr(current_user, campo, valor)
+
+    db.commit()
+    db.refresh(current_user)
+
+    return {
+        "identidad": {
+            "nombres": current_user.first_name,
+            "apellido_paterno": current_user.last_name_paternal,
+            "apellido_materno": current_user.last_name_maternal,
+            "email": current_user.email,
+            "foto_perfil": current_user.profile_picture_url,
         }
     }
