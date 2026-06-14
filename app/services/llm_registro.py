@@ -68,17 +68,41 @@ Responde SOLO con JSON válido (sin explicaciones, sin texto extra):
 "ceviche" = pescado crudo marinado en limón (NUNCA cocido al horno).
 "causa" = pastel de papa amarilla fría. "chicha morada" = bebida de maíz morado.
 
+━━ UNIDADES Y ABREVIATURAS (CRÍTICO — transcripción de voz) ━━
+El mensaje puede venir de audio transcrito a texto, donde "gramos" a veces se
+transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
+- "<número> G de <alimento>" o "<número> g de <alimento>" → <número> GRAMOS de <alimento>.
+  Ej: "50 G de pollo saltado" = "50 gramos de pollo saltado" (NO 50 unidades, NO 50 "G").
+- "gr", "grs", "grms" → gramos. "ml", "mls", "cc" → mililitros. "kg", "kilo(s)" → ×1000 gramos.
+- Una letra/abreviatura suelta junto a un número NUNCA es una unidad de cantidad/conteo
+  (cantidad nunca se infiere de "G", "g", "ml", "kg" — esos SIEMPRE son peso/volumen → porcion_g).
+
 ━━ REGLAS OBLIGATORIAS ━━
 1. Si es_real = false → ese item NO se incluye en el JSON final (omitirlo).
 2. Si TODOS son ficticios → {{"alimentos":[], "prot_total":0, "carb_total":0, "grasa_total":0}}
-3. SIEMPRE incluye todos los alimentos/bebidas reales del mensaje.
+3. ⚠️ SIEMPRE incluye TODOS los alimentos/bebidas reales mencionados en el mensaje, SIN EXCEPCIÓN
+   — incluso si el mensaje menciona 2, 3 o más alimentos distintos en la misma frase
+   (separados por "y", "con", "más", "," o "además de"). NUNCA omitas un alimento
+   mencionado explícitamente solo porque aparece junto a otro. Antes de responder,
+   verifica que cada alimento/plato nombrado por el usuario tenga su propio ítem
+   (o forme parte de un combo según la regla 9) — si falta alguno, agrégalo.
 4. MÉTODO DE COCCIÓN cambia kcal: FRITO (absorbe aceite) ≠ COCIDO ≠ CRUDO.
 5. prot_total = Σ prot_g. carb_total = Σ carb_g. grasa_total = Σ grasa_g.
 6. CANTIDADES: "dos panes con pollo" → UN solo ítem {{nombre:"Pan con Pollo", cantidad:2, kcal: total×2}}. NUNCA separes en Pan ×2 + Pollo por separado — el "con" indica un combo, no ingredientes sueltos. kcal/macros son TOTALES ya multiplicados. nombre siempre en singular.
 7. kcal debe ser consistente con P/C/G: verifica que ≈ 4×P + 4×C + 9×G. ⚠️ prot_g, carb_g, grasa_g y kcal son SIEMPRE para el "porcion_g" TOTAL de ese ítem, NUNCA valores de referencia por 100g sin escalar. Si "porcion_g" es menor a 100, los macros DEBEN ser proporcionalmente menores que los valores típicos por 100g de ese alimento (ej: si 100g de maní tienen ~26g de proteína, 28g de maní deben tener ~7g de proteína, NO 26g).
 8. Si no se menciona cantidad explícita → cantidad:1.
-9. COMBOS "X con Y": "pan con pollo", "arroz con leche", "tostada con mermelada", "pan con queso" → UN ítem cada uno. NO descomponer en ingredientes ni generar ítems extra para componentes ya incluidos en el combo. ⚠️ Esto incluye SIEMPRE "arroz con [cualquier carne/proteína]" (pato, pollo, pavo, res, chancho, mariscos, etc.) y cualquier "[base] con [proteína/guarnición/topping]" (papa con, tallarines con, puré con, menestra con, pan con, tostada con, etc.) — son UN ítem único con todos sus componentes incluidos en sus macros, jamás ítems separados (NO generes "Arroz" + "Pato", ni "Pan" + "Queso", ni "Arroz con Pollo" + "Pollo" como ítems independientes; genera UN ítem "Arroz con Pato", "Pan con Queso", "Arroz con Pollo" respectivamente, con macros que ya incluyen TODOS los componentes mencionados).
-10. ⚠️ "cantidad" es SOLO el número de PORCIONES/UNIDADES discretas (ej: "dos panes"→2, "tres galletas"→3). NUNCA pongas un valor en gramos/mililitros en "cantidad". Si el mensaje dice "150g de arroz", "200 gramos de pollo", "300ml de jugo", "2 kg de pollo", "1.5 kilos de papa" → eso va en "porcion_g" (convierte kg a gramos: 1 kg = 1000g) y "cantidad" sigue siendo 1. kcal/macros deben corresponder al total de "porcion_g" (ej: 2 kg de pollo a la plancha = 2000g ≈ 3300 kcal, NO uses una porción estándar de 100-300g cuando el usuario especificó kilos). "cantidad" jamás debe ser mayor a 10.
+9. COMBOS "X con Y" — UN solo ítem SOLO si "X con Y" es el NOMBRE de un plato/preparación
+   reconocido como UNA unidad (ej: "pan con pollo", "arroz con leche", "tostada con mermelada",
+   "pan con queso", "arroz con pollo/pato/pavo/res/chancho/mariscos", "papa con...", "tallarines con...",
+   "puré con...", "menestra con...") → genera UN ítem único con todos sus componentes incluidos
+   en sus macros (NO descompongas en ingredientes separados).
+   ⚠️ Si "X" y "Y" son DOS PLATOS/ALIMENTOS COMPLETOS E INDEPENDIENTES que simplemente se
+   comieron juntos (ej: "pollo saltado con plátano sancochado", "arroz con pollo con una gaseosa",
+   "lomo saltado con una ensalada"), trátalos como DOS ítems SEPARADOS, cada uno con sus
+   propias macros — NO los fusiones en uno solo y NO descartes ninguno.
+   Lo mismo aplica si están unidos por "y", "más" o ",": cada alimento/plato completo
+   mencionado es su propio ítem, salvo que coincidan con un combo reconocido de esta regla.
+10. ⚠️ "cantidad" es SOLO el número de PORCIONES/UNIDADES discretas (ej: "dos panes"→2, "tres galletas"→3). NUNCA pongas un valor en gramos/mililitros en "cantidad". Si el mensaje dice "150g de arroz", "200 gramos de pollo", "50 G de pollo" (= 50 gramos, ver sección de unidades), "300ml de jugo", "2 kg de pollo", "1.5 kilos de papa" → eso va en "porcion_g" (convierte kg a gramos: 1 kg = 1000g) y "cantidad" sigue siendo 1. kcal/macros deben corresponder al total de "porcion_g" (ej: 2 kg de pollo a la plancha = 2000g ≈ 3300 kcal, NO uses una porción estándar de 100-300g cuando el usuario especificó kilos). "cantidad" jamás debe ser mayor a 10.
 11. PORCIONES POR DEFECTO (SOLO si el usuario NO especifica ninguna cantidad, unidad ni gramaje — ver regla 12 si sí especifica):
     - PLATO DE FONDO / almuerzo completo (arroz con algo, lomo saltado, seco, ají de gallina, tallarines, guisos, frituras con guarnición, causas rellenas): porción 350-450g → 600-1000 kcal. Proteínas magras (pollo, pescado, pavo) ≈600-750 kcal; proteínas grasas (pato, cerdo, res, chicharrón) ≈800-1000 kcal. NUNCA estimes un plato de fondo en menos de 600 kcal.
     - BEBIDAS (jugo, limonada, gaseosa, chicha): 200-300 ml.
@@ -86,6 +110,9 @@ Responde SOLO con JSON válido (sin explicaciones, sin texto extra):
     - ENSALADA/ENTRADA/SOPA: 150-350 kcal.
 12. UNIDADES COTIDIANAS: si el usuario usa medidas caseras (rebanada/tajada/lonja/rodaja, trozo/pedazo, cucharada/cucharadita, taza, vaso, puñado, plato/porción), convierte a "porcion_g" REAL según ESE alimento específico y la cantidad mencionada — usa tu conocimiento nutricional para estimar el peso típico de esa medida para ese alimento (ej: una rebanada/rodaja de un tubérculo o pan es delgada, ~15-40g; una cucharada de una salsa/crema es ~15-20g; un vaso/taza de líquido es ~200-250ml; un puñado es ~25-40g). La unidad/cantidad EXPLÍCITA del usuario SIEMPRE tiene prioridad sobre las porciones por defecto de la regla 11 — NUNCA asumas un "plato completo" si el usuario especificó una porción menor (ej: "dos rebanadas de papa sancochada" es una porción pequeña de papa, NO un plato entero de papa a la huancaina).
 13. MODIFICADORES DE TAMAÑO: "medio/media" → ~50% de la porción base (de la regla 11 o de una porción estándar de ese alimento); "un cuarto de" → ~25%; "porción/plato pequeño(a)" → ~60-70%; "porción/plato grande" → ~130-160%; "porción/plato mediano(a)" → 100% (base normal). Aplica ese porcentaje TANTO a "porcion_g" COMO a kcal/prot_g/carb_g/grasa_g de forma proporcional (ej: "medio vaso de leche" → ~120ml y la mitad de las kcal/macros de un vaso completo; "porción pequeña de causa de pollo" → ~60-70% del porcion_g y kcal de una causa de pollo normal, NO la porción completa).
+14. CONSISTENCIA: para un mismo alimento y la misma porción, usa SIEMPRE los valores nutricionales
+    estándar (USDA/INS-CENAN) de ese alimento — NO improvises valores nuevos cada vez. Si tienes
+    duda entre varias preparaciones, usa la versión más común/estándar en Perú.
 """
 
 _PROMPT_EJERCICIO = _IDENTIDAD + """
