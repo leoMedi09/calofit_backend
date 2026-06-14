@@ -382,15 +382,9 @@ async def registrar_comida_llm(
     _prot_items  = sum(float(a.get("prot_g",  0) or 0) for a in _items)
     _carb_items  = sum(float(a.get("carb_g",  0) or 0) for a in _items)
     _grasa_items = sum(float(a.get("grasa_g", 0) or 0) for a in _items)
-    _kcal_items  = sum(float(a.get("kcal",    0) or 0) for a in _items)
-    _tiene_macros = (
-        (datos.get("prot_total",  0) or 0) > 0
-        or (datos.get("carb_total",  0) or 0) > 0
-        or (datos.get("grasa_total", 0) or 0) > 0
-        or (datos.get("kcal_total",  0) or 0) > 0
-        or _prot_items > 0 or _carb_items > 0 or _grasa_items > 0 or _kcal_items > 0
-    )
-    if not _items or not _tiene_macros:
+    # No exigir macros > 0: alimentos/bebidas reales con 0 kcal (café negro, agua,
+    # té sin azúcar, gaseosa zero) son válidos y deben registrarse igual.
+    if not _items:
         return {
             "success": False,
             "tipo_detectado": "no_identificado",
