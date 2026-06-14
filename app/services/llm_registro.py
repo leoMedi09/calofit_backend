@@ -397,15 +397,23 @@ async def registrar_comida_llm(
             "mensaje": f"No identifiqué ningún alimento, {perfil.first_name}. ¿Qué comiste exactamente?",
         }
 
-    prot  = round(float(datos.get("prot_total", 0)), 1)
-    carb  = round(float(datos.get("carb_total", 0)), 1)
-    grasa = round(float(datos.get("grasa_total", 0)), 1)
-    # Calcular kcal desde macros (fuente de verdad).
-    # Si los macros dan > 0, siempre usar esa cifra — más confiable que kcal_total del LLM.
-    kcal_desde_macros = round(4 * prot + 4 * carb + 9 * grasa, 1)
-    kcal_llm = round(float(datos.get("kcal_total", 0)), 1)
-    # Preferir macros si dan algún valor positivo; fallback a kcal_llm solo si macros=0
-    kcal = kcal_desde_macros if kcal_desde_macros > 0 else kcal_llm
+    # Fuente de verdad: SUMA de los macros POR ÍTEM (no los totales que devuelve el LLM
+    # aparte, que a veces no coinciden con la suma real de sus propios ítems).
+    # Esto garantiza que kcal == Σ kcal de cada fila insertada en comida_registros,
+    # para que el Balance (suma de comidas) coincida con el total mostrado en el chat.
+    if _prot_items > 0 or _carb_items > 0 or _grasa_items > 0:
+        prot  = round(_prot_items, 1)
+        carb  = round(_carb_items, 1)
+        grasa = round(_grasa_items, 1)
+        kcal  = round(4 * prot + 4 * carb + 9 * grasa, 1)
+    else:
+        prot  = round(float(datos.get("prot_total", 0)), 1)
+        carb  = round(float(datos.get("carb_total", 0)), 1)
+        grasa = round(float(datos.get("grasa_total", 0)), 1)
+        kcal_desde_macros = round(4 * prot + 4 * carb + 9 * grasa, 1)
+        kcal_llm = round(float(datos.get("kcal_total", 0)), 1)
+        # Preferir macros si dan algún valor positivo; fallback a kcal_llm solo si macros=0
+        kcal = kcal_desde_macros if kcal_desde_macros > 0 else kcal_llm
 
     # Tope de sanidad: cantidades absurdas (ej. "50 kg de arroz") generan totales
     # de macros irreales. Si el total supera el tope, escalar proporcionalmente
@@ -463,10 +471,13 @@ async def registrar_comida_llm(
         # 10 filas por ítem.
         cantidad_item = max(1, min(cantidad_item, 10))
         # Macros por porción unitaria (aplicando el mismo tope de sanidad que los totales)
-        k_item = round(float(item.get("kcal", kcal / n_items)) * _factor_cap / cantidad_item, 1)
         p_item = round(float(item.get("prot_g", prot / n_items)) * _factor_cap / cantidad_item, 1)
         c_item = round(float(item.get("carb_g", carb / n_items)) * _factor_cap / cantidad_item, 1)
         g_item = round(float(item.get("grasa_g", grasa / n_items)) * _factor_cap / cantidad_item, 1)
+        # kcal SIEMPRE derivado de P/C/G de este ítem (4-4-9) — nunca el "kcal" crudo
+        # del LLM, que puede no ser consistente con sus propios macros. Así Σ kcal de
+        # las filas de este ítem == 4*prot_item + 4*carb_item + 9*grasa_item del total.
+        k_item = round(4 * p_item + 4 * c_item + 9 * g_item, 1)
         for _ in range(cantidad_item):
             registro = ComidaRegistro(
                 client_id=perfil.id,
