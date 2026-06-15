@@ -86,6 +86,18 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
    mencionado explícitamente solo porque aparece junto a otro. Antes de responder,
    verifica que cada alimento/plato nombrado por el usuario tenga su propio ítem
    (o forme parte de un combo según la regla 9) — si falta alguno, agrégalo.
+   ⚠️ CUENTA LAS MENCIONES, NO LOS NOMBRES ÚNICOS: si el mensaje describe varias comidas
+   (Desayuno/Almuerzo/Cena/Merienda) y el MISMO alimento aparece mencionado en MÁS DE UNA
+   sección, debe haber UN ÍTEM POR CADA MENCIÓN (el array "alimentos" puede tener el mismo
+   "nombre" repetido más de una vez) — NUNCA fusiones menciones de secciones distintas en
+   un solo ítem. Ejemplo concreto:
+     Mensaje: "Desayuno: plátano sancochado con queso de dieta y un bizcocho.
+               Almuerzo: ceviche con torta de choclo, camote.
+               Cena: 3 bizcochos con queso de dieta"
+     → "alimentos" debe tener 8 ítems: Plátano sancochado, Queso de dieta (desayuno),
+        Bizcocho ×1 (desayuno), Ceviche, Torta de choclo, Camote, Bizcocho ×3 (cena),
+        Queso de dieta (cena) — "Queso de dieta" aparece DOS VECES porque se menciona
+        en DOS comidas distintas, cada una con su propia porción.
 4. MÉTODO DE COCCIÓN cambia kcal: FRITO (absorbe aceite) ≠ COCIDO ≠ CRUDO.
 5. prot_total = Σ prot_g. carb_total = Σ carb_g. grasa_total = Σ grasa_g.
 6. CANTIDADES: "dos panes con pollo" → UN solo ítem {{nombre:"Pan con Pollo", cantidad:2, kcal: total×2}}. NUNCA separes en Pan ×2 + Pollo por separado — el "con" indica un combo, no ingredientes sueltos. kcal/macros son TOTALES ya multiplicados. nombre siempre en singular.
