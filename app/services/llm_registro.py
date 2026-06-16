@@ -411,15 +411,9 @@ async def registrar_comida_llm(
     elif re.search(r'porci[oó]n (grande|extra)|plato grande|doble porci[oó]n', _msg_low_porcion):
         _factor_porcion = 1.4
 
-    # Aplica el modificador cuando hay 1 ítem (caso normal) o exactamente 2 ítems
-    # y el modificador está en la primera mitad del mensaje — indica que aplica
-    # al combo completo (ej: "un cuarto de pan francés con palta" → pan+palta son 1 porción)
-    _modifier_early = (
-        re.search(r'\b(medi[oa]|mitad|un cuarto|cuarta parte|porci[oó]n (chica|pequeñ[ao]|grande)|plato (chico|pequeñ[ao]|grande)|doble porci[oó]n)\b',
-                  _msg_low_porcion[:max(1, len(_msg_low_porcion) // 2)])
-        if _msg_low_porcion else None
-    )
-    if _factor_porcion and (len(_items) == 1 or (len(_items) == 2 and _modifier_early)):
+    # Aplica el modificador cuando hay 1 o 2 ítems. Con 2 ítems cubre combos que el
+    # LLM separa en dos partes (ej: "un cuarto de pan francés con palta" → pan+palta).
+    if _factor_porcion and len(_items) <= 2:
         for _it in _items:
             for _campo in ("porcion_g", "kcal", "prot_g", "carb_g", "grasa_g"):
                 if _it.get(_campo) is not None:
