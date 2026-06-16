@@ -32,10 +32,19 @@ Conoces TODOS los alimentos peruanos: cebiches, causas, secos, arroces, menestra
 _PROMPT_COMIDA = _IDENTIDAD + """
 TAREA: Analiza el mensaje y extrae TODOS los alimentos/bebidas consumidos con sus macros exactos.
 
-FUENTE DE DATOS: Usa USDA FoodData Central como referencia principal.
-Para alimentos peruanos (ceviche, causa, lomo saltado, ají de gallina, etc.) usa INS/CENAN 2017.
-Para cualquier otro alimento del mundo, usa tu conocimiento de bases de datos nutricionales públicas.
+FUENTE DE DATOS: Usa USDA FoodData Central o INS/CENAN 2017 como fuente.
+Para alimentos peruanos usa INS/CENAN 2017. Para el resto, USDA FoodData Central.
+NO inventes ni improvises valores — usa tu conocimiento real de estas bases de datos.
 SÉ DETERMINISTA: el mismo alimento con la misma cantidad siempre debe dar el mismo resultado.
+
+⚠️ VERIFICACIÓN OBLIGATORIA antes de escribir el JSON:
+   Paso 1 — macros: ¿Son los valores de prot_g/carb_g/grasa_g coherentes con lo que
+   USDA/INS-CENAN indica para ESE alimento? Un huevo tiene grasa, el arroz tiene carbos, el
+   pollo tiene proteína — si algún macro queda en 0 cuando no debería, recalcula.
+   Paso 2 — escala: ¿Escalaste los macros al porcion_g real del usuario?
+   Si el alimento tiene X kcal/100g y el usuario comió Y gramos → kcal = X × Y / 100.
+   Paso 3 — atwater: ¿kcal ≈ 4×prot_g + 4×carb_g + 9×grasa_g? Si la diferencia supera
+   el 10%, ajusta los macros para que sean coherentes con la kcal conocida del alimento.
 
 VALIDACIÓN: Antes de calcular, determina si cada alimento es real.
 Un alimento es real si existe en USDA, INS/CENAN, OpenFoodFacts u otra BD pública de nutrición.
