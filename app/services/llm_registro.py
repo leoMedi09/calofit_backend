@@ -249,10 +249,13 @@ REGLAS DE RESPUESTA:
   3. PROHIBIDO terminar con pregunta: "¿Quieres saber más?", "¿Te gustaría...?". Termina con punto.
 
 ⛔ ADAPTACIÓN DE DIETA (CRÍTICO):
-  Si Dieta = Vegano o Vegetariano → PROHIBIDO ingredientes animales en recetas.
-  Para platos con carne/pescado: adapta AUTOMÁTICAMENTE al sustituto vegetal SIN que el usuario lo pida.
-  Ceviche vegano → usa palmito o champiñones. Lomo saltado vegano → usa tofu o setas.
-  Siempre MENCIONA que es la versión vegana: "Versión vegana: en lugar de pescado, usa palmito..."
+  Si Dieta = "Vegano" o "Vegetariano" → PROHIBIDO ingredientes animales en recetas.
+    Para platos con carne/pescado: adapta AUTOMÁTICAMENTE al sustituto vegetal SIN que el usuario lo pida.
+    Ceviche vegano → usa palmito o champiñones. Lomo saltado vegano → usa tofu o setas.
+    Siempre MENCIONA que es la versión vegana: "Versión vegana: en lugar de pescado, usa palmito..."
+  Si Dieta = Normal, Mediterránea, Cetogénica, Diabético u OTRA → PROHIBIDO mencionar
+    versiones veganas, sustitutos vegetales ni alternativas veganas en la receta.
+    Usa los ingredientes originales del plato sin ofrecer variantes no solicitadas.
   Si Condiciones incluye Diabetes → evita azúcar, miel, carbos refinados en la receta.
 
 RECETAS ('cómo se hace X', 'receta de X'):
@@ -680,6 +683,33 @@ async def registrar_ejercicio_llm(
     }
 
 
+def _persistir_historial_recomendaciones(db, perfil, momento: str, platos: list) -> None:
+    """Guarda los platos recomendados (con macros reales) en HistorialRecomendacion
+    para que las próximas 48h los excluya el candidato KNN y el LLM no los repita.
+    plato_id queda en NULL: son platos generados por LLM, no del catálogo."""
+    if db is None or not platos:
+        return
+    try:
+        from app.models.historial_recomendacion import HistorialRecomendacion
+
+        for nombre, kcal, prot, carb, gras in platos:
+            db.add(HistorialRecomendacion(
+                client_id=perfil.id,
+                plato_id=None,
+                nombre_plato=nombre,
+                calorias=kcal,
+                proteinas_g=prot,
+                carbohidratos_g=carb,
+                grasas_g=gras,
+                momento_dia=momento.lower() if momento else None,
+                fue_consumido=False,
+            ))
+        db.commit()
+    except Exception as e:
+        logger.warning("[Reco] No se pudo persistir HistorialRecomendacion: %s", e)
+        db.rollback()
+
+
 async def respuesta_recomendacion_llm(
     mensaje: str,
     perfil,
@@ -689,6 +719,9 @@ async def respuesta_recomendacion_llm(
     ia_engine,
     modo: str = "comida",
     historial: list = None,
+    db: Session = None,
+    plan_macros: dict = None,
+    consumido_macros: dict = None,
 ) -> str:
     """Genera recomendación vía LLM. Para comida: cachea los macros exactos de
     cada plato recomendado → cuando el usuario lo registre, se usarán los mismos
@@ -711,12 +744,17 @@ async def respuesta_recomendacion_llm(
     import re as _re_reco
     from app.core.utils import get_peru_now as _get_peru_now_reco
 
-    # 1. Detectar momento del día desde el mensaje del usuario
+    # 0. Detectar momento del día PRIMERO — necesario para filtrar candidatos KNN
+    #    antes de pasarlos al LLM (evita sugerir ingredientes inapropiados por horario)
+    # Orden de prioridad: CENA → MERIENDA → ALMUERZO → DESAYUNO
+    # ALMUERZO va antes que DESAYUNO para que "ya entrené en la mañana, necesito almorzar"
+    # matchee "almorzar" (ALMUERZO) antes de matchear "mañana" (DESAYUNO).
+    # "tarde" solo en MERIENDA — "snack en la tarde" → MERIENDA, no ALMUERZO.
     _MOMENTO_KEYWORDS_RECO = {
         "CENA":      ["cenar", "cena", "noche", "nocturno"],
+        "MERIENDA":  ["merienda", "snack", "media tarde", "media mañana", "antojo", "tarde"],
+        "ALMUERZO":  ["almorzar", "almuerzo", "mediodía", "mediodia"],
         "DESAYUNO":  ["desayunar", "desayuno", "mañana", "madrugada"],
-        "ALMUERZO":  ["almorzar", "almuerzo", "mediodía", "mediodia", "tarde"],
-        "MERIENDA":  ["merienda", "snack", "media tarde", "media mañana", "antojo"],
     }
     _msg_low_reco = mensaje.lower() if mensaje else ""
     momento_reco = None
@@ -735,28 +773,127 @@ async def respuesta_recomendacion_llm(
         else:
             momento_reco = "CENA"
 
-    # 2. Restricciones por momento del día
-    _RESTRICCIONES_MOMENTO_RECO = {
-        "CENA": (
-            "Cena ligera (máx 520 kcal). "
-            "PROHIBIDO absolutamente: cebiches, tiraditos, arroz con pato/pollo/cabrito, "
-            "lomo saltado, ají de gallina, seco de res/cabrito, jalea, chicharrón. "
-            "SOLO: sopas ligeras, ensaladas, menestras con vegetales, pescado a la plancha, "
-            "huevo sancochado, causa pequeña, crema de verduras."
-        ),
+    # 1. KNN — candidatos del catálogo INS/CENAN por similitud coseno con el déficit real.
+    _candidatos_knn: list = []
+    _excluidos_48h: list[str] = []
+    if db is not None:
+        try:
+            from datetime import datetime, timedelta
+
+            from app.models.historial_recomendacion import HistorialRecomendacion
+            from app.services.ml_service import ml_recomendador
+
+            _desde_48h = datetime.utcnow() - timedelta(hours=48)
+            _excluidos_48h = [
+                row[0] for row in db.query(HistorialRecomendacion.nombre_plato)
+                .filter(
+                    HistorialRecomendacion.client_id == perfil.id,
+                    HistorialRecomendacion.created_at >= _desde_48h,
+                )
+                .all()
+                if row[0]
+            ]
+
+            _plan_macros = plan_macros or {}
+            _cons_macros = consumido_macros or {}
+            _prot_falt = max(0.0, (_plan_macros.get("proteinas_g") or 0) - (_cons_macros.get("proteinas") or 0))
+            _carb_falt = max(0.0, (_plan_macros.get("carbohidratos_g") or 0) - (_cons_macros.get("carbohidratos") or 0))
+            _gras_falt = max(0.0, (_plan_macros.get("grasas_g") or 0) - (_cons_macros.get("grasas") or 0))
+
+            _candidatos_knn = ml_recomendador.obtener_recomendaciones(
+                restante, _prot_falt, _carb_falt, _gras_falt,
+                n_recomendaciones=3,
+                excluir_nombres=_excluidos_48h,
+                contexto=mensaje,
+            )
+        except Exception as e:
+            logger.warning("[Reco] KNN candidatos no disponibles: %s", e)
+
+    # 1.5. Evaluador LLM — valida culturalmente los candidatos KNN para el momento del día.
+    #      El prompt varía por momento para rechazar ingredientes que generarían platos
+    #      inapropiados aunque el ingrediente en sí no esté prohibido (ej: "Lisa" es un
+    #      pez válido, pero con él el LLM haría un sudado → plato de almuerzo, no desayuno).
+    #      Si ninguno calza → _top_knn = None → los 3 platos serán full LLM.
+    _EVAL_CONTEXTO_MOMENTO = {
         "DESAYUNO": (
-            "Desayuno energético (máx 450 kcal). "
-            "Opciones: avena con fruta, huevos revueltos, pan integral con palta, "
-            "kiwicha, mazamorra, jugo natural, quinua con leche, plátano con maní."
-        ),
-        "ALMUERZO": (
-            "Almuerzo completo (500-900 kcal). "
-            "Puede incluir platos de fondo lambayecanos: cebiche, arroz con pollo/pato, "
-            "seco, lomo saltado, guisos, sudados, causas, arroces con menestras."
+            "Para el DESAYUNO en Perú solo son válidos ingredientes con los que se "
+            "preparan desayunos reales: lácteos (leche, yogur, queso fresco), cereales "
+            "(avena, kiwicha, quinua), frutas, pan, huevos, palta, plátano, granola. "
+            "RECHAZA SIEMPRE: pescado, carne de res, pollo, cerdo, mariscos — con "
+            "ellos se hacen platos de almuerzo o cena, nunca desayunos. "
+            "RECHAZA también legumbres/menestras (frejol, lenteja, arveja seca, soja, "
+            "garbanzo) y especias/hierbas solas (anís, orégano, comino, canela)."
         ),
         "MERIENDA": (
-            "Merienda/snack ligero (máx 300 kcal). "
-            "Frutas, yogur, galletas integrales, maní, frutos secos, barra de cereal, té."
+            "Para la MERIENDA (snack, 80-300 kcal) solo son válidos: frutas, frutos "
+            "secos, lácteos, avena, pan integral, palta, maní, granola, yogur. "
+            "RECHAZA: pescado, carne, pollo, mariscos, legumbres, arroz — con ellos "
+            "se preparan platos completos de almuerzo o cena, no meriendas. "
+            "RECHAZA especias/hierbas solas (anís, orégano, comino) que no anclan plato."
+        ),
+        "CENA": (
+            "Para la CENA (platos ligeros, máx 520 kcal) son válidos: pescado magro, "
+            "pollo a la plancha, huevos, vegetales, menestras ligeras, sopas. "
+            "RECHAZA: ingredientes que solo generan platos muy calóricos (chicharrón, "
+            "panceta) y especias/hierbas solas (anís, orégano, comino, canela) que "
+            "no pueden ser el ingrediente principal de un plato."
+        ),
+        "ALMUERZO": (
+            "Para el ALMUERZO son válidos casi todos los ingredientes de la gastronomía "
+            "peruana: carnes, pescados, aves, mariscos, legumbres, cereales, tubérculos. "
+            "RECHAZA únicamente especias/hierbas como ingrediente PRINCIPAL (anís, "
+            "orégano, comino, canela, culantro seco) que no pueden anclar un plato completo."
+        ),
+    }
+    _top_knn = None
+    if _candidatos_knn:
+        _nombres_knn = [c["alimento"] for c in _candidatos_knn]
+        _ctx_eval = _EVAL_CONTEXTO_MOMENTO.get(momento_reco, "")
+        _prompt_eval = (
+            f"Eres nutricionista peruano. {_ctx_eval} "
+            f"Lista del catálogo MINSA/INS: {', '.join(_nombres_knn)}. "
+            f"¿Cuáles de estos alimentos se usarían habitualmente para preparar "
+            f"un plato de {momento_reco} en Lambayeque? "
+            f"Responde SOLO los nombres apropiados separados por coma. "
+            f"Si ninguno encaja responde exactamente: ninguno"
+        )
+        try:
+            _resp_eval = await ia_engine._llamar_groq(_prompt_eval, max_tokens=60, temp=0.0)
+            if _resp_eval and "ninguno" not in _resp_eval.lower():
+                _resp_low = _resp_eval.lower()
+                for c in _candidatos_knn:
+                    _palabras = [p for p in c["alimento"].lower().split() if len(p) > 3]
+                    if any(p in _resp_low for p in _palabras):
+                        _top_knn = c
+                        logger.info("[KNN Eval] Aprobado: %s para %s", c["alimento"], momento_reco)
+                        break
+            else:
+                logger.info("[KNN Eval] Ningún candidato válido para %s → 3 platos full LLM", momento_reco)
+        except Exception as e:
+            logger.warning("[KNN Eval] Evaluador falló: %s — sin ancla KNN", e)
+
+    # 2. Restricciones por momento del día
+    _RESTRICCIONES_MOMENTO_RECO = {
+        "DESAYUNO": (
+            "Rango: 250-450 kcal. Primera comida del día, rápida y simple. "
+            "Típico peruano: avena con leche, pan con palta o queso, huevos revueltos, "
+            "yogur con granola, fruta con cereal, quinua con leche. "
+            "⛔ PROHIBIDO: sopas, chupes, caldos, pescado, carnes, cebiches, causas, arroces guisados."
+        ),
+        "ALMUERZO": (
+            "Rango: 550-850 kcal — porción real de adulto, MÍNIMO 550 kcal. "
+            "Plato de fondo conocido: seco de pollo, arroz con pollo, ceviche, sudado, lomo saltado. "
+            "⛔ No repitas el mismo tipo de proteína en los 3 platos."
+        ),
+        "CENA": (
+            "Rango: 200-520 kcal. Plato ligero para la noche: "
+            "sopa, ensalada con proteína, pescado a la plancha, menestra. "
+            "⛔ Evita frituras y guisos pesados — esos son de almuerzo."
+        ),
+        "MERIENDA": (
+            "Rango: 80-280 kcal. Refrigerio rápido sin cocción elaborada. "
+            "Válido: fruta, pan con palta, yogur, frutos secos, huevo sancochado. "
+            "⛔ PROHIBIDO: pescado, mariscos, carnes, causas, cebiches, arroces, guisos."
         ),
     }
     restricciones_momento_reco = _RESTRICCIONES_MOMENTO_RECO.get(momento_reco, "")
@@ -789,7 +926,26 @@ async def respuesta_recomendacion_llm(
         "(ej: ensalada de solo lechuga/tomate/papa, pachamanca solo de verduras)."
     ) if _objetivo_proteina_match else ""
 
-    # 4. Restricción de dieta
+    # 3.6. Detectar objetivo de masa muscular/volumen → override calórico
+    _masa_muscular_match = _re_reco.search(
+        r'masa muscular|ganar m[uú]sculo|aumentar m[uú]sculo|volumen muscular|'
+        r'bulking|ganar peso|subir de peso|aumentar peso',
+        _msg_low_reco,
+    )
+    # Si el restante es muy bajo pero el objetivo es ganar músculo, mostrar mínimo 500 kcal
+    # para que el LLM no recomiende snacks ridículos (el LLM usa el valor como referencia, no límite duro)
+    _restante_display = max(restante, 500.0) if _masa_muscular_match else restante
+    _masa_muscular_txt = (
+        "OBJETIVO MASA MUSCULAR: para ganar masa muscular se requiere un aporte calórico ALTO. "
+        "Propón 3 platos completos de 400-700 kcal cada uno con ALTA proteína (≥25g por plato). "
+        "Una ingesta calórica ligeramente superior al mantenimiento diario es CORRECTA y deseable "
+        "para este objetivo — NO limites los platos al déficit restante del día. "
+        "Usa fuentes de proteína magra: pollo a la plancha, pescado, res magra, huevos, "
+        "menestras con quinua. Incluye carbohidratos de calidad (arroz, papa, quinua) como "
+        "fuente de energía para el entrenamiento."
+    ) if _masa_muscular_match else ""
+
+    # 4. Restricción de dieta + condiciones médicas → reglas concretas para el LLM
     _condiciones_list_reco = getattr(perfil, "medical_conditions", None) or []
     _condiciones_str_reco = " ".join(_condiciones_list_reco).lower()
     es_vegano_reco = (
@@ -799,59 +955,166 @@ async def respuesta_recomendacion_llm(
     restriccion_dieta_reco = (
         "VEGANO/VEGETARIANO: PROHIBIDO carnes, pollo, pescado, mariscos, lácteos animales. "
         "Solo plantas, legumbres, granos, frutas, tofu, soja, hongos."
-    ) if es_vegano_reco else (
-        "Omnívoro: carnes, pescados, aves, mariscos y vegetales son válidos."
-    )
+    ) if es_vegano_reco else ""
 
-    # 5. Extraer platos ya recomendados del historial para evitar repetición
-    _ya_sugeridos_txt = ""
+    # Condiciones médicas → micro-llamada Groq que traduce cualquier condición
+    # a restricciones dietéticas concretas. Sin hardcoding: funciona para Diabetes,
+    # Hipertensión, Lactosa, Gota, Enfermedad Renal, Asma o cualquier condición futura.
+    _condiciones_medicas_txt = ""
+    if condiciones and condiciones.lower() != "ninguna":
+        try:
+            _prompt_med = (
+                f"Eres nutricionista clínico. El paciente tiene: {condiciones}.\n"
+                f"Lista en máximo 5 líneas las restricciones dietéticas CONCRETAS "
+                f"para estas condiciones. Sé ESPECÍFICO con cada alimento individual "
+                f"(leche, yogur, queso, crema, miel, azúcar, etc.) — menciona explícitamente "
+                f"si se debe evitar o si existe una versión permitida (ej. deslactosada, sin azúcar).\n"
+                f"Formato estricto — solo esto, sin explicaciones:\n"
+                f"• [condición]: evitar [lista exacta], permitido solo [versiones seguras]\n"
+                f"Responde SOLO las líneas con •. Nada más."
+            )
+            _restricciones_raw = await ia_engine._llamar_groq(
+                _prompt_med, max_tokens=200, temp=0.0
+            )
+            if _restricciones_raw and _restricciones_raw.strip():
+                _condiciones_medicas_txt = (
+                    f"⛔ RESTRICCIONES MÉDICAS OBLIGATORIAS — aplica en los 3 platos:\n"
+                    f"{_restricciones_raw.strip()}\n"
+                    f"⚠️ Aplica cada restricción SOLO si el plato normalmente lleva ese ingrediente. "
+                    f"No añadas lácteos, azúcares ni sustitutos a platos que no los necesitan "
+                    f"(ej. no pongas leche en una menestra o sopa de verduras).\n\n"
+                )
+        except Exception as _e_med:
+            logger.warning("[Reco] No se pudo generar restricciones médicas: %s", _e_med)
+
+    # 5. Combinar platos ya recomendados: historial de la conversación actual
+    #    (corto plazo) + HistorialRecomendacion de las últimas 48h (persistente,
+    #    real, vía BD) para evitar repetición entre sesiones/días.
+    _ya_vistos: list[str] = []
     if historial:
         _RE_BULLET_HIST = _re_reco.compile(r'-\s*([^\(]+)\s*\(~?\d+\s*kcal\)', _re_reco.IGNORECASE)
-        _ya_vistos = []
         for _hm in (historial or [])[-10:]:
             _ya_vistos += _RE_BULLET_HIST.findall(_hm.get("content", ""))
-        if _ya_vistos:
-            _ya_sugeridos_txt = (
-                f"PLATOS YA RECOMENDADOS (NO repetir): {', '.join(_ya_vistos[:6])}.\n\n"
-            )
+    _ya_vistos += _excluidos_48h
 
-    # 6. Prompt al LLM
+    _ya_sugeridos_txt = ""
+    if _ya_vistos:
+        _vistos_unicos = list(dict.fromkeys(v.strip() for v in _ya_vistos if v and v.strip()))
+        _ya_sugeridos_txt = (
+            f"PLATOS YA RECOMENDADOS (NO repetir): {', '.join(_vistos_unicos[:8])}.\n\n"
+        )
+
+    # 5.5. Estructura híbrida KNN + LLM:
+    #      Plato 1 → ingrediente ancla del KNN (filtrado por momento), LLM crea nombre natural.
+    #      Platos 2 y 3 → LLM libre, guiado solo por las restricciones del momento.
+    _knn_candidatos_txt = ""
+    if _top_knn:
+        _alim_knn = _top_knn["alimento"]
+        _kcal_knn = _top_knn["calorias_100g"]
+        _knn_candidatos_txt = (
+            f"GUÍA NUTRICIONAL (modelo KNN): el alimento '{_alim_knn}' "
+            f"(~{_kcal_knn:.0f} kcal/100g) tiene el perfil nutricional más afín al déficit actual. "
+            f"Si existe un plato CONOCIDO y COMÚN en Perú que lo lleve, úsalo para el Plato 1. "
+            f"Si no hay un plato conocido que lo incluya para este momento, "
+            f"ignora la guía y elige un plato libre igualmente conocido.\n\n"
+        )
+
+    # 6. Referencia de platos del día a día por momento — ejemplos de ESTILO, no lista cerrada.
+    #    El LLM puede adaptar según condiciones médicas y KNN, pero dentro de este universo.
+    _PLATOS_REFERENCIA = {
+        "DESAYUNO": (
+            "avena con leche, quinua con leche, pan con palta, pan con queso, "
+            "huevos revueltos, huevos sancochados, tostada con mermelada, "
+            "yogur con granola, fruta con cereal, mazamorra de maíz"
+        ),
+        "ALMUERZO": (
+            "seco de pollo, seco de res, arroz con pollo, lomo saltado, ají de gallina, "
+            "ceviche de pescado, sudado de pescado, carapulcra, chicharrón de pollo, "
+            "menestra con arroz, tallarines verdes, arroz con mariscos, causa rellena, "
+            "chaufa de pollo, estofado de pollo, sopa a la minuta"
+        ),
+        "CENA": (
+            "sopa de pollo, caldo de gallina, sopa de fideos, sopa de lentejas, "
+            "pollo a la plancha con ensalada, pescado a la plancha, tortilla de verduras, "
+            "arroz con huevo, menestra sencilla, crema de zapallo, sopa de quinua"
+        ),
+        "MERIENDA": (
+            "fruta sola, yogur con granola, pan con palta, galletas con queso, "
+            "puñado de frutos secos, huevo sancochado, vaso de leche, "
+            "avena preparada, mazamorra de maíz pequeña"
+        ),
+    }
+    _ref_platos = _PLATOS_REFERENCIA.get(momento_reco, "")
+
+    # 7. Prompt al LLM — condiciones médicas al final (recency bias: LLM las lee último)
     _prompt_reco_comida = (
-        f"Eres nutricionista del gimnasio World Light Lambayeque. "
-        f"Propón EXACTAMENTE 3 platos peruanos (preferiblemente lambayecanos) para {perfil.first_name}.\n\n"
+        f"Eres nutricionista del Gimnasio World Light Lambayeque.\n"
+        f"Propón EXACTAMENTE 3 platos para {perfil.first_name} — "
+        f"recetas peruanas reales y conocidas del día a día.\n\n"
         f"PERFIL:\n"
         f"- Objetivo: {objetivo}\n"
-        f"- Dieta: {restriccion_dieta_reco}\n"
-        f"- Condiciones: {condiciones}\n"
-        f"- Calorías restantes del día: {round(restante)} kcal\n"
-        f"- Momento: {momento_reco}\n\n"
-        f"REGLAS PARA {momento_reco}:\n{restricciones_momento_reco}\n\n"
-        f"IDENTIDAD PESCADOS: si sugieres pescado, usa especies de Lambayeque "
-        f"(Caballa, Lisa, Mero, Tollo, Pescado Salpreso, Pescado Blanco). "
-        f"PROHIBIDO sugerir Atún o Salmón (no son típicos de la zona).\n\n"
-        f"COHERENCIA CULINARIA: cada plato debe ser una preparación real y realista de la "
-        f"gastronomía peruana, con UNA sola proteína principal (no mezcles pollo+mariscos+res "
-        f"en un mismo plato salvo que sea un tipo de plato tradicionalmente mixto, ej. jalea, "
-        f"parrillada, chaufa). Las kcal indicadas deben corresponder al tipo de plato: "
-        f"entradas/causas/ensaladas ~250-450 kcal, sopas/cremas ~150-400 kcal, "
-        f"platos de fondo ~400-900 kcal.\n\n"
+        f"- Momento: {momento_reco}\n"
+        f"- Calorías disponibles hoy: {round(_restante_display)} kcal\n\n"
+        + (f"{restriccion_dieta_reco}\n\n" if restriccion_dieta_reco else "")
+        + f"PARA EL {momento_reco}:\n{restricciones_momento_reco}\n\n"
+        + f"PLATOS — escoge entre recetas conocidas del día a día peruano, como: {_ref_platos}. "
+        + f"Puedes sugerir variantes o platos similares con nombre real que cualquier peruano reconoce. "
+        + f"Si sugieres pescado, usa especies de Lambayeque (Caballa, Lisa, Mero, Tollo).\n"
+        + f"⛔ SEMÁNTICA: Caballa, Lisa, Mero, Tollo son PESCADOS — nunca son 'mariscos'. "
+        + f"No escribas 'Mariscos de Caballa' ni 'Mariscos de Lisa' — son categorías distintas. "
+        + f"Di 'Arroz con Caballa' O 'Arroz con Mariscos', nunca ambos combinados.\n\n"
+        + (f"{_masa_muscular_txt}\n\n" if _masa_muscular_txt else "")
         + (f"{objetivo_proteina_reco}\n\n" if objetivo_proteina_reco else "")
         + (f"PREFERENCIA: {pref_ingrediente_reco}\n\n" if pref_ingrediente_reco else "")
         + _ya_sugeridos_txt
-        + "FORMATO DE RESPUESTA (exactamente 3 líneas, nada más):\n"
+        + _knn_candidatos_txt
+        + _condiciones_medicas_txt  # ← justo antes del formato: máxima prioridad LLM
+        + "FORMATO — exactamente 3 líneas:\n"
         "- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
         "- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
         "- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n\n"
-        "Los gramos de proteína (P), carbohidratos (C) y grasa (G) deben ser "
-        "estimaciones nutricionales reales y coherentes con las kcal indicadas.\n"
-        "NO agregues explicaciones, recetas ni texto extra. Solo las 3 líneas."
+        "P/C/G coherentes con kcal (4×P + 4×C + 9×G ≈ kcal). "
+        "⛔ SOLO las 3 líneas. Sin recetas, sin texto extra."
     )
 
     respuesta_llm_reco = await ia_engine._llamar_groq(
         _prompt_reco_comida, max_tokens=180, temp=0.5
     )
 
+    # Guard: si el LLM ignoró el formato y devolvió receta, reintentar con prompt mínimo
+    _RECIPE_MARKERS = ("ingredientes:", "preparación:", "preparacion:", "pasos:", "instrucciones:")
+    if any(m in (respuesta_llm_reco or "").lower() for m in _RECIPE_MARKERS):
+        logger.warning("[Reco] LLM devolvió receta en vez de bullets — reintentando")
+        _prompt_retry = (
+            f"Lista 3 opciones de {momento_reco.lower()} peruanas "
+            f"({round(restante)} kcal disponibles). SOLO este formato exacto:\n"
+            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+            f"Sin frases extra, sin ingredientes, sin pasos."
+        )
+        respuesta_llm_reco = await ia_engine._llamar_groq(_prompt_retry, max_tokens=120, temp=0.2)
+
     # 6. Parsear bullets del LLM y cachear macros reales (no hardcodeados)
+    # Filtro de colas temporales: "Huevos con Espinacas y Mañana" → "Huevos con Espinacas"
+    # Colas temporales al final del nombre
+    _RE_COLA_TEMPORAL = _re_reco.compile(
+        r'\s+(?:y\s+|con\s+|para\s+)?'
+        r'(?:mañana|hoy|tarde|noche|esta\s+mañana|esta\s+noche|esta\s+tarde|hoy\s+día)\s*$',
+        _re_reco.IGNORECASE,
+    )
+    # Palabras de contexto que el LLM inserta en cualquier posición del nombre
+    _RE_CONTEXTO_MEDIO = _re_reco.compile(
+        r'\s+(?:con|de|y|al)\s+(?:entrenamiento|ejercicio|workout|post[\s\-]?entrenamiento)\b',
+        _re_reco.IGNORECASE,
+    )
+
+    def _limpiar_nombre(n: str) -> str:
+        n = _re_reco.sub(r'^[\s\-•*\d.\)]+|[\s*]+$', '', n).strip()
+        n = _RE_COLA_TEMPORAL.sub('', n).strip()
+        n = _RE_CONTEXTO_MEDIO.sub('', n).strip()
+        return n
+
     # Intento 1: el LLM incluyó kcal + P/C/G en el mismo bullet.
     _RE_BULLET_MACROS = _re_reco.compile(
         r'([^()\n]{3,80}?)\s*\(~?(\d+(?:\.\d+)?)\s*kcal[,;]?\s*'
@@ -862,12 +1125,53 @@ async def respuesta_recomendacion_llm(
     )
     _platos_con_macros = _RE_BULLET_MACROS.findall(respuesta_llm_reco or "")
 
+    # Límites duros por momento — cap y floor post-procesados por si el LLM ignora los rangos
+    _KCAL_CAP_MOMENTO   = {"CENA": 520, "ALMUERZO": 850, "MERIENDA": 280, "DESAYUNO": 450}
+    _KCAL_FLOOR_MOMENTO = {"ALMUERZO": 550, "MERIENDA": 80, "DESAYUNO": 200, "CENA": 120}
+    _kcal_cap   = _KCAL_CAP_MOMENTO.get(momento_reco, 850)
+    _kcal_floor = _KCAL_FLOOR_MOMENTO.get(momento_reco, 0)
+
+    # Post-procesado de lácteos: si el usuario tiene intolerancia a lactosa, asegurar
+    # que yogur/leche/queso en los nombres lleven el calificador "deslactosado/a".
+    # No hardcodea la condición: detecta "lactosa" como subcadena de condiciones.
+    _tiene_intolerancia_lactosa = "lactosa" in condiciones.lower()
+    _LACTEOS_REGEX = _re_reco.compile(
+        r'\b(yogur|leche|queso|crema de leche|mantequilla)\b(?!\s+deslact)',
+        _re_reco.IGNORECASE,
+    )
+
+    def _aplicar_deslactosado(nombre: str) -> str:
+        if not _tiene_intolerancia_lactosa:
+            return nombre
+        return _LACTEOS_REGEX.sub(
+            lambda m: m.group(0) + " deslactosado" if m.group(1).lower() in ("yogur", "queso", "mantequilla")
+            else m.group(0) + " deslactosada",
+            nombre,
+        )
+
     if _platos_con_macros:
         _platos_limpios = []
         for _nombre_p, _kcal_p, _p_p, _c_p, _g_p in _platos_con_macros[:3]:
-            _nombre_p = _re_reco.sub(r'^[\s\-•*\d.\)]+', '', _nombre_p).strip()
+            _nombre_p = _limpiar_nombre(_nombre_p)
+            _nombre_p = _aplicar_deslactosado(_nombre_p)
             p_f, c_f, g_f = float(_p_p), float(_c_p), float(_g_p)
             k_f = round(4 * p_f + 4 * c_f + 9 * g_f, 1) or float(_kcal_p)
+            # Cap duro: si el LLM ignoró el límite superior, escalar macros proporcionalmente
+            if k_f > _kcal_cap:
+                _factor = _kcal_cap / k_f
+                p_f = round(p_f * _factor, 1)
+                c_f = round(c_f * _factor, 1)
+                g_f = round(g_f * _factor, 1)
+                k_f = float(_kcal_cap)
+                logger.info("[Reco] Cap MAX aplicado a '%s': →%.0f kcal (%s)", _nombre_p, k_f, momento_reco)
+            # Floor duro: si el LLM fue demasiado conservador, escalar al mínimo del momento
+            elif _kcal_floor and k_f < _kcal_floor:
+                _factor = _kcal_floor / k_f if k_f > 0 else 1.0
+                p_f = round(p_f * _factor, 1)
+                c_f = round(c_f * _factor, 1)
+                g_f = round(g_f * _factor, 1)
+                k_f = float(_kcal_floor)
+                logger.info("[Reco] Floor MIN aplicado a '%s': →%.0f kcal (%s)", _nombre_p, k_f, momento_reco)
             cache_macros(_nombre_p, {
                 "nombre": _nombre_p,
                 "kcal": k_f,
@@ -875,9 +1179,10 @@ async def respuesta_recomendacion_llm(
                 "carb_g": c_f,
                 "grasa_g": g_f,
             })
-            _platos_limpios.append((_nombre_p, k_f))
+            _platos_limpios.append((_nombre_p, k_f, p_f, c_f, g_f))
+        _persistir_historial_recomendaciones(db, perfil, momento_reco, _platos_limpios)
         bullets = '\n'.join(
-            f'- {n} (~{k:.0f} kcal)' for n, k in _platos_limpios
+            f'- {n} (~{k:.0f} kcal)' for n, k, *_ in _platos_limpios
         )
         return f"Opciones para ti:\n{bullets}"
 
@@ -892,7 +1197,7 @@ async def respuesta_recomendacion_llm(
     if _platos_parseados:
         _platos_limpios = []
         for _nombre_p, _kcal_p in _platos_parseados[:3]:
-            _nombre_p = _re_reco.sub(r'^[\s\-•*\d.\)]+', '', _nombre_p).strip()
+            _nombre_p = _limpiar_nombre(_nombre_p)
             _kcal_f = float(_kcal_p)
             p_f = c_f = g_f = 0.0
             try:
@@ -915,9 +1220,10 @@ async def respuesta_recomendacion_llm(
                 "carb_g": c_f,
                 "grasa_g": g_f,
             })
-            _platos_limpios.append((_nombre_p, _kcal_f))
+            _platos_limpios.append((_nombre_p, _kcal_f, p_f, c_f, g_f))
+        _persistir_historial_recomendaciones(db, perfil, momento_reco, _platos_limpios)
         bullets = '\n'.join(
-            f'- {n} (~{k:.0f} kcal)' for n, k in _platos_limpios
+            f'- {n} (~{k:.0f} kcal)' for n, k, *_ in _platos_limpios
         )
         return f"Opciones para ti:\n{bullets}"
 

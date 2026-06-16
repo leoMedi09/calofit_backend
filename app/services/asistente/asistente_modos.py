@@ -202,6 +202,12 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
             "ideas para comer", "sugerencias de comida",
             "opciones de almuerzo", "opciones de desayuno", "opciones de cena",
             "recetas", "receta ", "platos para",
+            # Verbos de alimentación en infinitivo → intención de comer
+            "almorzar", "desayunar", "merendar",
+            # Frases de recomendación de comida
+            "para el almuerzo", "para la cena", "para el desayuno", "para la merienda",
+            "qué recomiendas", "que recomiendas", "dame ideas", "dame opciones",
+            "qué me recomiendas", "que me recomiendas",
             # Frases naturales de hambre/recomendación
             "tengo hambre", "tengo antojo", "qué puedo comer", "que puedo comer",
             "me recomiendas comer", "me da hambre", "quiero comer algo",
@@ -212,6 +218,8 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
     # Ejercicio registrado: "entrené X", "realicé X", etc.
     # NOTA: "hice " (genérico) fue eliminado — matcheaba "me hice un desayuno".
     # Usar solo formas específicas de ejercicio.
+    # NOTA 2: si el mensaje tiene intención clara de comida (rec_nut), no registrar ejercicio
+    # aunque mencione "entrené" de forma incidental ("ya entrené, qué almuerzo?").
     _EJERCICIO_REGISTRADO = (
         # Formas genéricas verificadas
         "hice cardio", "hice pesas", "hice gym", "hice ejercicio",
@@ -230,7 +238,7 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
         "sali a caminar", "salí a caminar", "sali a entrenar", "salí a entrenar",
         "correr durante", "trotar durante", "caminar durante",
     )
-    if any(x in m for x in _EJERCICIO_REGISTRADO) and "?" not in m and fe >= fc:
+    if any(x in m for x in _EJERCICIO_REGISTRADO) and "?" not in m and fe >= fc and not rec_nut:
         return REGISTRAR_EJERCICIO
     # Preguntas de permiso/capacidad sobre actividad física → OTRO informativo
     # "puedo realizar un trote", "se puede trotar", "es bueno correr" — NO son registros
@@ -340,8 +348,18 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
         "que comer ahora", "que almorzar hoy", "que cenar hoy",
         "opciones de comida", "opciones para almorzar", "opciones para cenar",
         "que puedo comer en este momento",
+        # Señales directas de hambre/snack (antes dependían del LLM clasificador)
+        "tengo hambre", "tengo antojo",
+        "una merienda", "un snack",
+        "ideas para comer", "ideas para el desayuno", "ideas para el almuerzo",
+        "ideas para la cena", "ideas para la merienda",
+        "que deberia comer", "que deberia almorzar", "que deberia cenar",
+        "que deberia desayunar",
     )
-    _EJ_KW = ("ejercicio", "entren", "gym", "rutina", "deporte", "ejercicios")
+    # Solo bloquean recomendación de COMIDA los keywords que indican contexto de EJERCICIO puro.
+    # "entren" y "ejercicio" (singular) se eliminan: "qué puedo comer después de entrenar"
+    # es RECOMENDAR_NUTRICION aunque mencione entrenar.
+    _EJ_KW = ("gym", "rutina", "ejercicios")
     if any(p in _mn for p in _PEDIR_REC_NUT) and not any(e in _mn for e in _EJ_KW):
         return RECOMENDAR_NUTRICION
     # Petición de recomendación de ejercicio
@@ -402,7 +420,17 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
         _mn.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", _mn)
         for v in _EJ_CLARO_NORM
     )
-    if _tiene_ej and "?" not in _m:
+    # Guard: si el mensaje tiene intención de COMIDA explícita, el ejercicio es mención
+    # incidental ("ya entrené en la mañana, necesito almorzar") — no registrar ejercicio.
+    _COMIDA_PRIORITARIA_NUT = (
+        "almorzar", "desayunar", "cenar", "merendar",
+        "que como", "dame opciones", "dame ideas",
+        "que recomiendas", "que me recomiendas",
+        "necesito comer", "quiero comer",
+        "para el almuerzo", "para la cena", "para el desayuno",
+    )
+    _comida_es_prioritaria = any(p in _mn for p in _COMIDA_PRIORITARIA_NUT)
+    if _tiene_ej and "?" not in _m and not _comida_es_prioritaria:
         return REGISTRAR_EJERCICIO
 
     # ── Pre-check 4b: patrón de volumen de ejercicio SIN verbo ───────────────────
