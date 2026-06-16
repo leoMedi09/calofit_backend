@@ -113,11 +113,14 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
 7. kcal debe ser consistente con P/C/G: verifica que ≈ 4×P + 4×C + 9×G. ⚠️ prot_g, carb_g, grasa_g y kcal son SIEMPRE para el "porcion_g" TOTAL de ese ítem, NUNCA valores de referencia por 100g sin escalar. Si "porcion_g" es menor a 100, los macros DEBEN ser proporcionalmente menores que los valores típicos por 100g de ese alimento (ej: si 100g de maní tienen ~26g de proteína, 28g de maní deben tener ~7g de proteína, NO 26g).
 8. Si no se menciona cantidad explícita → cantidad:1.
 9. COMBOS "X con Y" — UN solo ítem SOLO si "X con Y" es el NOMBRE de un plato/preparación
-   reconocido como UNA unidad (ej: "pan con pollo", "pan con queso", "pan con palta/aguacate",
-   "pan con mantequilla", "pan con mermelada", "tostada con mermelada", "tostada con mantequilla",
-   "arroz con leche", "arroz con pollo/pato/pavo/res/chancho/mariscos", "papa con...", "tallarines con...",
-   "puré con...", "menestra con...") → genera UN ítem único con todos sus componentes incluidos
-   en sus macros (NO descompongas en ingredientes separados).
+   reconocido como UNA unidad. Ejemplos:
+   · CUALQUIER tipo de pan (pan francés, pan de molde, pan integral, ciabatta, baguette, etc.)
+     con un topping/relleno (queso, palta/aguacate, mantequilla, mermelada, pollo, jamón, huevo, etc.)
+     → SIEMPRE UN solo ítem "Pan [tipo] con [topping]". NUNCA separes el pan de su topping.
+   · "tostada con mermelada/mantequilla/queso", "arroz con leche",
+     "arroz con pollo/pato/pavo/res/chancho/mariscos", "papa con...", "tallarines con...",
+     "puré con...", "menestra con..."
+   → genera UN ítem único con todos sus componentes incluidos en sus macros.
    ⚠️ Si "X" y "Y" son DOS PLATOS/ALIMENTOS COMPLETOS E INDEPENDIENTES que simplemente se
    comieron juntos (ej: "pollo saltado con plátano sancochado", "arroz con pollo con una gaseosa",
    "lomo saltado con una ensalada"), trátalos como DOS ítems SEPARADOS, cada uno con sus
@@ -408,11 +411,19 @@ async def registrar_comida_llm(
     elif re.search(r'porci[oó]n (grande|extra)|plato grande|doble porci[oó]n', _msg_low_porcion):
         _factor_porcion = 1.4
 
-    if _factor_porcion and len(_items) == 1:
-        _it = _items[0]
-        for _campo in ("porcion_g", "kcal", "prot_g", "carb_g", "grasa_g"):
-            if _it.get(_campo) is not None:
-                _it[_campo] = round(float(_it[_campo]) * _factor_porcion, 1)
+    # Aplica el modificador cuando hay 1 ítem (caso normal) o exactamente 2 ítems
+    # y el modificador está en la primera mitad del mensaje — indica que aplica
+    # al combo completo (ej: "un cuarto de pan francés con palta" → pan+palta son 1 porción)
+    _modifier_early = (
+        re.search(r'\b(medi[oa]|mitad|un cuarto|cuarta parte|porci[oó]n (chica|pequeñ[ao]|grande)|plato (chico|pequeñ[ao]|grande)|doble porci[oó]n)\b',
+                  _msg_low_porcion[:max(1, len(_msg_low_porcion) // 2)])
+        if _msg_low_porcion else None
+    )
+    if _factor_porcion and (len(_items) == 1 or (len(_items) == 2 and _modifier_early)):
+        for _it in _items:
+            for _campo in ("porcion_g", "kcal", "prot_g", "carb_g", "grasa_g"):
+                if _it.get(_campo) is not None:
+                    _it[_campo] = round(float(_it[_campo]) * _factor_porcion, 1)
         for _campo_total in ("prot_total", "carb_total", "grasa_total", "kcal_total"):
             if datos.get(_campo_total) is not None:
                 datos[_campo_total] = round(float(datos[_campo_total]) * _factor_porcion, 1)
