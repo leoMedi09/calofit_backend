@@ -360,7 +360,14 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool) -> str:
     # "entren" y "ejercicio" (singular) se eliminan: "qué puedo comer después de entrenar"
     # es RECOMENDAR_NUTRICION aunque mencione entrenar.
     _EJ_KW = ("gym", "rutina", "ejercicios")
-    if any(p in _mn for p in _PEDIR_REC_NUT) and not any(e in _mn for e in _EJ_KW):
+    # Guard: si el mensaje contiene verbo de consumo pasado ("comí un snack", "cené pollo")
+    # NO es recomendación aunque contenga "un snack" u otras palabras de _PEDIR_REC_NUT.
+    _PASADO_BLOQUEO_REC = ("comi", "desayune", "almorce", "cene", "bebi", "me comi", "me tome", "me bebi", "ya comi", "ya desayune")
+    _tiene_pasado_bloqueo = any(
+        _mn.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", _mn)
+        for v in _PASADO_BLOQUEO_REC
+    )
+    if any(p in _mn for p in _PEDIR_REC_NUT) and not any(e in _mn for e in _EJ_KW) and not _tiene_pasado_bloqueo:
         return RECOMENDAR_NUTRICION
     # Petición de recomendación de ejercicio
     _PEDIR_REC_EJ = (

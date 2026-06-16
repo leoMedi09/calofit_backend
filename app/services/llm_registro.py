@@ -126,14 +126,21 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
 10. ⚠️ "cantidad" es SOLO el número de PORCIONES/UNIDADES discretas (ej: "dos panes"→2, "tres galletas"→3). NUNCA pongas un valor en gramos/mililitros en "cantidad". Si el mensaje dice "150g de arroz", "200 gramos de pollo", "50 G de pollo" (= 50 gramos, ver sección de unidades), "300ml de jugo", "2 kg de pollo", "1.5 kilos de papa" → eso va en "porcion_g" (convierte kg a gramos: 1 kg = 1000g) y "cantidad" sigue siendo 1. kcal/macros deben corresponder al total de "porcion_g" (ej: 2 kg de pollo a la plancha = 2000g ≈ 3300 kcal, NO uses una porción estándar de 100-300g cuando el usuario especificó kilos). "cantidad" jamás debe ser mayor a 10.
 11. PORCIONES POR DEFECTO (SOLO si el usuario NO especifica ninguna cantidad, unidad ni gramaje — ver regla 12 si sí especifica):
     - PLATO DE FONDO / almuerzo completo (arroz con algo, lomo saltado, seco, ají de gallina, tallarines, guisos, frituras con guarnición, causas rellenas): porción 350-450g → 600-1000 kcal. Proteínas magras (pollo, pescado, pavo) ≈600-750 kcal; proteínas grasas (pato, cerdo, res, chicharrón) ≈800-1000 kcal. NUNCA estimes un plato de fondo en menos de 600 kcal.
+      ⚠️ PLATOS PERUANOS RECONOCIDOS — tratarlos SIEMPRE como UN solo ítem de plato de fondo
+      (aplica regla 9 automáticamente): "arroz con pollo", "arroz con pato", "arroz con mariscos",
+      "lomo saltado", "seco de pollo", "seco de res", "ají de gallina", "carapulcra", "causa rellena",
+      "sudado de pescado", "chaufa de pollo", "estofado de pollo", "tallarines verdes con pollo".
+      NUNCA descompongas estos platos en ingredientes separados — son un plato completo con 600-900 kcal.
     - BEBIDAS (jugo, limonada, gaseosa, chicha): 200-300 ml.
     - PAN/SÁNDWICH individual: 1 unidad ≈ 150-250 kcal base + relleno.
     - ENSALADA/ENTRADA/SOPA: 150-350 kcal.
-    - DESAYUNO hogareño: si el mensaje dice "desayuno", las porciones son MODERADAS.
-      El total para 2-3 ítems de un desayuno hogareño no supera 600 kcal. Un ítem
-      individual de desayuno (1 taza de avena, 1 porción de mote con queso, 1 pan con
-      relleno, 1 fruta con yogur) raramente supera 350 kcal sin gramaje explícito.
-      NUNCA asumas porción de restaurante ni "olla completa" para un desayuno hogareño.
+    - DESAYUNO hogareño: si el mensaje dice "desayuno", usa porciones hogareñas moderadas
+      (NO porción de restaurante ni olla completa). 2-3 ítems de desayuno suman típicamente
+      350-600 kcal en total. Ej: 2 huevos + pan + leche ≈ 450-500 kcal total.
+    - SOPA/CALDO/CREMA (sopa de pollo, caldo de gallina, crema de verduras, sopa de fideos):
+      es un plato líquido y ligero. Sin guarnición sólida explícita del usuario (arroz, papa,
+      pan aparte), estima 100-250 kcal por porción (300-400ml). NUNCA estimes una sopa en
+      más de 300 kcal si el usuario no menciona acompañamiento sólido extra.
 12. UNIDADES COTIDIANAS: si el usuario usa medidas caseras (rebanada/tajada/lonja/rodaja, trozo/pedazo, cucharada/cucharadita, taza, vaso, puñado, plato/porción), convierte a "porcion_g" REAL según ESE alimento específico y la cantidad mencionada — usa tu conocimiento nutricional para estimar el peso típico de esa medida para ese alimento (ej: una rebanada/rodaja de un tubérculo o pan es delgada, ~15-40g; una cucharada de una salsa/crema es ~15-20g; un vaso/taza de líquido es ~200-250ml; un puñado es ~25-40g). La unidad/cantidad EXPLÍCITA del usuario SIEMPRE tiene prioridad sobre las porciones por defecto de la regla 11 — NUNCA asumas un "plato completo" si el usuario especificó una porción menor (ej: "dos rebanadas de papa sancochada" es una porción pequeña de papa, NO un plato entero de papa a la huancaina).
 13. MODIFICADORES DE TAMAÑO: "medio/media" → ~50% de la porción base (de la regla 11 o de una porción estándar de ese alimento); "un cuarto de" → ~25%; "porción/plato pequeño(a)" → ~60-70%; "porción/plato grande" → ~130-160%; "porción/plato mediano(a)" → 100% (base normal). Aplica ese porcentaje TANTO a "porcion_g" COMO a kcal/prot_g/carb_g/grasa_g de forma proporcional (ej: "medio vaso de leche" → ~120ml y la mitad de las kcal/macros de un vaso completo; "porción pequeña de causa de pollo" → ~60-70% del porcion_g y kcal de una causa de pollo normal, NO la porción completa).
 14. CONSISTENCIA: para un mismo alimento y la misma porción, usa SIEMPRE los valores nutricionales
