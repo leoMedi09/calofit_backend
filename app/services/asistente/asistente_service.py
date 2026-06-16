@@ -409,7 +409,7 @@ class AsistenteService:
         # Detecta saludos puros — inicio de conversación, no respuestas en medio del hilo.
         # Regla: es saludo SI contiene keyword de apertura Y no hay verbo de acción
         #        Y no es una respuesta de seguimiento ("bien gracias", "sí claro", "ok").
-        _KW_SALUDO  = ("hola", "hey", "salu", "que tal", "qué tal",
+        _KW_SALUDO  = ("hola", "hey", "saludos", "buenas", "que tal", "qué tal",
                        "cómo estás", "como estas", "cómo te va", "como te va")
         _KW_ACCION  = ("comí", "comi", "hice", "fui al", "corrí", "corri",
                        "almorcé", "almorce", "desayuné", "desayune", "cené", "cene",
@@ -601,6 +601,13 @@ class AsistenteService:
                 mensaje, perfil, consumo_real, calorias_meta, quemadas_real, self.ia,
                 modo=_modo_rec,
                 historial=historial,
+                db=db,
+                plan_macros=plan_hoy_data,
+                consumido_macros={
+                    "proteinas":     prog.proteinas_consumidas if prog else 0,
+                    "carbohidratos": prog.carbohidratos_consumidos if prog else 0,
+                    "grasas":        prog.grasas_consumidas if prog else 0,
+                },
             )
             _intent_rec = "RECIPE" if modo_funcion == RECOMENDAR_NUTRICION else "POWER"
             return _build_response(
