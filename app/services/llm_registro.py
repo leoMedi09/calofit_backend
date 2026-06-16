@@ -129,6 +129,11 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
     - BEBIDAS (jugo, limonada, gaseosa, chicha): 200-300 ml.
     - PAN/SÁNDWICH individual: 1 unidad ≈ 150-250 kcal base + relleno.
     - ENSALADA/ENTRADA/SOPA: 150-350 kcal.
+    - DESAYUNO hogareño: si el mensaje dice "desayuno", las porciones son MODERADAS.
+      El total para 2-3 ítems de un desayuno hogareño no supera 600 kcal. Un ítem
+      individual de desayuno (1 taza de avena, 1 porción de mote con queso, 1 pan con
+      relleno, 1 fruta con yogur) raramente supera 350 kcal sin gramaje explícito.
+      NUNCA asumas porción de restaurante ni "olla completa" para un desayuno hogareño.
 12. UNIDADES COTIDIANAS: si el usuario usa medidas caseras (rebanada/tajada/lonja/rodaja, trozo/pedazo, cucharada/cucharadita, taza, vaso, puñado, plato/porción), convierte a "porcion_g" REAL según ESE alimento específico y la cantidad mencionada — usa tu conocimiento nutricional para estimar el peso típico de esa medida para ese alimento (ej: una rebanada/rodaja de un tubérculo o pan es delgada, ~15-40g; una cucharada de una salsa/crema es ~15-20g; un vaso/taza de líquido es ~200-250ml; un puñado es ~25-40g). La unidad/cantidad EXPLÍCITA del usuario SIEMPRE tiene prioridad sobre las porciones por defecto de la regla 11 — NUNCA asumas un "plato completo" si el usuario especificó una porción menor (ej: "dos rebanadas de papa sancochada" es una porción pequeña de papa, NO un plato entero de papa a la huancaina).
 13. MODIFICADORES DE TAMAÑO: "medio/media" → ~50% de la porción base (de la regla 11 o de una porción estándar de ese alimento); "un cuarto de" → ~25%; "porción/plato pequeño(a)" → ~60-70%; "porción/plato grande" → ~130-160%; "porción/plato mediano(a)" → 100% (base normal). Aplica ese porcentaje TANTO a "porcion_g" COMO a kcal/prot_g/carb_g/grasa_g de forma proporcional (ej: "medio vaso de leche" → ~120ml y la mitad de las kcal/macros de un vaso completo; "porción pequeña de causa de pollo" → ~60-70% del porcion_g y kcal de una causa de pollo normal, NO la porción completa).
 14. CONSISTENCIA: para un mismo alimento y la misma porción, usa SIEMPRE los valores nutricionales
@@ -439,6 +444,8 @@ async def registrar_comida_llm(
     _KCAL_MAX_RAZONABLE = 5000
     _factor_cap = 1.0
     advertencia_cantidad = None
+    _factor_momento = 1.0
+    advertencia_momento = None
     if kcal > _KCAL_MAX_RAZONABLE:
         _factor_cap = _KCAL_MAX_RAZONABLE / kcal
         kcal  = round(kcal * _factor_cap, 1)
@@ -450,6 +457,29 @@ async def registrar_comida_llm(
             f"de {round(kcal)} kcal. Si en verdad comiste esa cantidad, regístralo en "
             f"porciones separadas a lo largo del día."
         )
+
+    # Cap por momento del día — evita que el LLM infle porciones de desayuno/cena/merienda
+    _msg_low_momento = mensaje.lower() if mensaje else ""
+    _momento_registro = None
+    if any(k in _msg_low_momento for k in ("desayuno", "desayuné", "desayune")):
+        _momento_registro = "DESAYUNO"
+    elif any(k in _msg_low_momento for k in ("merienda", "snack")):
+        _momento_registro = "MERIENDA"
+    elif any(k in _msg_low_momento for k in ("cena", "cené", "cene")):
+        _momento_registro = "CENA"
+    _KCAL_CAP_MOMENTO_REG = {"DESAYUNO": 700, "MERIENDA": 400, "CENA": 750}
+    _cap_momento = _KCAL_CAP_MOMENTO_REG.get(_momento_registro)
+    if _cap_momento and kcal > _cap_momento and not advertencia_cantidad:
+        _factor_momento = _cap_momento / kcal
+        kcal   = round(kcal   * _factor_momento, 1)
+        prot   = round(prot   * _factor_momento, 1)
+        carb   = round(carb   * _factor_momento, 1)
+        grasa  = round(grasa  * _factor_momento, 1)
+        advertencia_momento = (
+            f"⚠️ Los macros parecían elevados para un {_momento_registro.lower()} hogareño "
+            f"— ajustado a {round(kcal)} kcal."
+        )
+        logger.info("[Registro] Cap momento %s aplicado → %.0f kcal", _momento_registro, kcal)
 
     alimentos_raw = datos.get("alimentos", [])
     # Construir nombres con multiplicador ×N para mostrar en chat y balance
@@ -489,9 +519,10 @@ async def registrar_comida_llm(
         # 10 filas por ítem.
         cantidad_item = max(1, min(cantidad_item, 10))
         # Macros por porción unitaria (aplicando el mismo tope de sanidad que los totales)
-        p_item = round(float(item.get("prot_g", prot / n_items)) * _factor_cap / cantidad_item, 1)
-        c_item = round(float(item.get("carb_g", carb / n_items)) * _factor_cap / cantidad_item, 1)
-        g_item = round(float(item.get("grasa_g", grasa / n_items)) * _factor_cap / cantidad_item, 1)
+        _factor_total = _factor_cap * _factor_momento
+        p_item = round(float(item.get("prot_g", prot / n_items)) * _factor_total / cantidad_item, 1)
+        c_item = round(float(item.get("carb_g", carb / n_items)) * _factor_total / cantidad_item, 1)
+        g_item = round(float(item.get("grasa_g", grasa / n_items)) * _factor_total / cantidad_item, 1)
         # kcal SIEMPRE derivado de P/C/G de este ítem (4-4-9) — nunca el "kcal" crudo
         # del LLM, que puede no ser consistente con sus propios macros. Así Σ kcal de
         # las filas de este ítem == 4*prot_item + 4*carb_item + 9*grasa_item del total.
@@ -567,6 +598,7 @@ async def registrar_comida_llm(
             f"✅ Registré: {nombres_str} — {round(kcal)} kcal. "
             f"Llevas {round(consumido)} de {round(meta)} kcal hoy."
             + (f"\n\n{advertencia_cantidad}" if advertencia_cantidad else "")
+            + (f"\n\n{advertencia_momento}" if advertencia_momento else "")
         ),
         "alerta_dieta": alerta_dieta,
     }
