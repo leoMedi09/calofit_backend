@@ -133,14 +133,14 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
       NUNCA descompongas estos platos en ingredientes separados — son un plato completo con 600-900 kcal.
     - BEBIDAS (jugo, limonada, gaseosa, chicha): 200-300 ml.
     - PAN/SÁNDWICH individual: 1 unidad ≈ 150-250 kcal base + relleno.
-    - ENSALADA/ENTRADA/SOPA: 150-350 kcal.
-    - DESAYUNO hogareño: si el mensaje dice "desayuno", usa porciones hogareñas moderadas
-      (NO porción de restaurante ni olla completa). 2-3 ítems de desayuno suman típicamente
-      350-600 kcal en total. Ej: 2 huevos + pan + leche ≈ 450-500 kcal total.
+    - ENSALADA/ENTRADA (sin sopa ni caldo — ver regla SOPA abajo): 80-350 kcal.
+    - DESAYUNO hogareño: usa porciones hogareñas normales (NO restaurante).
+      Referencia por ítem: 1 huevo frito/revuelto (con aceite) ≈ 90 kcal · 1 rebanada pan de molde ≈ 75 kcal · vaso leche entera 200ml ≈ 130 kcal · taza avena cocida 200ml ≈ 150 kcal · queso fresco 30g ≈ 75 kcal.
+      2-3 ítems de desayuno combinados suman 350-600 kcal. NUNCA reportes menos de 320 kcal si el usuario menciona 2 o más ítems de desayuno (huevos + pan, huevos + leche, etc.).
     - SOPA/CALDO/CREMA (sopa de pollo, caldo de gallina, crema de verduras, sopa de fideos):
-      es un plato líquido y ligero. Sin guarnición sólida explícita del usuario (arroz, papa,
-      pan aparte), estima 100-250 kcal por porción (300-400ml). NUNCA estimes una sopa en
-      más de 300 kcal si el usuario no menciona acompañamiento sólido extra.
+      plato líquido — proteína típica 8-15g (NUNCA 30g+ en una sopa sola). Sin guarnición
+      sólida mencionada aparte (arroz, papa extra, pan adicional), estima 120-250 kcal.
+      LÍMITE ABSOLUTO: 300 kcal. Una sopa hogareña NUNCA supera 300 kcal por sí sola.
 12. UNIDADES COTIDIANAS: si el usuario usa medidas caseras (rebanada/tajada/lonja/rodaja, trozo/pedazo, cucharada/cucharadita, taza, vaso, puñado, plato/porción), convierte a "porcion_g" REAL según ESE alimento específico y la cantidad mencionada — usa tu conocimiento nutricional para estimar el peso típico de esa medida para ese alimento (ej: una rebanada/rodaja de un tubérculo o pan es delgada, ~15-40g; una cucharada de una salsa/crema es ~15-20g; un vaso/taza de líquido es ~200-250ml; un puñado es ~25-40g). La unidad/cantidad EXPLÍCITA del usuario SIEMPRE tiene prioridad sobre las porciones por defecto de la regla 11 — NUNCA asumas un "plato completo" si el usuario especificó una porción menor (ej: "dos rebanadas de papa sancochada" es una porción pequeña de papa, NO un plato entero de papa a la huancaina).
 13. MODIFICADORES DE TAMAÑO: "medio/media" → ~50% de la porción base (de la regla 11 o de una porción estándar de ese alimento); "un cuarto de" → ~25%; "porción/plato pequeño(a)" → ~60-70%; "porción/plato grande" → ~130-160%; "porción/plato mediano(a)" → 100% (base normal). Aplica ese porcentaje TANTO a "porcion_g" COMO a kcal/prot_g/carb_g/grasa_g de forma proporcional (ej: "medio vaso de leche" → ~120ml y la mitad de las kcal/macros de un vaso completo; "porción pequeña de causa de pollo" → ~60-70% del porcion_g y kcal de una causa de pollo normal, NO la porción completa).
 14. CONSISTENCIA: para un mismo alimento y la misma porción, usa SIEMPRE los valores nutricionales
@@ -488,6 +488,21 @@ async def registrar_comida_llm(
         )
         logger.info("[Registro] Cap momento %s aplicado → %.0f kcal", _momento_registro, kcal)
 
+    # Cap específico para sopas/caldos — el LLM tiende a inflar sopas a 400+ kcal
+    # cuando la realidad de una sopa hogareña sin guarnición extra es 120-250 kcal
+    _SOPA_KW = ("sopa ", "caldo ", "crema de ", "sopa de ", " sopa", "caldito")
+    _is_sopa = any(k in _msg_low_momento for k in _SOPA_KW)
+    _KCAL_CAP_SOPA = 300
+    _factor_sopa = 1.0
+    if _is_sopa and kcal > _KCAL_CAP_SOPA and not advertencia_cantidad and not advertencia_momento:
+        _factor_sopa = _KCAL_CAP_SOPA / kcal
+        kcal   = round(kcal   * _factor_sopa, 1)
+        prot   = round(prot   * _factor_sopa, 1)
+        carb   = round(carb   * _factor_sopa, 1)
+        grasa  = round(grasa  * _factor_sopa, 1)
+        advertencia_momento = "⚠️ Sopa estimada como plato líquido hogareño — ajustado a rango normal (sin guarnición sólida extra mencionada)."
+        logger.info("[Registro] Cap sopa aplicado → %.0f kcal", kcal)
+
     alimentos_raw = datos.get("alimentos", [])
     # Construir nombres con multiplicador ×N para mostrar en chat y balance
     def _nombre_con_cantidad(a: dict) -> str:
@@ -526,7 +541,7 @@ async def registrar_comida_llm(
         # 10 filas por ítem.
         cantidad_item = max(1, min(cantidad_item, 10))
         # Macros por porción unitaria (aplicando el mismo tope de sanidad que los totales)
-        _factor_total = _factor_cap * _factor_momento
+        _factor_total = _factor_cap * _factor_momento * _factor_sopa
         p_item = round(float(item.get("prot_g", prot / n_items)) * _factor_total / cantidad_item, 1)
         c_item = round(float(item.get("carb_g", carb / n_items)) * _factor_total / cantidad_item, 1)
         g_item = round(float(item.get("grasa_g", grasa / n_items)) * _factor_total / cantidad_item, 1)
