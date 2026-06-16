@@ -113,8 +113,9 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
 7. kcal debe ser consistente con P/C/G: verifica que ≈ 4×P + 4×C + 9×G. ⚠️ prot_g, carb_g, grasa_g y kcal son SIEMPRE para el "porcion_g" TOTAL de ese ítem, NUNCA valores de referencia por 100g sin escalar. Si "porcion_g" es menor a 100, los macros DEBEN ser proporcionalmente menores que los valores típicos por 100g de ese alimento (ej: si 100g de maní tienen ~26g de proteína, 28g de maní deben tener ~7g de proteína, NO 26g).
 8. Si no se menciona cantidad explícita → cantidad:1.
 9. COMBOS "X con Y" — UN solo ítem SOLO si "X con Y" es el NOMBRE de un plato/preparación
-   reconocido como UNA unidad (ej: "pan con pollo", "arroz con leche", "tostada con mermelada",
-   "pan con queso", "arroz con pollo/pato/pavo/res/chancho/mariscos", "papa con...", "tallarines con...",
+   reconocido como UNA unidad (ej: "pan con pollo", "pan con queso", "pan con palta/aguacate",
+   "pan con mantequilla", "pan con mermelada", "tostada con mermelada", "tostada con mantequilla",
+   "arroz con leche", "arroz con pollo/pato/pavo/res/chancho/mariscos", "papa con...", "tallarines con...",
    "puré con...", "menestra con...") → genera UN ítem único con todos sus componentes incluidos
    en sus macros (NO descompongas en ingredientes separados).
    ⚠️ Si "X" y "Y" son DOS PLATOS/ALIMENTOS COMPLETOS E INDEPENDIENTES que simplemente se
@@ -492,9 +493,13 @@ async def registrar_comida_llm(
     # cuando la realidad de una sopa hogareña sin guarnición extra es 120-250 kcal
     _SOPA_KW = ("sopa ", "caldo ", "crema de ", "sopa de ", " sopa", "caldito")
     _is_sopa = any(k in _msg_low_momento for k in _SOPA_KW)
+    # Si el usuario menciona guarnición sólida explícita junto a la sopa, NO aplicar cap
+    _SOPA_LADOS = ("con arroz", "con papa", "con pan", "con fideo", "con yuca",
+                   "con camote", "con choclo", "y arroz", "y papa", "y pan")
+    _tiene_lado_solido = any(s in _msg_low_momento for s in _SOPA_LADOS)
     _KCAL_CAP_SOPA = 300
     _factor_sopa = 1.0
-    if _is_sopa and kcal > _KCAL_CAP_SOPA and not advertencia_cantidad and not advertencia_momento:
+    if _is_sopa and not _tiene_lado_solido and kcal > _KCAL_CAP_SOPA and not advertencia_cantidad and not advertencia_momento:
         _factor_sopa = _KCAL_CAP_SOPA / kcal
         kcal   = round(kcal   * _factor_sopa, 1)
         prot   = round(prot   * _factor_sopa, 1)
