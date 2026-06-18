@@ -133,19 +133,32 @@ def _evaluar_estructura_espacio(knn, scaler, df):
     # No usa las predicciones del KNN — solo valida si las features
     # (kcal, prot, carb, gras escalados) tienen estructura separable.
     from sklearn.cluster import KMeans
-    from sklearn.metrics import silhouette_score
+    from sklearn.metrics import davies_bouldin_score, silhouette_score
 
     k = 4
     labels = KMeans(n_clusters=k, random_state=42, n_init=10).fit_predict(X_scaled)
+
     sil = silhouette_score(X_scaled, labels, metric="cosine")
     print(f"\n  Silhouette Score (k={k} clusters, distancia coseno): {sil:.3f}")
-    if sil >= 0.25:
+    print("  Interpretación: >0.5 = buena separación, >0.25 = razonable, <0.1 = débil")
+    if sil >= 0.50:
+        print("  ✅ Buena estructura — clusters de macros bien diferenciados.")
+    elif sil >= 0.25:
         print("  ✅ Estructura razonable — el espacio de macros separa grupos de alimentos.")
     elif sil >= 0.10:
-        print("  ~ Estructura débil pero presente — esperable en datos nutricionales reales")
-        print("    (muchos alimentos comparten proporciones similares de macros).")
+        print("  ~ Estructura débil pero presente — esperable en datos nutricionales reales.")
     else:
         print("  ⚠ Estructura muy débil — revisar escalado/features.")
+
+    db = davies_bouldin_score(X_scaled, labels)
+    print(f"\n  Davies-Bouldin Index (k={k} clusters): {db:.3f}")
+    print("  Interpretación: <1.0 = buena separación, ~1.5 = aceptable, >2.0 = clusters solapados")
+    if db < 1.0:
+        print("  ✅ Clusters bien separados — el espacio de macros tiene fronteras claras.")
+    elif db < 1.5:
+        print("  ✅ Separación aceptable — clusters con algo de solapamiento (normal en nutrición).")
+    else:
+        print("  ⚠ Clusters con alto solapamiento — alimentos muy similares entre grupos.")
 
 
 def _vectores_deficit_sinteticos(n: int, seed: int = 42) -> list[list[float]]:
@@ -175,14 +188,35 @@ def _evaluar_diversidad_cobertura(n_consultas: int = 100):
         print("  ⚠ ml_recomendador no está activo — omitiendo.")
         return
 
-    total_catalogo = len(ml_recomendador._df)
+    from sklearn.metrics.pairwise import cosine_distances
+
+    features_knn = ["calorias_100g", "proteina_100g", "carbohindratos_100g", "grasas_100g"]
+    df_knn  = ml_recomendador._df
+    scaler  = ml_recomendador._scaler
+
+    total_catalogo = len(df_knn)
     vistos: set[str] = set()
     todas_recos: list[str] = []
+    ild_scores: list[float] = []
+
     for vector in _vectores_deficit_sinteticos(n_consultas):
         recos = ml_recomendador.obtener_recomendaciones(*vector, n_recomendaciones=3)
         for r in recos:
             vistos.add(r["alimento"].lower().strip())
             todas_recos.append(r["alimento"])
+
+        # ILD — distancia coseno promedio entre pares dentro de la lista
+        if len(recos) >= 2:
+            item_vecs = []
+            for r in recos:
+                row = df_knn[df_knn["alimento"] == r["alimento"]]
+                if not row.empty:
+                    item_vecs.append(scaler.transform(row[features_knn].values)[0])
+            if len(item_vecs) >= 2:
+                dmat = cosine_distances(item_vecs)
+                n = len(item_vecs)
+                pares = [(i, j) for i in range(n) for j in range(i + 1, n)]
+                ild_scores.append(float(np.mean([dmat[i][j] for i, j in pares])))
 
     cobertura = len(vistos) / total_catalogo
     print(f"  Catálogo total: {total_catalogo} alimentos")
@@ -196,6 +230,16 @@ def _evaluar_diversidad_cobertura(n_consultas: int = 100):
         print("  ✅ Cobertura razonable — el modelo explora una porción amplia del catálogo.")
     else:
         print("  ⚠ Cobertura baja — pocas combinaciones de macros dominan las recomendaciones.")
+
+    ild_mean = float(np.mean(ild_scores)) if ild_scores else 0.0
+    print(f"\n  ILD — Intra-list Diversity (diversidad intra-lista): {ild_mean:.4f}")
+    print("  Interpretación: 0 = ítems nutricionalmente idénticos, 1 = completamente distintos")
+    if ild_mean >= 0.10:
+        print("  ✅ Las listas de 3 recomendaciones tienen diversidad interna razonable.")
+    elif ild_mean >= 0.03:
+        print("  ~ Diversidad interna moderada — esperado en recomendadores basados en déficit.")
+    else:
+        print("  ⚠ Ítems muy similares entre sí dentro de cada lista.")
 
 
 def _evaluar_con_datos_reales():
