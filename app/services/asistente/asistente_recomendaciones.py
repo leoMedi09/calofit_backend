@@ -207,7 +207,7 @@ class RecomendacionesHandler:
     # ── Privados ─────────────────────────────────────────────────────────────
 
     def _nombres_historial_reciente(
-        self, client_id: int, db: Session, dias: int = 2
+        self, client_id: int, db: Session, dias: int = 7
     ) -> List[str]:
         """Devuelve nombres de platos ya recomendados en las últimas N días."""
         desde = datetime.now() - timedelta(days=dias)

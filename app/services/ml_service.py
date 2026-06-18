@@ -260,7 +260,9 @@ class RecomendadorAlimentosKNN:
             if self._df is None or len(self._df) == 0:
                 return []
             vector_scaled = self._scaler.transform([vector])
-            n_pool = min(max(n_recomendaciones * 8, 24), len(self._df))
+            # Pool ampliado para diversidad: 60 candidatos en lugar de 24.
+            # Más vecinos → más alimentos distintos alcanzables por semana.
+            n_pool = min(max(n_recomendaciones * 20, 60), len(self._df))
             n_pool = max(1, n_pool)
             distancias, idx = self._knn.kneighbors(vector_scaled, n_neighbors=n_pool)
 
@@ -297,7 +299,10 @@ class RecomendadorAlimentosKNN:
                     if any(esp in c["alimento"].lower() for esp in self._OMEGA3_ESPECIES):
                         c["similitud"] = min(99.9, round(c["similitud"] * 1.25, 1))
 
-            # Misma semilla por día + vector → reproducible en tests; cambia día a día.
+            # Muestreo ponderado por similitud (Efraimidis-Spirakis):
+            # key = u^(1/similitud) → alimentos con mayor similitud son más
+            # probables, pero los de similitud media (~70%) también tienen
+            # oportunidad. Semilla determinista por día+vector → reproducible.
             seed = (
                 get_peru_date().toordinal() * 10007
                 + int(calorias_faltantes)
@@ -307,7 +312,8 @@ class RecomendadorAlimentosKNN:
                 + len(excluir_nombres) * 17
             ) % (2**31)
             rng = random.Random(seed)
-            rng.shuffle(candidatos)
+            keys = [rng.random() ** (1.0 / max(c["similitud"], 0.1)) for c in candidatos]
+            candidatos = [c for _, c in sorted(zip(keys, candidatos), reverse=True)]
 
             vistos = set()
             resultados = []
