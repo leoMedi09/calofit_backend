@@ -225,6 +225,8 @@ def _evaluar_diversidad_cobertura(n_consultas: int = 100):
 
     ratio_unicidad = len(set(todas_recos)) / max(len(todas_recos), 1)
     print(f"  Ratio de unicidad por recomendación: {ratio_unicidad:.1%}")
+    print(f"  ({ratio_unicidad:.0%} de las recomendaciones son distintas entre sesiones — "
+          f"{'alta' if ratio_unicidad >= 0.5 else 'baja'} variedad entre consultas)")
 
     if cobertura >= 0.15:
         print("  ✅ Cobertura razonable — el modelo explora una porción amplia del catálogo.")
