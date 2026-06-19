@@ -12,7 +12,7 @@ class ClientCreate(BaseModel):
     password: str = Field(..., min_length=6)
     birth_date: date
     weight: float = Field(..., gt=0, description="Peso en kilogramos")
-    height: float = Field(..., gt=0, description="Altura en centímetros")
+    height: float = Field(..., ge=100, le=230, description="Altura en centímetros")
     gender: str = Field(..., pattern="^[MF]$", description="Género: M (Masculino) o F (Femenino)")
     
     medical_conditions: List[str] = Field(default=[], description="Lista de condiciones médicas")
@@ -61,7 +61,7 @@ class ClientUpdate(BaseModel):
     flutter_uid: Optional[str] = None
     birth_date: Optional[date] = None
     weight: Optional[float] = None
-    height: Optional[float] = None
+    height: Optional[float] = Field(default=None, ge=100, le=230)
     gender: Optional[str] = None
     medical_conditions: Optional[List[str]] = None
     activity_level: Optional[str] = None
