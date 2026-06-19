@@ -173,7 +173,9 @@ async def get_daily_summary(
         "ai_insight": ai_insight,
         "ai_strategic_focus": cliente.ai_strategic_focus,
         "nutri_weekly_note": cliente.nutri_weekly_note,
-        "is_strategy_validated": cliente.is_strategic_guide_validated
+        "is_strategy_validated": cliente.is_strategic_guide_validated,
+        "recommended_foods": cliente.recommended_foods,
+        "forbidden_foods": cliente.forbidden_foods
     }
 
 @router.get("/clientes/{cliente_id}/calorias-tendencia")

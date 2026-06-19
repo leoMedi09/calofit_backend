@@ -191,10 +191,24 @@ def get_assigned_patients(
         alerta_data = ia_service.generar_alerta_fuzzy(adherencia, progreso)
 
         # Check-in mensual de peso (independiente del estado del plan)
-        first_of_month = now.replace(day=1).date()
-        hizo_checkin_peso = any(
-            r.fecha_registro >= first_of_month for r in c.historial_peso
-        )
+        # Misma regla que /clientes/checkin-status: 30 días de gracia desde el
+        # registro del cliente, no desde el día 1 del mes calendario — evita que
+        # un usuario recién registrado salga "SIN PESO" sin haber tenido chance.
+        now_naive = now.replace(tzinfo=None)
+        created = c.created_at.replace(tzinfo=None) if c.created_at else None
+        days_since_creation = (now_naive - created).days if created else 31
+        is_new_user = days_since_creation < 30
+
+        if is_new_user:
+            hizo_checkin_peso = True
+        else:
+            last_record = max(
+                (r.fecha_registro for r in c.historial_peso), default=None
+            )
+            days_since = (
+                (now.date() - last_record).days if last_record else days_since_creation
+            )
+            hizo_checkin_peso = days_since < 30
 
         result.append({
             "id": c.id,
