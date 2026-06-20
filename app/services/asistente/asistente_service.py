@@ -213,13 +213,10 @@ from app.services.asistente.asistente_nutricion import (
 from app.services.asistente.asistente_plan import obtener_plan_hoy
 from app.services.asistente.asistente_prompt import (
     clasificar_intencion_respuesta,
-    construir_prompt_cliente,
     detectar_intencion_principal,
-    enriquecer_prompt_con_bd,
     limpiar_tags_calofit,
     rescue_nlp_log,
     respuesta_fallo_llm,
-    respuesta_info_faltante,
 )
 from app.services.asistente.asistente_registro_comida import (
     registrar_desde_cache,
@@ -228,11 +225,6 @@ from app.services.asistente.asistente_registro_comida import (
 from app.services.asistente.asistente_registro_ejercicio import registro_ejercicio_handler
 from app.services.asistente.asistente_respuesta_normalize import enriquecer_respuesta_estructurada
 from app.services.ia_service import ia_engine
-from app.services.missing_data_guard import (
-    detectar_faltantes,
-    detectar_faltantes_recomendar_ejercicio,
-    strict_ask_missing_enabled,
-)
 from app.services.response_parser import parsear_respuesta_para_frontend
 
 
@@ -467,8 +459,23 @@ class AsistenteService:
             _resp_ot["_blocked"] = True  # no guardar en historial BD
             return _resp_ot
 
+        # ── Pre-check de seguridad COMÚN, antes de decidir el modo ───────────────
+        # Si se menciona una lesión sin especificar zona (rodilla/espalda/hombro/
+        # codo), no hay info suficiente para recomendar nada seguro — sin importar
+        # a qué modo iba a ir el mensaje (antes esto solo protegía dentro de
+        # respuesta_chat_llm, así que RECOMENDAR_EJERCICIO podía saltárselo).
+        from app.services.llm_registro import _lesion_mencionada_sin_tipo
+        if _lesion_mencionada_sin_tipo(mensaje, historial):
+            _resp_lesion = _build_response(
+                perfil, "INFO", "OTRO",
+                calorias_meta, consumo_real, quemadas_real, plan_hoy_data,
+                "¿Qué lesión tienes exactamente? ¿Es en la rodilla, espalda, "
+                "hombro, codo u otra zona? Así te doy un consejo seguro y específico.",
+            )
+            return _resp_lesion
+
         # Modo funcional + guard rails
-        modo_funcion = await resolver_modo_funcion(self.ia, mensaje, es_saludo)
+        modo_funcion = await resolver_modo_funcion(self.ia, mensaje, es_saludo, historial=historial)
 
         # ══════════════════════════════════════════════════════════════════════════
         # NUEVA ARQUITECTURA: LLM estima macros directo, sin lookup de BD
@@ -618,7 +625,8 @@ class AsistenteService:
         # OTRO / saludo / consulta informativa → respuesta conversacional
         _texto_chat = await respuesta_chat_llm(
             mensaje, perfil, consumo_real, calorias_meta,
-            quemadas_real, _hist_limpio, self.ia
+            quemadas_real, _hist_limpio, self.ia,
+            plan_macros=plan_hoy_data,
         )
         # Guardia: si el LLM falló o devolvió vacío, usar fallback
         if not _texto_chat or len(_texto_chat.strip()) < 5 or _texto_chat.startswith("["):

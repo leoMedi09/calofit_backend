@@ -63,11 +63,36 @@ _CONDICION_TOKENS: dict[str, set[str]] = {
         "azucar", "azúcar", "miel", "mermelada", "jarabe",
         # Bebidas azucaradas
         "gaseosa", "chicha", "refresco", "jugo azucarado",
-        # Dulces y postres
+        # Dulces y postres genéricos
         "chocolate", "caramelo", "helado", "torta", "pastel",
         "galleta", "donuts", "churro", "suspiro",
+        # Postres tradicionales peruanos — lista corta y estable (no crece con
+        # cada alimento del catálogo, solo nombres de postre ya conocidos en
+        # la gastronomía peruana). Llevan azúcar/miel aunque el nombre no lo diga.
+        "picarones", "mazamorra", "alfajor", "alfajores",
+        "tres leches", "cocada", "turron", "turrón", "keke", "queque",
     },
 }
+
+
+_DIETA_KEYWORDS_MENSAJE: dict[str, tuple[str, ...]] = {
+    "Vegano": ("vegano", "vegana", "veganismo"),
+    "Vegetariano": ("vegetariano", "vegetariana"),
+    "Intolerancia a la Lactosa": (
+        "intolerancia a la lactosa", "intolerante a la lactosa", "soy lactosa",
+    ),
+    "Celíaco": ("celiaco", "celíaco", "celiaca", "celíaca"),
+    "Diabetes": ("diabetes", "diabetico", "diabético", "diabetica", "diabética"),
+}
+
+
+def _detectar_dieta_en_mensaje(mensaje: str) -> list[str]:
+    """Detecta restricciones dietéticas dichas en el mensaje actual (ej. "Soy
+    vegano"), no solo las guardadas en el perfil. Sin esto, un usuario que
+    declara una restricción al vuelo (sin tenerla guardada) podía recibir un
+    plato que la viola — el guard solo miraba `medical_conditions`."""
+    t = (mensaje or "").lower()
+    return [cond for cond, kws in _DIETA_KEYWORDS_MENSAJE.items() if any(k in t for k in kws)]
 
 
 def _tokens_prohibidos(condiciones: list[str]) -> set[str]:

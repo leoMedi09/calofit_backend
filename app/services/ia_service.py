@@ -262,11 +262,17 @@ class IAService:
                 return modo
         return None
 
-    async def clasificar_modo_asistente(self, mensaje: str) -> Optional[str]:
+    async def clasificar_modo_asistente(self, mensaje: str, historial: list = None) -> Optional[str]:
         """
         Clasificación semántica vía Groq (llamada breve, baja temperatura).
         Si devuelve ``None`` (sin API, error, respuesta inválida o desactivado por env),
         ``resolver_modo_funcion`` usa ``detectar_modo_funcion``.
+
+        ``historial``: últimos turnos de la conversación (opcional). Sin esto, una
+        pregunta de seguimiento como "¿cuál de esas tiene más proteína?" se ve
+        aislada y el clasificador la confunde con una NUEVA petición de
+        recomendación — con contexto, entiende que es una pregunta sobre algo
+        ya mencionado y la manda a "otro" (conversación libre con memoria).
 
         Desactivar la llamada extra (p. ej. en benchmarks): ``CALOFIT_DISABLE_CLASIFICAR_MODO_LLM=1``.
         """
@@ -277,6 +283,16 @@ class IAService:
         m = (mensaje or "").strip()
         if len(m) < 2:
             return None
+        _contexto_historial = ""
+        if historial:
+            _ultimos = historial[-4:]
+            _lineas = "\n".join(
+                f"{'Usuario' if h.get('role') == 'user' else 'Asistente'}: {str(h.get('content', ''))[:200]}"
+                for h in _ultimos
+            )
+            _contexto_historial = (
+                f"\n━━ CONVERSACIÓN RECIENTE (para contexto) ━━\n{_lineas}\n"
+            )
         prompt = (
             "Eres el clasificador de intenciones de CaloFit, app de nutrición y ejercicio en Perú.\n"
             "Responde ÚNICAMENTE con una de estas 5 palabras (nada más, sin explicación):\n"
@@ -315,7 +331,14 @@ class IAService:
             "R2. MODAL = PERMISO: cualquier 'puedo/se puede/podría/es posible + verbo' = otro.\n"
             "R3. MEZCLA saludo+acción: 'hola amigo hoy hice press' → clasifica por la ACCIÓN (registrar_ejercicio).\n"
             "R4. VOZ: ignora muletillas (mmm, este, pues, o sea) y números en palabras (setenta kilos).\n"
-            "R5. AMBIGUO: si no estás seguro, prefiere 'otro' antes que un registro incorrecto.\n\n"
+            "R5. AMBIGUO: si no estás seguro, prefiere 'otro' antes que un registro incorrecto.\n"
+            "R6. PREGUNTA DE SEGUIMIENTO: si el mensaje hace referencia a algo YA mencionado en "
+            "la conversación reciente (palabras como 'esas', 'esa', 'ese', 'la anterior', 'cuál de "
+            "los/las', o compara/pregunta sobre opciones sin nombrar un alimento/ejercicio nuevo), "
+            "clasifica como 'otro' — es una pregunta sobre la respuesta anterior, no una nueva "
+            "petición. Ejemplo: si el asistente ya dio 3 platos y el usuario pregunta '¿cuál tiene "
+            "más proteína?' o '¿cuál es más barato?', eso es 'otro', NO recomendar_nutricion.\n"
+            f"{_contexto_historial}\n"
             f"Mensaje a clasificar: \"{m[:500]}\"\n"
             "Respuesta (una sola palabra exacta):"
         )

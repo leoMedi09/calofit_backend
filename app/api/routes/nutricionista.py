@@ -11,7 +11,7 @@ from app.models.historial import AlertaSalud
 from app.schemas.nutricion import PlanNutricionalResponse, PlanNutricionalUpdate
 from app.schemas.client import StrategicGuideUpdate
 from datetime import datetime, timedelta
-from app.core.utils import calcular_metabolismo_basal, obtener_macros_desglosados
+from app.core.utils import calcular_metabolismo_basal, obtener_macros_desglosados, get_peru_now
 from app.schemas.client import StrategicGuideUpdate, ClientExpressCreate
 from app.core.security import security
 
@@ -175,7 +175,6 @@ def get_assigned_patients(
 
     clients = query.all()
     
-    from app.core.utils import get_peru_now
     now = get_peru_now()
     seven_days_ago = now - timedelta(days=7)
     
@@ -507,7 +506,7 @@ def update_strategic_guide(
         .first()
     )
     if plan_activo:
-        plan_activo.validated_at = datetime.utcnow()
+        plan_activo.validated_at = get_peru_now().replace(tzinfo=None)
         plan_activo.validated_by_id = current_user.id
         if plan_activo.status != "validado":
             plan_activo.status = "validado"
@@ -560,7 +559,7 @@ def validate_plan(
 
     plan.status = "validado"
     plan.validated_by_id = current_user.id
-    plan.validated_at = datetime.utcnow()
+    plan.validated_at = get_peru_now().replace(tzinfo=None)
     db.commit()
     return {"message": f"Plan del cliente {id} validado correctamente por Nutricionista {current_user.first_name}"}
 

@@ -5,7 +5,6 @@ from app.core.database import get_db
 from app.models.nutricion import PlanNutricional, PlanDiario
 from app.schemas.nutricion import PlanNutricionalCreate, PlanNutricionalResponse, TestIARequest
 from typing import List, Optional, Any, Dict
-from datetime import datetime
 
 from app.api.routes.auth import get_current_staff, get_current_user
 from app.services.ia_service import ia_engine 
@@ -237,9 +236,10 @@ async def validar_plan_nutricional(
         raise HTTPException(status_code=403, detail="No tienes permiso para validar planes de este cliente")
 
     # Actualizar cabecera del plan
+    from app.core.utils import get_peru_now
     plan.status = "validado"
     plan.validated_by_id = current_user.id
-    plan.validated_at = datetime.utcnow()
+    plan.validated_at = get_peru_now().replace(tzinfo=None)
     plan.nutricionista_id = current_user.id # Asignar formalmente al plan
     
     # Actualizar todos los días del plan a oficial

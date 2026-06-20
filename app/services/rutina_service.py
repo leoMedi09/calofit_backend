@@ -53,9 +53,19 @@ _LESIONES_SUSTITUCION: Dict[str, Dict[str, Any]] = {
         "keywords": ["codo", "epicóndilo", "codo de tenista", "codo de golfista", "tendinitis codo"],
         "grupos_restringidos": ["Bíceps", "Tríceps"],
         "sustituir": {
-            "default": ("face_pull", "Face Pull (isométrico suave)"),
+            # Antes solo tenía "default" — el guard nunca podía bloquear nada
+            # concreto porque _ejercicios_riesgosos quedaba vacío (el loop
+            # excluye la clave "default" al construir el set). Se agregan los
+            # movimientos de flexo-extensión bajo carga, que son justo los que
+            # sobrecargan el codo (epicondilitis/codo de tenista).
+            "curl de biceps":   ("isometria_antebrazo", "Isometría de antebrazo (sin carga)"),
+            "extension triceps": ("estiramiento_triceps", "Estiramiento de tríceps (sin carga)"),
+            "press":            ("face_pull",  "Face Pull (carga ligera, sin extensión forzada del codo)"),
+            "fondos":           ("face_pull",  "Face Pull (isométrico suave)"),
+            "jalon":            ("face_pull",  "Face Pull (isométrico suave)"),
+            "default":          ("face_pull",  "Face Pull (isométrico suave)"),
         },
-        "justificacion": "lesión de codo — se redujeron ejercicios de flexo-extensión de codo y se sugieren cargas mínimas",
+        "justificacion": "lesión de codo — se eliminaron ejercicios de flexo-extensión bajo carga (curl, extensión, press, fondos, jalón) y se sugieren alternativas isométricas o sin carga",
     },
 }
 
@@ -136,6 +146,92 @@ def _detectar_lesiones(medical_conditions: List[str]) -> List[str]:
                 activas.append(clave)
                 break
     return activas
+
+
+# ── Estado de la lesión: ¿sigue activa o el usuario ya se recuperó? ──────────
+# No es una lista de frases completas ("ya estoy recuperado") porque cualquier
+# usuario real lo dice de muchas formas distintas. Son raíces/conceptos: si
+# aparecen en el mismo turno que menciona la zona, ese turno fija el estado
+# más reciente de esa lesión. El historial se recorre cronológicamente y el
+# turno MÁS RECIENTE que mencione la zona decide — no "se mencionó alguna vez".
+_ESTADO_RECUPERADO_STEMS = (
+    "recuper",                          # recuperado/a, recuperación, recuperé
+    "sanad", "sane", "sano ya", "ya sano", "ya sana",  # sanado/a, sané
+    "curad", "ya cure", "ya curé",       # curado/a, curé
+    "sin dolor", "sin molestia", "no tengo dolor", "no tengo molestia",
+    "ningun dolor", "ningún dolor", "ninguna molestia",
+    "no me duele", "ya no duele", "ya no me duele",
+    "desaparecio", "desaparec",          # desapareció, desapareciendo
+    "ya paso", "ya pasó", "ya pase", "ya pasé",
+    "estoy bien", "me siento bien", "entren normal", "entreno normal",
+    "sin problema",
+)
+_ESTADO_ACTIVO_STEMS = (
+    "duele", "dolor", "molesta", "molestia", "inflamad",
+    "lesion", "lesión", "lastimad", "me lastime", "me lastimé",
+)
+# Cuando el usuario no repite ninguna zona por su nombre pero se refiere a
+# "todas" las que están en la conversación (ej. "ya no tengo molestias en
+# ninguna de las dos") — sin esto, un mensaje así queda ambiguo y no actualiza
+# ninguna zona.
+_INDICADORES_TODAS_LAS_ZONAS = (
+    "ambas", "ambos", "las dos", "los dos", "ninguna de las dos",
+    "ninguno de los dos", "todas", "todos",
+)
+
+
+def filtrar_lesiones_activas(
+    lesiones_candidatas: List[str], historial: List[dict] | None, mensaje_actual: str,
+) -> List[str]:
+    """De las lesiones detectadas (por perfil o mensaje), descarta las que el
+    usuario indicó como recuperadas. Procesa TODAS las zonas en una sola
+    pasada cronológica (no zona por zona) porque un turno que nombra
+    explícitamente una zona ("Ya estoy recuperado DEL HOMBRO") solo debe
+    actualizar esa zona — evaluar cada zona por separado hacía que ese mismo
+    turno "recuperara" también la rodilla, que nunca se mencionó ahí."""
+    if not lesiones_candidatas:
+        return []
+    turnos = [
+        str(h.get("content", "")) for h in (historial or []) if h.get("role") == "user"
+    ]
+    turnos.append(mensaje_actual or "")
+
+    estados: dict[str, str] = {}       # clave -> "activa" | "recuperada"
+    vistas: set[str] = set()           # zonas mencionadas explícitamente hasta ahora
+
+    for turno in turnos:
+        t = turno.lower()
+        zonas_en_turno = [
+            clave for clave in lesiones_candidatas
+            if any(kw in t for kw in _LESIONES_SUSTITUCION[clave]["keywords"])
+        ]
+        vistas.update(zonas_en_turno)
+
+        if zonas_en_turno:
+            zonas_objetivo = zonas_en_turno
+        elif any(ind in t for ind in _INDICADORES_TODAS_LAS_ZONAS) and vistas:
+            # "ya no tengo molestias en ninguna de las dos" → aplica a todas
+            # las zonas ya mencionadas, no solo a la última.
+            zonas_objetivo = list(vistas)
+        elif len(vistas) == 1:
+            # Solo una zona en juego — un comentario sin nombrarla ("ya estoy
+            # recuperado") obviamente se refiere a ella.
+            zonas_objetivo = list(vistas)
+        else:
+            # 2+ zonas en juego y el turno no nombra ninguna ni dice "ambas":
+            # ambiguo. Más seguro no tocar ningún estado que adivinar mal.
+            zonas_objetivo = []
+
+        if not zonas_objetivo:
+            continue
+        if any(stem in t for stem in _ESTADO_RECUPERADO_STEMS):
+            for z in zonas_objetivo:
+                estados[z] = "recuperada"
+        elif any(stem in t for stem in _ESTADO_ACTIVO_STEMS):
+            for z in zonas_objetivo:
+                estados[z] = "activa"
+
+    return [c for c in lesiones_candidatas if estados.get(c) != "recuperada"]
 
 
 def _grupos_restringidos(lesiones_activas: List[str]) -> List[str]:

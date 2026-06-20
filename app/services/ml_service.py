@@ -16,7 +16,7 @@ from typing import List, Optional
 
 from app.core.alimentos_ux_filters import es_alimento_bloqueado_ia, nombre_coincide_exclusion
 from app.core.logging_config import get_logger
-from app.core.utils import get_peru_date
+from app.core.utils import get_peru_now
 
 logger = get_logger("ml_service")
 
@@ -302,9 +302,12 @@ class RecomendadorAlimentosKNN:
             # Muestreo ponderado por similitud (Efraimidis-Spirakis):
             # key = u^(1/similitud) → alimentos con mayor similitud son más
             # probables, pero los de similitud media (~70%) también tienen
-            # oportunidad. Semilla determinista por día+vector → reproducible.
+            # oportunidad. Semilla por bucket de 3 minutos + vector — variedad
+            # real entre consultas seguidas del chat, sin ser aleatorio puro
+            # (dos llamadas casi simultáneas con el mismo déficit aún coinciden).
+            _bucket_temporal = int(get_peru_now().timestamp() // 60)
             seed = (
-                get_peru_date().toordinal() * 10007
+                _bucket_temporal * 10007
                 + int(calorias_faltantes)
                 + int(prote_faltante * 10)
                 + int(carbo_faltante * 10)

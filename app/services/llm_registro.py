@@ -87,6 +87,11 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
   (cantidad nunca se infiere de "G", "g", "ml", "kg" — esos SIEMPRE son peso/volumen → porcion_g).
 
 ━━ REGLAS OBLIGATORIAS ━━
+0. ⚠️ Si el mensaje NO menciona ningún alimento ni bebida (ej. datos personales como
+   peso/altura/frecuencia de entrenamiento, una pregunta, un saludo, una instrucción
+   sin comida) → NO INVENTES una comida para llenar el JSON. Responde exactamente
+   {{"alimentos":[], "prot_total":0, "carb_total":0, "grasa_total":0}}.
+   Esto es distinto de "ficticio": aquí no hay NADA que extraer, ni real ni inventado.
 1. Si es_real = false → ese item NO se incluye en el JSON final (omitirlo).
 2. Si TODOS son ficticios → {{"alimentos":[], "prot_total":0, "carb_total":0, "grasa_total":0}}
 3. ⚠️ SIEMPRE incluye TODOS los alimentos/bebidas reales mencionados en el mensaje, SIN EXCEPCIÓN
@@ -201,6 +206,12 @@ DEPORTES:
   Fútbol=7.0  Básquet=8.0  Vóley=4.0  Tenis=7.5  Boxeo sparring=9.0
 
 ━━ REGLAS PROFESIONALES ━━
+0. ⚠️ Si el mensaje NO nombra un ejercicio o actividad física ESPECÍFICA (ej. solo
+   confirma que ya no hay dolor, que está recuperado, que "entrenó sin problemas"
+   sin decir qué hizo, una pregunta, un saludo) → NO INVENTES una "rutina completa"
+   genérica. Responde {{"encontrado": false, "ejercicio": null, "kcal_quemadas": 0,
+   "duracion_min": 0, "met": 0, "intensidad": "Baja"}}. Solo extrae si el mensaje
+   nombra QUÉ hizo (sentadillas, trote, press banca, fútbol, etc.).
 1. kcal = MET × {peso_kg} × 3.5 / 200 × duracion_min  (fórmula MET estándar)
 2. Si NO hay ejercicio real: {{"encontrado": false, "ejercicio": null, "kcal_quemadas": 0, "duracion_min": 0, "met": 0, "intensidad": "Baja"}}
 3. duracion_min: extrae del mensaje; si no se dice, estima según volumen:
@@ -229,7 +240,7 @@ TAREA: El usuario pide sugerencias de EJERCICIO. Responde SOLO como entrenador p
 
 Perfil:
 - Nombre: {nombre}  |  Objetivo: {objetivo}  |  Condiciones médicas: {condiciones}
-
+{contexto_lesion}
 Mensaje del usuario: "{mensaje}"
 
 TABLA DE EJERCICIOS POR GRUPO MUSCULAR:
@@ -258,9 +269,7 @@ _PROMPT_CHAT = _IDENTIDAD + """
 TAREA: Responde al mensaje del usuario de forma conversacional.
 
 Perfil del usuario:
-- Nombre: {nombre}
-- {consumido}/{meta} kcal consumidas ({pct}%)  |  {quemado} kcal quemadas hoy
-- Dieta: {dieta}  |  Condiciones: {condiciones}  |  Objetivo: {objetivo}
+{bloque_perfil}
 
 Conversación reciente:
 {historial}
@@ -272,6 +281,11 @@ REGLAS DE RESPUESTA:
   1. PROHIBIDO cualquier markdown: **negrita**, *cursiva*, # títulos. Solo texto plano.
   2. PROHIBIDO empezar con frases de relleno: "Leonardo, me alegra...", "Qué buena pregunta...", "Es un placer...". Empieza directo al tema.
   3. PROHIBIDO terminar con pregunta: "¿Quieres saber más?", "¿Te gustaría...?". Termina con punto.
+     Única excepción: si el usuario pidió "consejo" o "ayuda" de forma EXPLÍCITA con esa palabra,
+     puedes terminar con una pregunta corta. En CUALQUIER otro caso, termina con punto.
+  4. LÍMITE DE LONGITUD: máximo 3 oraciones cortas en total (cuenta mentalmente antes de responder).
+     Si la respuesta te queda más larga, recórtala — elimina la oración menos importante.
+     PROHIBIDO repetir o citar el mensaje del usuario al inicio de tu respuesta.
 
 ⛔ ADAPTACIÓN DE DIETA (CRÍTICO):
   Si Dieta = "Vegano" o "Vegetariano" → PROHIBIDO ingredientes animales en recetas.
@@ -310,10 +324,31 @@ PREGUNTAS SIMPLES: máximo 2-3 oraciones directas.
   "palta" = aguacate/avocado. NUNCA confundir con "pata".
   Vegano pregunta por animal → responde NO directamente.
 
+- CÁLCULO nutricional ('cuánta proteína necesito', 'cuántas calorías necesito al día'):
+  ⚠️ Esto es una pregunta de NÚMERO, no una petición de plato — PROHIBIDO responder
+  con un alimento o receta aquí.
+  Para PROTEÍNA: si el perfil incluye "Meta proteína (plan)", usa EXACTAMENTE ese
+  número — es el cálculo real de su plan nutricional, ya considera su objetivo
+  específico (puede ser distinto de una fórmula genérica). PROHIBIDO recalcular o
+  dar un rango distinto cuando ese dato está disponible.
+  Solo si "Meta proteína (plan)" NO aparece en el perfil, calcula con el Peso y el
+  Objetivo: 1.6-2.2 g/kg si es ganar músculo · 1.2-1.6 g/kg si es mantener o perder peso.
+  Para CALORÍAS: usa las kcal de la meta diaria del perfil si están disponibles.
+  Responde con el número y una frase de por qué, en 2 oraciones máximo.
+  Si no hay Peso ni Meta proteína disponibles, pide el peso antes de calcular — no inventes un número.
+
 - Recetas peruanas: Causa=PAPA AMARILLA. Ceviche=PESCADO CRUDO. Lomo saltado=RES.
   Vegano: adapta con tofu/palmito manteniendo la base.
 - Usa el historial para dar continuidad a la conversación.
-- PROHIBIDO terminar con pregunta a menos que el usuario pida consejo explícito.
+
+- CONTINUIDAD DE TEMA EN RESPUESTAS DE SEGUIMIENTO (CRÍTICO):
+  Si el mensaje actual es una respuesta corta a algo que TÚ preguntaste o sugeriste
+  en el turno anterior ("sí", "dale", "dame consejo", "cuéntame más", "ok", "claro"),
+  CONTINÚA exactamente el mismo tema del turno anterior en 2-3 oraciones — el mismo
+  límite de longitud que cualquier pregunta simple. NO agregues temas no relacionados
+  (ej. si el tema venía siendo ejercicio/lesión, NO mezcles balance de kcal ni dieta a
+  menos que el usuario lo pida explícitamente). Una respuesta de seguimiento corta NO
+  es una invitación a dar un resumen general del perfil del usuario.
 
 ⛔ PERSONA GRAMATICAL (CRÍTICO):
   Las comidas/ejercicios del historial son del USUARIO, no tuyos. Refiérete a ellas SIEMPRE
@@ -391,6 +426,15 @@ async def registrar_comida_llm(
             a for a in datos["alimentos"]
             if a.get("es_real", True) is not False
         ]
+        # Solo para la ruta LLM (no caché): descartar ítems cuyo nombre no
+        # tenga ninguna palabra presente en el mensaje real — evita registrar
+        # una comida inventada cuando el mensaje no menciona comida alguna
+        # (ej. "Peso 80 kg, mido 1.75..." → no debe registrar "Pollo saltado").
+        if not goto_save:
+            datos["alimentos"] = [
+                a for a in datos["alimentos"]
+                if _extraccion_tiene_base_textual(a.get("nombre", ""), mensaje)
+            ]
 
     # Validar que hay alimentos con macros
     _items = datos.get("alimentos", [])
@@ -661,6 +705,14 @@ async def registrar_ejercicio_llm(
     # Filtrar ejercicios válidos
     ejercicios_raw = [e for e in ejercicios_raw
                       if e.get("encontrado", True) and e.get("ejercicio")]
+    # Descartar ejercicios cuyo nombre no tenga base en el mensaje real — evita
+    # registrar un entrenamiento inventado cuando el mensaje no describe
+    # ninguno (ej. "La molestia ya desapareció, volví a entrenar sin
+    # problemas" → no debe registrar "Rutina completa en el gimnasio").
+    ejercicios_raw = [
+        e for e in ejercicios_raw
+        if _extraccion_tiene_base_textual(e.get("ejercicio", ""), mensaje)
+    ]
 
     if not ejercicios_raw:
         return {
@@ -783,6 +835,48 @@ def _persistir_historial_recomendaciones(db, perfil, momento: str, platos: list)
         db.rollback()
 
 
+def _construir_mensaje_natural_reco(
+    platos_limpios: list,
+    palabra_evitada: str | None,
+    condicion_relevante: str | None,
+    estilo_evitado_momento: str | None,
+) -> str:
+    """
+    Construye el mensaje final en prosa natural (no lista con guiones) a
+    partir de los platos YA validados/parseados — la estructura de datos
+    (kcal/macros) ya se extrajo y cacheó antes de llamar a esto, así que
+    cambiar la presentación aquí no afecta el registro/caché posterior.
+    """
+    nombres = [n for n, *_ in platos_limpios]
+    if not nombres:
+        return "No pude generar recomendaciones en este momento."
+
+    if len(nombres) == 1:
+        lista_natural = nombres[0]
+    else:
+        lista_natural = ", ".join(nombres[:-1]) + " o " + nombres[-1]
+
+    kcals = [k for _, k, *_ in platos_limpios]
+    kcal_min, kcal_max = min(kcals), max(kcals)
+    kcal_txt = (
+        f"~{kcal_min:.0f} kcal" if kcal_min == kcal_max
+        else f"entre {kcal_min:.0f} y {kcal_max:.0f} kcal"
+    )
+
+    razones = []
+    if palabra_evitada and condicion_relevante:
+        razones.append(f"por tu condición de {condicion_relevante}, evité incluir {palabra_evitada}")
+    if estilo_evitado_momento:
+        razones.append("a esta hora evité algo frito o pesado, mejor algo más ligero")
+
+    if razones:
+        intro_razones = "; y ".join(razones)
+        intro_razones = intro_razones[0].upper() + intro_razones[1:]
+        return f"{intro_razones}, así que te recomiendo {lista_natural} — {kcal_txt}."
+
+    return f"Te recomiendo {lista_natural} — {kcal_txt}."
+
+
 async def respuesta_recomendacion_llm(
     mensaje: str,
     perfil,
@@ -805,13 +899,122 @@ async def respuesta_recomendacion_llm(
     condiciones = ", ".join(getattr(perfil, "medical_conditions", None) or []) or "ninguna"
 
     if modo == "ejercicio":
+        # Guard de seguridad por lesión — detecta la lesión tanto en el PERFIL
+        # como en el MENSAJE (el usuario puede mencionarla al vuelo sin tenerla
+        # guardada), y reutiliza las sustituciones ya conocidas de
+        # rutina_service.py en vez de mantener una lista nueva por separado.
+        # Se calcula ANTES de generar (no solo después) para informar al LLM
+        # desde el prompt — antes el LLM "nacía a ciegas" y solo se corregía
+        # reactivamente si violaba algo; ahora además se le avisa de entrada.
+        from app.services.rutina_service import (
+            _LESIONES_SUSTITUCION, _detectar_lesiones, filtrar_lesiones_activas,
+        )
+        _condiciones_lista_ej = list(getattr(perfil, "medical_conditions", None) or [])
+        # Incluir TODO el historial: una lesión mencionada varios turnos atrás
+        # (ej. "me duele la rodilla" en el turno 1) debe seguir siendo
+        # candidata aunque ya no esté en los últimos 2-4 turnos — antes esta
+        # ventana corta hacía que la rodilla "desapareciera" de las candidatas
+        # y nunca llegara a evaluarse en filtrar_lesiones_activas. No hay
+        # riesgo de que esto bloquee para siempre: filtrar_lesiones_activas
+        # (abajo) ya resuelve si sigue activa o se recuperó.
+        _texto_historial_ej = " ".join(
+            str(h.get("content", "")) for h in (historial or [])
+        )
+        _lesiones_candidatas_ej = _detectar_lesiones(
+            _condiciones_lista_ej + [mensaje or "", _texto_historial_ej]
+        )
+        # Filtrar las que el usuario ya indicó como recuperadas más reciente
+        # que la última mención de dolor — si no, "rodilla" bloquea para
+        # siempre una vez mencionada, aunque el usuario diga que ya sanó.
+        _lesiones_activas = filtrar_lesiones_activas(
+            _lesiones_candidatas_ej, historial, mensaje
+        )
+
+        _ejercicios_riesgosos: set[str] = set()
+        _alternativas_seguras: list[str] = []
+        _contexto_lesion = ""
+        if _lesiones_activas:
+            for _lesion in _lesiones_activas:
+                _cfg = _LESIONES_SUSTITUCION[_lesion]
+                for _riesgoso, (_id_seguro, _nombre_seguro) in _cfg["sustituir"].items():
+                    if _riesgoso != "default":
+                        _ejercicios_riesgosos.add(_riesgoso)
+                    _alternativas_seguras.append(_nombre_seguro)
+            # `sustituir` solo cubre ejercicios de FUERZA por lesión (sentadilla,
+            # prensa, press...) — no cardio de impacto. Una lesión de rodilla
+            # también prohíbe trote/correr/salto, sin importar la lesión exacta:
+            # se sumó tras encontrar "Trote 20 minutos" recomendado como ejercicio
+            # "seguro" a alguien que dijo que correr le duele la rodilla.
+            if "rodilla" in _lesiones_activas:
+                _ejercicios_riesgosos |= set(_ACCIONES_IMPACTO)
+            _justif_previa = "; ".join(
+                _LESIONES_SUSTITUCION[l]["justificacion"] for l in _lesiones_activas
+            )
+            _contexto_lesion = (
+                f"\n⚠️ LESIÓN ACTIVA DEL USUARIO: {_justif_previa}.\n"
+                f"PROHIBIDO sugerir: {', '.join(sorted(_ejercicios_riesgosos))} (ni variantes).\n"
+                f"Prioriza alternativas como: {', '.join(dict.fromkeys(_alternativas_seguras))}.\n"
+            )
+
         prompt = _PROMPT_RECOMENDACION_EJERCICIO.format(
             nombre=perfil.first_name,
             objetivo=objetivo,
             condiciones=condiciones,
+            contexto_lesion=_contexto_lesion,
             mensaje=mensaje,
         )
-        return await ia_engine._llamar_groq(prompt, max_tokens=300, temp=0.7)
+        respuesta_ej = await ia_engine._llamar_groq(prompt, max_tokens=300, temp=0.7)
+
+        if _lesiones_activas:
+            # _normalizar_nombre quita tildes — sin esto, "jalon" (keyword) nunca
+            # coincide con "Jalón" (como el LLM lo escribe naturalmente).
+            # Este chequeo sigue existiendo como red de seguridad — el contexto
+            # arriba reduce la probabilidad de violación, no la garantiza.
+            _viola_lesion = any(
+                r in _normalizar_nombre(respuesta_ej or "") for r in _ejercicios_riesgosos
+            )
+
+            if _viola_lesion:
+                logger.warning(
+                    "[Reco-Ejercicio] Ejercicio riesgoso para lesión detectada — reintentando"
+                )
+                _justif_lesion = "; ".join(
+                    _LESIONES_SUSTITUCION[l]["justificacion"] for l in _lesiones_activas
+                )
+                _prompt_retry_ej = (
+                    f"Eres entrenador personal. El usuario tiene: {_justif_lesion}.\n"
+                    f"NO sugieras NINGUNO de estos ejercicios ni variantes: "
+                    f"{', '.join(sorted(_ejercicios_riesgosos))}.\n"
+                    f"En su lugar usa alternativas seguras como: {', '.join(_alternativas_seguras)}.\n"
+                    f"Mensaje original del usuario: \"{mensaje}\"\n"
+                    f"Responde en 2-3 frases naturales (sin listas, sin numeración, sin pasos "
+                    f"de ejecución), mencionando 2-3 ejercicios seguros con series/reps. "
+                    f"Sin preguntas al final."
+                )
+                respuesta_ej = await ia_engine._llamar_groq(
+                    _prompt_retry_ej, max_tokens=200, temp=0.3
+                )
+
+                # Verificación final + fallback garantizado en prosa natural (no lista)
+                _aun_viola_ej = any(
+                    r in _normalizar_nombre(respuesta_ej or "") for r in _ejercicios_riesgosos
+                )
+                if _aun_viola_ej:
+                    logger.warning(
+                        "[Reco-Ejercicio] Reintento también riesgoso — usando fallback seguro"
+                    )
+                    _nombres_unicos = list(dict.fromkeys(_alternativas_seguras))[:3]
+                    if len(_nombres_unicos) > 1:
+                        _lista_segura = ", ".join(_nombres_unicos[:-1]) + " o " + _nombres_unicos[-1]
+                    else:
+                        _lista_segura = _nombres_unicos[0]
+                    respuesta_ej = (
+                        f"Por tu lesión, mejor evitamos ejercicios de alto impacto en esa zona. "
+                        f"Prueba con {_lista_segura} — 3 series de 12 repeticiones, con peso "
+                        f"ligero y movimientos controlados."
+                    )
+
+        return respuesta_ej
 
     # ── Recomendación de COMIDA: generada por LLM con contexto real ──────────────
     import re as _re_reco
@@ -823,28 +1026,120 @@ async def respuesta_recomendacion_llm(
     # ALMUERZO va antes que DESAYUNO para que "ya entrené en la mañana, necesito almorzar"
     # matchee "almorzar" (ALMUERZO) antes de matchear "mañana" (DESAYUNO).
     # "tarde" solo en MERIENDA — "snack en la tarde" → MERIENDA, no ALMUERZO.
+    # "noche"/"nocturno"/"madrugada" NO están aquí a propósito: son descriptores
+    # de horario ambiguos (se pueden decir tanto a las 8pm como a la 1am) y se
+    # resuelven más abajo consultando la hora real, en vez de forzar siempre
+    # CENA/DESAYUNO sin importar qué hora es de verdad.
     _MOMENTO_KEYWORDS_RECO = {
-        "CENA":      ["cenar", "cena", "noche", "nocturno"],
+        "CENA":      ["cenar", "cena"],
         "MERIENDA":  ["merienda", "snack", "media tarde", "media mañana", "antojo", "tarde"],
         "ALMUERZO":  ["almorzar", "almuerzo", "mediodía", "mediodia"],
-        "DESAYUNO":  ["desayunar", "desayuno", "mañana", "madrugada"],
+        "DESAYUNO":  ["desayunar", "desayuno", "mañana"],
     }
     _msg_low_reco = mensaje.lower() if mensaje else ""
+
+    # Si el usuario pidió explícitamente algo que choca con su propia condición
+    # médica (ej. "queso" siendo intolerante a la lactosa), lo detectamos aquí
+    # para poder justificar la respuesta en vez de devolver un "Opciones para
+    # ti:" genérico que ignora el pedido sin explicación. Junta TODAS las
+    # coincidencias del mensaje, no solo la primera (ej. "queso y algo dulce"
+    # → debe mencionar ambas, no solo "queso").
+    from app.services.recomendador_platos import _tokens_prohibidos, _CONDICION_TOKENS
+    _condiciones_lista_reco = getattr(perfil, "medical_conditions", None) or []
+    _tokens_dieta_msg = _tokens_prohibidos(_condiciones_lista_reco)
+
+    _evitados_msg: list[tuple[str, str]] = []  # [(palabra, condición), ...]
+    for _t in _tokens_dieta_msg:
+        if _t in _msg_low_reco:
+            _cond = next(
+                (c for c in _condiciones_lista_reco if _t in _CONDICION_TOKENS.get(c, set())),
+                None,
+            )
+            if _cond:
+                _evitados_msg.append((_t, _cond))
+
+    # Sinónimos genéricos: "dulce"/"postre" no son un ingrediente literal, son
+    # una CATEGORÍA — pero si el cliente tiene Diabetes, significan lo mismo
+    # que "azúcar" para este propósito. Lista corta de categorías comunes,
+    # no de alimentos puntuales (eso seguiría siendo hardcoding de verdad).
+    _SINONIMOS_CATEGORIA_DIETA = {
+        "dulce": ("Diabetes", "azúcar"),
+        "postre": ("Diabetes", "azúcar"),
+        "azucarado": ("Diabetes", "azúcar"),
+        "lacteo": ("Intolerancia a la Lactosa", "lácteos"),
+        "lácteo": ("Intolerancia a la Lactosa", "lácteos"),
+        "lacteos": ("Intolerancia a la Lactosa", "lácteos"),
+        "lácteos": ("Intolerancia a la Lactosa", "lácteos"),
+    }
+    _conds_ya_cubiertas = {c for _, c in _evitados_msg}
+    for _palabra_generica, (_cond_generica, _termino_mostrar) in _SINONIMOS_CATEGORIA_DIETA.items():
+        if (
+            _palabra_generica in _msg_low_reco
+            and _cond_generica in _condiciones_lista_reco
+            and _cond_generica not in _conds_ya_cubiertas
+        ):
+            _evitados_msg.append((_termino_mostrar, _cond_generica))
+            _conds_ya_cubiertas.add(_cond_generica)
+
+    # Texto final: "queso" o "queso y azúcar" o "queso, azúcar y lácteos"
+    _palabra_evitada_msg = (
+        " y ".join([", ".join(p for p, _ in _evitados_msg[:-1]), _evitados_msg[-1][0]])
+        if len(_evitados_msg) > 1
+        else (_evitados_msg[0][0] if _evitados_msg else None)
+    )
+    _condicion_relevante_msg = (
+        " y ".join(dict.fromkeys(c for _, c in _evitados_msg)) if _evitados_msg else None
+    )
+
     momento_reco = None
     for _m_key, _kws in _MOMENTO_KEYWORDS_RECO.items():
         if any(kw in _msg_low_reco for kw in _kws):
             momento_reco = _m_key
             break
+
+    # Descriptores de horario ambiguos: "noche"/"nocturno" puede ser las 8pm
+    # (cena real) o la 1am (antojo ligero) — se resuelve con la hora real.
+    # "madrugada" nunca es un desayuno completo, siempre antojo ligero.
+    if not momento_reco and any(kw in _msg_low_reco for kw in ("noche", "nocturno")):
+        _hora_noche = _get_peru_now_reco().hour
+        momento_reco = "CENA" if 18 <= _hora_noche <= 21 else "MERIENDA"
+    elif not momento_reco and "madrugada" in _msg_low_reco:
+        momento_reco = "MERIENDA"
+
     if not momento_reco:
+        # Rangos alineados con la fuente canónica inferir_momento_dia_peru()
+        # (app/core/utils.py). La franja 22:00-04:59 (trasnoche) reutiliza
+        # MERIENDA — a esa hora nadie quiere un plato de cena completo, sino
+        # un antojo ligero. Antes caía en "CENA" y el LLM sugería platos
+        # pesados de almuerzo sin que nada lo restringiera correctamente.
         _hora = _get_peru_now_reco().hour
-        if 5 <= _hora < 10:
+        if 5 <= _hora <= 9:
             momento_reco = "DESAYUNO"
-        elif 10 <= _hora < 15:
+        elif 10 <= _hora <= 14:
             momento_reco = "ALMUERZO"
-        elif 15 <= _hora < 19:
+        elif 15 <= _hora <= 17:
             momento_reco = "MERIENDA"
-        else:
+        elif 18 <= _hora <= 21:
             momento_reco = "CENA"
+        else:  # 22:00-04:59 — trasnoche / antojo nocturno
+            momento_reco = "MERIENDA"
+
+    # Si el usuario pidió un estilo de preparación (frito, guisado) que el
+    # momento del día no permite (ej. "algo frito" a la hora de la merienda),
+    # lo anotamos para explicarlo igual que con las condiciones médicas — no
+    # es una restricción de salud, es de horario, pero merece la misma
+    # transparencia en vez de ignorar el pedido sin decir nada.
+    _ESTILOS_NO_PERMITIDOS_MOMENTO = {
+        "DESAYUNO": ("frito", "frita", "guiso", "guisado"),
+        "MERIENDA": ("frito", "frita", "guiso", "guisado"),
+    }
+    _estilo_evitado_momento = next(
+        (
+            e for e in _ESTILOS_NO_PERMITIDOS_MOMENTO.get(momento_reco, ())
+            if e in _msg_low_reco
+        ),
+        None,
+    )
 
     # 1. KNN — candidatos del catálogo INS/CENAN por similitud coseno con el déficit real.
     _candidatos_knn: list = []
@@ -879,6 +1174,20 @@ async def respuesta_recomendacion_llm(
                 excluir_nombres=_excluidos_48h,
                 contexto=mensaje,
             )
+
+            # Filtrar el ancla KNN por condiciones médicas/dietéticas (Vegano,
+            # Vegetariano, Lactosa, Celíaco, Diabetes...) — sin esto, el KNN puede
+            # anclar el Plato 1 en un alimento prohibido (ej. pescado para un
+            # cliente vegano) y el LLM termina usándolo igual.
+            from app.services.recomendador_platos import _tokens_prohibidos
+            _tokens_dieta_reco_knn = _tokens_prohibidos(
+                getattr(perfil, "medical_conditions", None) or []
+            )
+            if _tokens_dieta_reco_knn:
+                _candidatos_knn = [
+                    c for c in _candidatos_knn
+                    if not any(t in c["alimento"].lower() for t in _tokens_dieta_reco_knn)
+                ]
         except Exception as e:
             logger.warning("[Reco] KNN candidatos no disponibles: %s", e)
 
@@ -945,6 +1254,15 @@ async def respuesta_recomendacion_llm(
         except Exception as e:
             logger.warning("[KNN Eval] Evaluador falló: %s — sin ancla KNN", e)
 
+    # 1.5. Detectar Vegano/Vegetariano TEMPRANO — los ejemplos de plato por momento
+    #      (paso 2) deben ser distintos si el cliente no come carne/pescado/lácteos/huevo.
+    _condiciones_list_reco = getattr(perfil, "medical_conditions", None) or []
+    _condiciones_str_reco = " ".join(_condiciones_list_reco).lower()
+    es_vegano_reco = (
+        "vegano" in dieta.lower() or "vegetariano" in dieta.lower()
+        or "vegano" in _condiciones_str_reco or "vegetariano" in _condiciones_str_reco
+    )
+
     # 2. Restricciones por momento del día
     _RESTRICCIONES_MOMENTO_RECO = {
         "DESAYUNO": (
@@ -969,7 +1287,35 @@ async def respuesta_recomendacion_llm(
             "⛔ PROHIBIDO: pescado, mariscos, carnes, causas, cebiches, arroces, guisos."
         ),
     }
-    restricciones_momento_reco = _RESTRICCIONES_MOMENTO_RECO.get(momento_reco, "")
+    # Variante Vegano/Vegetariano: mismos rangos, ejemplos sin carne/pescado/lácteos/huevo.
+    _RESTRICCIONES_MOMENTO_VEGANO = {
+        "DESAYUNO": (
+            "Rango: 250-450 kcal. Primera comida del día, rápida y simple. "
+            "Típico vegano/vegetariano: avena con leche vegetal, pan con palta, "
+            "quinua con leche vegetal, fruta con granola, tostadas con mermelada. "
+            "⛔ PROHIBIDO: sopas, chupes, caldos, pescado, carnes, huevos, lácteos animales, cebiches, causas."
+        ),
+        "ALMUERZO": (
+            "Rango: 550-850 kcal — porción real de adulto, MÍNIMO 550 kcal. "
+            "Plato de fondo vegano/vegetariano conocido: menestra con arroz, tallarines con verduras, "
+            "arroz con lentejas, quinua con verduras salteadas, tofu salteado con verduras. "
+            "⛔ PROHIBIDO carnes, pescado, mariscos, huevos, lácteos animales. "
+            "No repitas la misma proteína vegetal en los 3 platos."
+        ),
+        "CENA": (
+            "Rango: 200-520 kcal. Plato ligero para la noche: "
+            "sopa de verduras, ensalada con menestra o tofu, crema de zapallo, menestra sencilla. "
+            "⛔ PROHIBIDO pescado, carnes, huevos, lácteos animales. Evita frituras y guisos pesados."
+        ),
+        "MERIENDA": (
+            "Rango: 80-280 kcal. Refrigerio rápido sin cocción elaborada. "
+            "Válido: fruta, pan con palta, frutos secos, batido con leche vegetal. "
+            "⛔ PROHIBIDO: pescado, mariscos, carnes, huevos, lácteos animales, causas, cebiches, arroces, guisos."
+        ),
+    }
+    restricciones_momento_reco = (
+        _RESTRICCIONES_MOMENTO_VEGANO if es_vegano_reco else _RESTRICCIONES_MOMENTO_RECO
+    ).get(momento_reco, "")
 
     # 3. Detectar preferencia de ingrediente específico en el mensaje
     _ing_match = _re_reco.search(
@@ -1018,13 +1364,7 @@ async def respuesta_recomendacion_llm(
         "fuente de energía para el entrenamiento."
     ) if _masa_muscular_match else ""
 
-    # 4. Restricción de dieta + condiciones médicas → reglas concretas para el LLM
-    _condiciones_list_reco = getattr(perfil, "medical_conditions", None) or []
-    _condiciones_str_reco = " ".join(_condiciones_list_reco).lower()
-    es_vegano_reco = (
-        "vegano" in dieta.lower() or "vegetariano" in dieta.lower()
-        or "vegano" in _condiciones_str_reco or "vegetariano" in _condiciones_str_reco
-    )
+    # 4. Restricción de dieta (es_vegano_reco ya se calculó en el paso 1.5)
     restriccion_dieta_reco = (
         "VEGANO/VEGETARIANO: PROHIBIDO carnes, pollo, pescado, mariscos, lácteos animales. "
         "Solo plantas, legumbres, granos, frutas, tofu, soja, hongos."
@@ -1055,7 +1395,11 @@ async def respuesta_recomendacion_llm(
                     f"{_restricciones_raw.strip()}\n"
                     f"⚠️ Aplica cada restricción SOLO si el plato normalmente lleva ese ingrediente. "
                     f"No añadas lácteos, azúcares ni sustitutos a platos que no los necesitan "
-                    f"(ej. no pongas leche en una menestra o sopa de verduras).\n\n"
+                    f"(ej. no pongas leche en una menestra o sopa de verduras).\n"
+                    f"🚨 PRIORIDAD ABSOLUTA: estas restricciones médicas pesan MÁS que cualquier "
+                    f"ejemplo de plato mencionado antes en este mensaje (por momento del día, "
+                    f"estilo o ingrediente sugerido). Si algún ejemplo anterior contradice esta "
+                    f"lista, IGNÓRALO POR COMPLETO y elige otra opción real y conocida que sí cumpla.\n\n"
                 )
         except Exception as _e_med:
             logger.warning("[Reco] No se pudo generar restricciones médicas: %s", _e_med)
@@ -1085,11 +1429,14 @@ async def respuesta_recomendacion_llm(
         _alim_knn = _top_knn["alimento"]
         _kcal_knn = _top_knn["calorias_100g"]
         _knn_candidatos_txt = (
-            f"GUÍA NUTRICIONAL (modelo KNN): el alimento '{_alim_knn}' "
-            f"(~{_kcal_knn:.0f} kcal/100g) tiene el perfil nutricional más afín al déficit actual. "
-            f"Si existe un plato CONOCIDO y COMÚN en Perú que lo lleve, úsalo para el Plato 1. "
-            f"Si no hay un plato conocido que lo incluya para este momento, "
-            f"ignora la guía y elige un plato libre igualmente conocido.\n\n"
+            f"INSPIRACIÓN NUTRICIONAL (sutil, NO obligatoria): el alimento "
+            f"'{_alim_knn}' (~{_kcal_knn:.0f} kcal/100g) tiene un perfil afín al "
+            f"déficit actual. Si encaja de forma natural con un plato conocido "
+            f"y común en Perú, puedes considerarlo como inspiración para UNO "
+            f"de los 3 platos — no necesariamente el primero, y no siempre el "
+            f"mismo tipo de proteína. Prioriza variedad real entre los 3 "
+            f"platos por encima de esta sugerencia; ignórala libremente si no "
+            f"aporta variedad.\n\n"
         )
 
     # 6. Referencia de platos del día a día por momento — ejemplos de ESTILO, no lista cerrada.
@@ -1132,10 +1479,14 @@ async def respuesta_recomendacion_llm(
         + f"PARA EL {momento_reco}:\n{restricciones_momento_reco}\n\n"
         + f"PLATOS — escoge entre recetas conocidas del día a día peruano, como: {_ref_platos}. "
         + f"Puedes sugerir variantes o platos similares con nombre real que cualquier peruano reconoce. "
-        + f"Si sugieres pescado, usa especies de Lambayeque (Caballa, Lisa, Mero, Tollo).\n"
-        + f"⛔ SEMÁNTICA: Caballa, Lisa, Mero, Tollo son PESCADOS — nunca son 'mariscos'. "
-        + f"No escribas 'Mariscos de Caballa' ni 'Mariscos de Lisa' — son categorías distintas. "
-        + f"Di 'Arroz con Caballa' O 'Arroz con Mariscos', nunca ambos combinados.\n\n"
+        + (
+            (
+                f"Si sugieres pescado, usa especies de Lambayeque (Caballa, Lisa, Mero, Tollo).\n"
+                f"⛔ SEMÁNTICA: Caballa, Lisa, Mero, Tollo son PESCADOS — nunca son 'mariscos'. "
+                f"No escribas 'Mariscos de Caballa' ni 'Mariscos de Lisa' — son categorías distintas. "
+                f"Di 'Arroz con Caballa' O 'Arroz con Mariscos', nunca ambos combinados.\n\n"
+            ) if not es_vegano_reco else "\n"
+        )
         + (f"{_masa_muscular_txt}\n\n" if _masa_muscular_txt else "")
         + (f"{objetivo_proteina_reco}\n\n" if objetivo_proteina_reco else "")
         + (f"PREFERENCIA: {pref_ingrediente_reco}\n\n" if pref_ingrediente_reco else "")
@@ -1167,6 +1518,187 @@ async def respuesta_recomendacion_llm(
             f"Sin frases extra, sin ingredientes, sin pasos."
         )
         respuesta_llm_reco = await ia_engine._llamar_groq(_prompt_retry, max_tokens=120, temp=0.2)
+
+    # Guard: si el LLM ignoró una restricción médica/dietética (Vegano, Vegetariano,
+    # Lactosa, Celíaco, Diabetes...), reintentar UNA vez. Dos chequeos complementarios:
+    #   1. Palabra clave literal (rápido, sin costo de API) — detecta "pollo", "leche", etc.
+    #   2. Juicio de Groq (sin hardcoding) — detecta platos que violan la condición aunque
+    #      el nombre no contenga la palabra prohibida (ej. "Picarones" para un diabético:
+    #      Groq sabe que llevan miel sin que tengamos que mantener una lista de postres).
+    from app.services.recomendador_platos import _tokens_prohibidos, _detectar_dieta_en_mensaje
+    _condiciones_dieta_check = list(getattr(perfil, "medical_conditions", None) or [])
+    # Sumar restricciones dichas en el mensaje actual aunque no estén en el
+    # perfil — ej. "Soy vegano y me duele la rodilla..." nunca se detectaba
+    # porque "Vegano" no vivía en medical_conditions de este usuario.
+    for _cond_msg in _detectar_dieta_en_mensaje(mensaje):
+        if _cond_msg not in _condiciones_dieta_check:
+            _condiciones_dieta_check.append(_cond_msg)
+    _tokens_dieta_check = _tokens_prohibidos(_condiciones_dieta_check)
+
+    # Calificadores que vuelven SEGURO un alimento normalmente prohibido
+    # (ej. "queso deslactosado" no debe disparar el filtro de Lactosa).
+    # Se evalúa por línea/plato — si la misma línea trae el calificador, no cuenta.
+    _CALIFICADORES_SEGUROS_DIETA = (
+        "deslactosado", "deslactosada", "sin lactosa", "sin azúcar", "sin azucar",
+        "sin gluten", "light", "diet",
+    )
+
+    def _linea_viola_dieta(linea: str) -> bool:
+        _linea_low = linea.lower()
+        if any(c in _linea_low for c in _CALIFICADORES_SEGUROS_DIETA):
+            return False
+        return any(t in _linea_low for t in _tokens_dieta_check)
+
+    _viola_token = bool(_tokens_dieta_check) and any(
+        _linea_viola_dieta(linea) for linea in (respuesta_llm_reco or "").split("\n")
+    )
+
+    _viola_juicio_groq = False
+    if not _viola_token and condiciones and condiciones.lower() != "ninguna":
+        try:
+            _prompt_validacion_dieta = (
+                f"Eres nutricionista clínico ESTRICTO. Condiciones del paciente: {condiciones}.\n"
+                f"Platos propuestos:\n{respuesta_llm_reco}\n"
+                f"Revisa cada plato UNO POR UNO, pensando en la receta tradicional completa, "
+                f"no solo en las palabras del nombre. Postres y dulces tradicionales peruanos "
+                f"(picarones, mazamorra, alfajor, suspiro, cocada, tres leches, turrón, etc.) "
+                f"SIEMPRE llevan azúcar o miel aunque el nombre no lo diga — son inadecuados "
+                f"para Diabetes. Quesos/lácteos sin la palabra 'deslactosado' son inadecuados "
+                f"para Intolerancia a la Lactosa.\n"
+                f"¿Hay AL MENOS UN plato inadecuado para alguna de las condiciones del paciente? "
+                f"Responde SOLO 'SI' o 'NO'."
+            )
+            _resp_validacion = await ia_engine._llamar_groq(
+                _prompt_validacion_dieta, max_tokens=5, temp=0.0
+            )
+            _viola_juicio_groq = bool(_resp_validacion) and _resp_validacion.strip().lower().startswith("si")
+        except Exception as _e_val:
+            logger.warning("[Reco] Validación dietética con Groq falló: %s", _e_val)
+
+    if _viola_token or _viola_juicio_groq:
+        # Capturar EXACTAMENTE qué palabras dispararon el chequeo, para que el
+        # reintento las excluya por nombre — un aviso genérico ("evita lo que
+        # corresponda") no es suficiente, el LLM tiende a repetir el mismo plato.
+        _tokens_detectados = sorted({
+            t for linea in (respuesta_llm_reco or "").split("\n")
+            for t in _tokens_dieta_check
+            if t in linea.lower() and not any(
+                c in linea.lower() for c in _CALIFICADORES_SEGUROS_DIETA
+            )
+        })
+        logger.warning(
+            "[Reco] Plato inadecuado por condición médica (token=%s detectados=%s, groq=%s) — reintentando",
+            _viola_token, _tokens_detectados, _viola_juicio_groq,
+        )
+        _restriccion_explicita = (
+            f"NO uses NINGUNO de estos ingredientes/platos, ni variantes: "
+            f"{', '.join(_tokens_detectados)}.\n"
+            if _tokens_detectados else ""
+        )
+        _prompt_retry_dieta = (
+            f"Lista EXACTAMENTE 3 platos de {momento_reco.lower()} peruanos "
+            f"({round(restante)} kcal disponibles) apropiados para un paciente con: {condiciones}.\n"
+            f"{_restriccion_explicita}"
+            f"Piensa como nutricionista clínico: evita además cualquier otro ingrediente o "
+            f"receta tradicional incompatible con esas condiciones, incluso si el nombre del "
+            f"plato no lo menciona explícitamente. Verifica cada plato dos veces.\n"
+            f"SOLO este formato:\n"
+            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+            f"Sin frases extra, sin ingredientes, sin pasos."
+        )
+        respuesta_llm_reco = await ia_engine._llamar_groq(_prompt_retry_dieta, max_tokens=150, temp=0.1)
+
+        # Garantía final: si el reintento TAMBIÉN viola (el LLM puede introducir
+        # una violación nueva al regenerar), no se intenta una 3ra vez sin certeza
+        # — se usa un fallback determinista 100% seguro (sin carne/pescado/lácteos/
+        # gluten/azúcar, válido para cualquiera de las 5 condiciones principales).
+        _aun_viola = bool(_tokens_dieta_check) and any(
+            _linea_viola_dieta(linea) for linea in (respuesta_llm_reco or "").split("\n")
+        )
+        if _aun_viola:
+            logger.warning(
+                "[Reco] Reintento también violó la condición médica — usando fallback seguro garantizado"
+            )
+            _FALLBACK_SEGURO_MOMENTO = {
+                "DESAYUNO": (
+                    "- Fruta sola (~80 kcal, P:1g C:20g G:0g)\n"
+                    "- Avena con agua (~150 kcal, P:5g C:27g G:3g)\n"
+                    "- Tostada con palta (~120 kcal, P:3g C:15g G:7g)"
+                ),
+                "ALMUERZO": (
+                    "- Menestra sencilla con verduras (~350 kcal, P:18g C:55g G:5g)\n"
+                    "- Sopa de verduras con quinua (~300 kcal, P:10g C:50g G:5g)\n"
+                    "- Ensalada de verduras con palta (~280 kcal, P:5g C:30g G:15g)"
+                ),
+                "CENA": (
+                    "- Sopa de verduras (~180 kcal, P:6g C:25g G:4g)\n"
+                    "- Ensalada de verduras con palta (~220 kcal, P:4g C:20g G:14g)\n"
+                    "- Menestra ligera (~250 kcal, P:14g C:35g G:4g)"
+                ),
+                "MERIENDA": (
+                    "- Fruta sola (~80 kcal, P:1g C:20g G:0g)\n"
+                    "- Puñado de frutos secos (~150 kcal, P:5g C:8g G:12g)\n"
+                    "- Tostada con palta (~120 kcal, P:3g C:15g G:7g)"
+                ),
+            }
+            respuesta_llm_reco = _FALLBACK_SEGURO_MOMENTO.get(
+                momento_reco, _FALLBACK_SEGURO_MOMENTO["ALMUERZO"]
+            )
+
+    # Guard de coherencia culinaria: el LLM a veces combina palabras reales
+    # de forma inventada (ej. "Pachamanca de quinoa" — la pachamanca es con
+    # carnes, nunca de quinoa; "Lomo saltado de pescado" — el lomo saltado es
+    # de carne/pollo). Sin hardcodear nombres de platos, le pedimos a Groq que
+    # juzgue con su propio conocimiento culinario si algo suena inventado.
+    try:
+        _prompt_coherencia = (
+            f"Eres experto en gastronomía peruana. Te paso 3 platos:\n"
+            f"{respuesta_llm_reco}\n"
+            f"Analiza CADA plato uno por uno, en voz alta, antes de concluir:\n"
+            f"Plato 1: ¿es una receta real que existe tal cual en la cocina "
+            f"peruana? ¿Sí o no, y por qué?\n"
+            f"Plato 2: lo mismo.\n"
+            f"Plato 3: lo mismo.\n"
+            f"Sé ESTRICTO: muchos platos peruanos tienen un ingrediente "
+            f"principal FIJO por tradición (ej. la pachamanca SIEMPRE es con "
+            f"carnes — pollo, cerdo, cordero — JAMÁS con quinua o verduras "
+            f"solas; el lomo saltado SIEMPRE es con carne de res o pollo, "
+            f"JAMÁS con pescado). Si un plato cambia ese ingrediente fijo por "
+            f"otro, NO es una receta real, es una combinación inventada.\n"
+            f"Termina tu respuesta exactamente con la palabra SI (si al menos "
+            f"un plato es inventado) o NO (si los 3 son reales), en la última línea."
+        )
+        _resp_coherencia = await ia_engine._llamar_groq(
+            _prompt_coherencia, max_tokens=220, temp=0.0
+        )
+        _ultima_linea_coherencia = (
+            (_resp_coherencia or "").strip().splitlines()[-1].strip().lower().rstrip(".")
+            if _resp_coherencia else ""
+        )
+        _incoherente = _ultima_linea_coherencia in ("si", "sí")
+    except Exception as _e_coh:
+        _incoherente = False
+        logger.warning("[Reco] Validación de coherencia culinaria falló: %s", _e_coh)
+
+    if _incoherente:
+        logger.warning("[Reco] Plato con combinación inventada detectado — reintentando")
+        _prompt_retry_coherencia = (
+            f"Lista EXACTAMENTE 3 platos de {momento_reco.lower()} peruanos "
+            f"({round(restante)} kcal disponibles) que sean REALES y "
+            f"conocidos en la gastronomía peruana — NO inventes combinaciones "
+            f"nuevas de ingredientes que no se preparan juntos tradicionalmente. "
+            f"Usa solo platos que cualquier peruano reconocería de inmediato.\n"
+            f"SOLO este formato:\n"
+            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+            f"Sin frases extra, sin ingredientes, sin pasos."
+        )
+        respuesta_llm_reco = await ia_engine._llamar_groq(
+            _prompt_retry_coherencia, max_tokens=150, temp=0.2
+        )
 
     # 6. Parsear bullets del LLM y cachear macros reales (no hardcodeados)
     # Filtro de colas temporales: "Huevos con Espinacas y Mañana" → "Huevos con Espinacas"
@@ -1254,10 +1786,9 @@ async def respuesta_recomendacion_llm(
             })
             _platos_limpios.append((_nombre_p, k_f, p_f, c_f, g_f))
         _persistir_historial_recomendaciones(db, perfil, momento_reco, _platos_limpios)
-        bullets = '\n'.join(
-            f'- {n} (~{k:.0f} kcal)' for n, k, *_ in _platos_limpios
+        return _construir_mensaje_natural_reco(
+            _platos_limpios, _palabra_evitada_msg, _condicion_relevante_msg, _estilo_evitado_momento
         )
-        return f"Opciones para ti:\n{bullets}"
 
     # Intento 2 (fallback): el LLM no incluyó P/C/G — extraer solo nombre+kcal
     # y estimar macros reales con _PROMPT_COMIDA por cada plato (sin valores
@@ -1295,13 +1826,185 @@ async def respuesta_recomendacion_llm(
             })
             _platos_limpios.append((_nombre_p, _kcal_f, p_f, c_f, g_f))
         _persistir_historial_recomendaciones(db, perfil, momento_reco, _platos_limpios)
-        bullets = '\n'.join(
-            f'- {n} (~{k:.0f} kcal)' for n, k, *_ in _platos_limpios
+        return _construir_mensaje_natural_reco(
+            _platos_limpios, _palabra_evitada_msg, _condicion_relevante_msg, _estilo_evitado_momento
         )
-        return f"Opciones para ti:\n{bullets}"
 
     # 7. Fallback: retornar respuesta del LLM tal como vino
     return respuesta_llm_reco or "No pude generar recomendaciones en este momento."
+
+
+# Gestor de contexto liviano para la conversación libre: decide qué parte del
+# perfil es relevante según el tema reciente, en vez de mandar todo siempre y
+# confiar en que el LLM ignore lo que no aplica (eso fallaba con frecuencia).
+_TEMA_EJERCICIO_KW = (
+    "ejercicio", "entren", "gym", "gimnasio", "rutina", "lesion", "lesión",
+    "dolor", "rodilla", "espalda", "hombro", "codo", "muscul", "correr",
+    "trotar", "nadar", "pesas", "cardio", "estiramiento", "pecho", "pierna",
+    "piernas", "bicep", "bícep", "tricep", "trícep", "abdomen", "core",
+)
+_TEMA_NUTRICION_KW = (
+    "comida", "comer", "comí", "comi ", "almuerzo", "cena", "desayuno",
+    "dieta", "kcal", "caloria", "caloría", "macros", "proteina", "proteína",
+    "carbohidrato", "grasa", "nutricion", "nutrición", "alimento", "plato",
+    "merienda", "postre",
+)
+_PALABRAS_LESION_GENERICA = (
+    "lesion", "lesión", "dolor", "molestia", "me duele", "me lastime", "me lastimé",
+)
+
+
+def _lesion_mencionada_sin_tipo(mensaje: str, historial: list) -> bool:
+    """True si se menciona una lesión/dolor de forma genérica (sin decir
+    rodilla/espalda/hombro/codo) — no hay suficiente información para un
+    consejo de ejercicio seguro, así que hay que preguntar antes de generar."""
+    _texto = (mensaje or "").lower()
+    if historial:
+        # Solo turnos del USUARIO — las respuestas del asistente usan palabras
+        # como "evitar lesiones" o "pierna lesionada" como lenguaje genérico de
+        # seguridad, no como el usuario reportando una lesión nueva. Mezclarlas
+        # causaba falsos positivos: "Comí pollo con quinua" disparaba "¿qué
+        # lesión tienes?" porque la respuesta anterior del asistente decía
+        # "evitar lesiones", aunque el usuario sí había nombrado la zona antes.
+        _turnos_usuario = [
+            str(h.get("content", "")) for h in historial if h.get("role") == "user"
+        ]
+        _texto += " " + " ".join(_turnos_usuario[-4:]).lower()
+    if not any(p in _texto for p in _PALABRAS_LESION_GENERICA):
+        return False
+    from app.services.rutina_service import _detectar_lesiones
+    return len(_detectar_lesiones([_texto])) == 0
+
+
+_PALABRAS_PETICION_AMBIGUA = (
+    "dame un consejo", "dame consejo", "dame una recomendacion", "dame algo",
+    "ayudame", "ayúdame", "que hago", "qué hago", "y entonces", "y ahora que",
+    "y ahora qué", "recomiendame algo", "recomiéndame algo",
+)
+
+
+def _es_peticion_ambigua(mensaje: str) -> bool:
+    """True si el mensaje pide ayuda/consejo de forma genérica, sin nombrar
+    ningún tema — solo se llama cuando _detectar_tema_chat ya devolvió
+    'general' (es decir, ni el mensaje ni el historial reciente tienen señal
+    de nutrición/ejercicio), así que no se dispara con mensajes que sí tienen
+    contexto claro."""
+    _low = (mensaje or "").lower().strip()
+    return any(p in _low for p in _PALABRAS_PETICION_AMBIGUA)
+
+
+def _detectar_tema_chat(mensaje: str, historial: list) -> str:
+    """'ejercicio' | 'nutricion' | 'general' — según el mensaje actual y los
+    últimos 2 turnos. Si hay señales de ambos temas a la vez, se prefiere
+    incluir todo el contexto (más seguro que omitir algo relevante)."""
+    _texto = (mensaje or "").lower()
+    if historial:
+        _texto += " " + " ".join(str(h.get("content", "")) for h in historial[-2:]).lower()
+    _es_ejercicio = any(k in _texto for k in _TEMA_EJERCICIO_KW)
+    _es_nutricion = any(k in _texto for k in _TEMA_NUTRICION_KW)
+    if _es_ejercicio and not _es_nutricion:
+        return "ejercicio"
+    if _es_nutricion and not _es_ejercicio:
+        return "nutricion"
+    return "general"
+
+
+async def validate_and_retry(
+    respuesta: str,
+    ia_engine,
+    es_invalida,
+    construir_prompt_retry,
+    fallback: str,
+    max_tokens_retry: int = 200,
+    temp_retry: float = 0.3,
+) -> str:
+    """
+    Ciclo genérico de control de calidad para respuestas de LLM:
+    generar → validar → reintentar con instrucción específica → respaldo
+    garantizado si el reintento también falla.
+
+    Formaliza el patrón que se repitió 5 veces hoy en este archivo (dieta,
+    coherencia culinaria, lesión×2, formato) en una sola función reusable —
+    en vez de copiar el bloque de detectar/reintentar/respaldar cada vez que
+    aparece un caso nuevo.
+
+    ``es_invalida(texto) -> bool``        — qué cuenta como violación.
+    ``construir_prompt_retry() -> str``   — prompt del reintento (closure con
+                                             el contexto que necesite).
+    ``fallback``                          — texto garantizado si el reintento
+                                             también falla (nunca None).
+    """
+    if not es_invalida(respuesta):
+        return respuesta
+
+    _prompt_retry = construir_prompt_retry()
+    _respuesta_retry = await ia_engine._llamar_groq(
+        _prompt_retry, max_tokens=max_tokens_retry, temp=temp_retry
+    )
+    if es_invalida(_respuesta_retry or ""):
+        return fallback
+    return _respuesta_retry
+
+
+def _repite_mensaje_usuario(respuesta: str, mensaje: str) -> bool:
+    """True si la respuesta empieza citando/repitiendo el mensaje del usuario."""
+    _msg_clean = (mensaje or "").strip().lower().rstrip("?.!¿¡")
+    if len(_msg_clean) < 5:
+        return False
+    _prefijo = _msg_clean[:min(len(_msg_clean), 20)]
+    return respuesta.strip().lower().startswith(_prefijo)
+
+
+def _menciona_tema_no_relacionado(respuesta: str, tema: str) -> bool:
+    """True si, dado el tema activo, la respuesta menciona el tema contrario
+    sin que nadie lo haya pedido (ej. hablar de dieta en una pregunta de
+    lesión, o de ejercicio en una pregunta de nutrición)."""
+    _low = respuesta.lower()
+    if tema == "ejercicio":
+        return any(k in _low for k in _TEMA_NUTRICION_KW)
+    if tema == "nutricion":
+        return any(k in _low for k in _TEMA_EJERCICIO_KW)
+    return False
+
+
+_FRASES_CAUTELA_IMPACTO = (
+    "evita", "evitar", "no es recomendable", "sin impacto", "bajo impacto",
+    "no te recomiendo", "no deberías", "no deberias",
+)
+_ACCIONES_IMPACTO = (
+    "trota", "trotar", "trote", "correr", "corre ", "saltar", "salto",
+    "sprint", "saltos",
+)
+
+
+def _tiene_contradiccion_impacto(respuesta: str) -> bool:
+    """True si la respuesta dice 'evita el impacto' y en la MISMA respuesta
+    igual sugiere correr/trotar/saltar — contradicción interna, no mezcla de
+    tema. Distinto de _menciona_tema_no_relacionado: aquí el tema SÍ es
+    correcto (ejercicio), el problema es que se contradice a sí misma."""
+    _low = respuesta.lower()
+    _tiene_cautela = any(f in _low for f in _FRASES_CAUTELA_IMPACTO)
+    _tiene_impacto = any(a in _low for a in _ACCIONES_IMPACTO)
+    return _tiene_cautela and _tiene_impacto
+
+
+def _filtrar_resultado_chat(texto: str, tema: str) -> str:
+    """Respaldo determinista: en vez de un mensaje genérico de disculpa,
+    conserva las oraciones del LLM que SÍ están en tema y descarta las que
+    se desviaron — aprovecha lo bueno que ya generó en vez de descartarlo todo."""
+    import re as _re_filtro
+    _oraciones = _re_filtro.split(r'(?<!\d)(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ¿¡])', texto.strip())
+    _oraciones = [o.strip() for o in _oraciones if o.strip()]
+    _kw_evitar = _TEMA_NUTRICION_KW if tema == "ejercicio" else (
+        _TEMA_EJERCICIO_KW if tema == "nutricion" else ()
+    )
+    _filtradas = [o for o in _oraciones if not any(k in o.lower() for k in _kw_evitar)]
+    if not _filtradas:
+        return "Cuéntame un poco más para poder ayudarte mejor con eso."
+    _resultado = " ".join(_filtradas).strip()
+    if _resultado and _resultado[-1] not in ".!":
+        _resultado += "."
+    return _resultado
 
 
 async def respuesta_chat_llm(
@@ -1312,6 +2015,7 @@ async def respuesta_chat_llm(
     quemado: float,
     historial: list,
     ia_engine,
+    plan_macros: dict = None,
 ) -> str:
     """Respuesta conversacional corta vía LLM."""
     pct = round(consumido / meta * 100) if meta > 0 else 0
@@ -1320,17 +2024,62 @@ async def respuesta_chat_llm(
         for m in historial[-4:]
     ) or "(inicio de conversación)"
 
+    objetivo = getattr(perfil, "goal", "mantener peso") or "mantener peso"
+    dieta = getattr(perfil, "diet_type", "Normal") or "Normal"
+    condiciones = ", ".join(getattr(perfil, "medical_conditions", None) or []) or "ninguna"
+
+    # Detector de información insuficiente: si se menciona una lesión/dolor
+    # de forma genérica (sin decir rodilla/espalda/hombro/codo), no hay datos
+    # suficientes para dar un consejo de ejercicio seguro — no es que el LLM
+    # "desobedezca", es que falta la variable que decide qué es seguro o no.
+    # Cortar aquí, sin llamar al LLM, y preguntar antes de recomendar nada.
+    if _lesion_mencionada_sin_tipo(mensaje, historial):
+        return (
+            "¿Qué lesión tienes exactamente? ¿Es en la rodilla, espalda, hombro, "
+            "codo u otra zona? Así te doy un consejo seguro y específico."
+        )
+
+    # Gestor de contexto: solo se incluye dieta/kcal/condiciones si el tema
+    # reciente es de comida/nutrición. Si es de ejercicio/lesión, se omite —
+    # así el código decide qué es relevante en vez de pedirle al LLM que
+    # "ignore" datos irrelevantes (eso fallaba ~50% de las veces en pruebas).
+    _tema_chat = _detectar_tema_chat(mensaje, historial)
+
+    # Intención desconocida: si NI el mensaje NI el historial reciente tienen
+    # señal de tema (_detectar_tema_chat ya devolvió "general" considerando
+    # ambos), y el mensaje es una petición vaga de ayuda/consejo, preguntar en
+    # vez de inventar un tema. Calibrado para NO dispararse cuando sí hay señal
+    # clara (ej. "tengo dolor de rodilla" ya cae en tema "ejercicio", no aquí).
+    if _tema_chat == "general" and _es_peticion_ambigua(mensaje):
+        return (
+            "¿Sobre qué tema necesitas ayuda? Puedo ayudarte con nutrición, "
+            "ejercicio o seguimiento de tu progreso."
+        )
+
+    if _tema_chat == "ejercicio":
+        # Sin "Objetivo" aquí a propósito: hasta "mantener peso" por sí solo
+        # bastaba para que el LLM se desviara a hablar de dieta sin que se
+        # preguntara — en temas de lesión/ejercicio, el nombre alcanza.
+        bloque_perfil = f"- Nombre: {perfil.first_name}"
+    else:
+        _peso = getattr(perfil, "weight", None)
+        _meta_prot = (plan_macros or {}).get("proteinas_g")
+        bloque_perfil = (
+            f"- Nombre: {perfil.first_name}\n"
+            f"- {round(consumido)}/{round(meta)} kcal consumidas ({pct}%)  |  {round(quemado)} kcal quemadas hoy\n"
+            f"- Dieta: {dieta}  |  Condiciones: {condiciones}  |  Objetivo: {objetivo}"
+            + (f"  |  Peso: {_peso:.0f} kg" if _peso else "")
+            # Meta real de proteína del plan calculado — fuente única de verdad,
+            # evita que el LLM recalcule con una fórmula g/kg genérica que puede
+            # quedar muy por debajo del valor real del plan (visto en prod: plan
+            # real 224g vs fórmula genérica 80-110g para el mismo usuario).
+            + (f"  |  Meta proteína (plan): {round(_meta_prot)} g" if _meta_prot else "")
+        )
+
     prompt = _PROMPT_CHAT.format(
-        nombre=perfil.first_name,
-        consumido=round(consumido),
-        meta=round(meta),
-        pct=pct,
-        quemado=round(quemado),
+        bloque_perfil=bloque_perfil,
         historial=hist_txt,
         mensaje=mensaje,
-        dieta=getattr(perfil, "diet_type", "Normal") or "Normal",
-        condiciones=", ".join(getattr(perfil, "medical_conditions", None) or []) or "ninguna",
-        objetivo=getattr(perfil, "goal", "mantener peso") or "mantener peso",
     )
     # ── Intercept "qué hora es" — hora real de Perú, sin pasar por el LLM ────────
     _m_lower_hora = mensaje.lower().strip()
@@ -1481,7 +2230,136 @@ async def respuesta_chat_llm(
         resultado = _re_fmt.sub(r'\.?\s*(\d+\.)\s+', r'\n\1 ', resultado)
         resultado = resultado.strip()
 
+    # Validador genérico: no repetir el mensaje del usuario + no mezclar el
+    # tema contrario (dieta en pregunta de ejercicio, o viceversa). Antes esto
+    # solo era una regla de prompt sin garantía — ahora usa el mismo ciclo
+    # detectar→reintentar→respaldo que ya funciona al 100% en nutrición/ejercicio.
+    if not _es_receta and not _es_tecnica:
+        resultado = await validate_and_retry(
+            respuesta=resultado,
+            ia_engine=ia_engine,
+            es_invalida=lambda t: (
+                _repite_mensaje_usuario(t, mensaje)
+                or _menciona_tema_no_relacionado(t, _tema_chat)
+                or _tiene_contradiccion_impacto(t)
+            ),
+            construir_prompt_retry=lambda: (
+                "Tu respuesta anterior tuvo un problema: "
+                + (
+                    "repitió/citó el mensaje del usuario al inicio. "
+                    if _repite_mensaje_usuario(resultado, mensaje) else ""
+                )
+                + (
+                    f"mencionó un tema no relacionado (la conversación es sobre "
+                    f"{'ejercicio/lesión' if _tema_chat == 'ejercicio' else 'nutrición'}, "
+                    f"no menciones {'dieta/kcal/nutrición' if _tema_chat == 'ejercicio' else 'ejercicio/entrenamiento'} "
+                    f"a menos que el usuario lo pida explícitamente). "
+                    if _menciona_tema_no_relacionado(resultado, _tema_chat) else ""
+                )
+                + (
+                    "se contradijo a sí misma: dijo que evitaras impacto y luego "
+                    "recomendó correr/trotar/saltar de todas formas. "
+                    if _tiene_contradiccion_impacto(resultado) else ""
+                )
+                + f"\nMensaje del usuario: \"{mensaje}\"\n"
+                + f"Conversación reciente:\n{hist_txt}\n"
+                + "Responde de nuevo corrigiendo eso, máximo 3 oraciones, sin preguntas, sin citar el mensaje. "
+                + "Si mencionas evitar impacto, NO sugieras correr/trotar/saltar en la misma respuesta."
+            ),
+            fallback=_filtrar_resultado_chat(resultado, _tema_chat),
+        )
+
+    # Guard de seguridad por lesión — la conversación libre también puede acabar
+    # sugiriendo ejercicios (ej. "¿puedo correr con esta lesión?" → "mejor haz
+    # sentadillas..."), y antes este guard solo protegía RECOMENDAR_EJERCICIO.
+    # Misma lógica reutilizada: detecta lesión en perfil o mensaje/historial,
+    # reintenta si sugiere algo riesgoso, fallback seguro en prosa si persiste.
+    from app.services.rutina_service import (
+        _LESIONES_SUSTITUCION, _detectar_lesiones, filtrar_lesiones_activas,
+    )
+    _condiciones_lista_chat = list(getattr(perfil, "medical_conditions", None) or [])
+    # Historial completo, no solo los últimos 2 turnos — mismo motivo que en
+    # respuesta_recomendacion_llm: si la zona se mencionó hace varios turnos,
+    # debe seguir siendo candidata para que filtrar_lesiones_activas decida
+    # si sigue activa o ya se recuperó (antes "desaparecía" de candidatas).
+    _texto_hist_chat = " ".join(str(h.get("content", "")) for h in (historial or []))
+    _lesiones_candidatas_chat = _detectar_lesiones(
+        _condiciones_lista_chat + [mensaje or "", _texto_hist_chat]
+    )
+    # Descartar lesiones que el usuario ya indicó como recuperadas más
+    # reciente que la última mención de dolor (ver filtrar_lesiones_activas).
+    _lesiones_activas_chat = filtrar_lesiones_activas(
+        _lesiones_candidatas_chat, historial, mensaje
+    )
+    if _lesiones_activas_chat:
+        _riesgosos_chat: set[str] = set()
+        _alternativas_chat: list[str] = []
+        for _lesion in _lesiones_activas_chat:
+            _cfg = _LESIONES_SUSTITUCION[_lesion]
+            for _riesgoso, (_id_seguro, _nombre_seguro) in _cfg["sustituir"].items():
+                if _riesgoso != "default":
+                    _riesgosos_chat.add(_riesgoso)
+                _alternativas_chat.append(_nombre_seguro)
+
+        if any(r in _normalizar_nombre(resultado) for r in _riesgosos_chat):
+            logger.warning(
+                "[Chat] Ejercicio riesgoso para lesión detectada en conversación libre — reintentando"
+            )
+            _justif_chat = "; ".join(
+                _LESIONES_SUSTITUCION[l]["justificacion"] for l in _lesiones_activas_chat
+            )
+            _prompt_retry_chat = (
+                f"Eres entrenador y nutricionista. El usuario tiene: {_justif_chat}.\n"
+                f"NO sugieras NINGUNO de estos ejercicios ni variantes: "
+                f"{', '.join(sorted(_riesgosos_chat))}.\n"
+                f"Si vas a sugerir actividad física, usa alternativas seguras como: "
+                f"{', '.join(_alternativas_chat)}.\n"
+                f"Mensaje del usuario: \"{mensaje}\"\n"
+                f"Responde en máximo 3 oraciones naturales, sin listas ni preguntas."
+            )
+            resultado = await ia_engine._llamar_groq(_prompt_retry_chat, max_tokens=200, temp=0.3)
+            resultado = _limpiar_markdown(resultado)
+
+            if any(r in _normalizar_nombre(resultado) for r in _riesgosos_chat):
+                logger.warning("[Chat] Reintento también riesgoso — usando fallback seguro")
+                _nombres_unicos_chat = list(dict.fromkeys(_alternativas_chat))[:2]
+                _alt_txt = " o ".join(_nombres_unicos_chat) if _nombres_unicos_chat else "estiramientos suaves"
+                resultado = (
+                    f"Por tu lesión, mejor evita esfuerzos que la sobrecarguen. "
+                    f"Prueba con {_alt_txt} mientras te recuperas, y consulta con un profesional de salud."
+                )
+
+    # Garantía determinista de formato: el LLM no siempre respeta "máx 3 oraciones"
+    # ni "sin pregunta al final" pese a tenerlo en el prompt — esto recorta el
+    # TEXTO ya generado (no cambia el contenido/sentido), nunca depende de que
+    # el LLM "se acuerde" cada vez. No se aplica a recetas/técnica (tienen su
+    # propio formato de pasos numerados).
+    if not _es_receta and not _es_tecnica:
+        resultado = _recortar_respuesta_chat(resultado, mensaje)
+
     return resultado
+
+
+def _recortar_respuesta_chat(texto: str, mensaje_usuario: str, max_oraciones: int = 3) -> str:
+    """Recorta a un máximo de oraciones y quita la pregunta final si el usuario
+    no pidió 'consejo'/'ayuda' explícitamente — recorte de formato puro, no
+    cambia el contenido de lo que el LLM ya dijo."""
+    import re as _re_trim
+    _oraciones = _re_trim.split(r'(?<!\d)(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ¿¡])', texto.strip())
+    _oraciones = [o.strip() for o in _oraciones if o.strip()]
+    if len(_oraciones) > max_oraciones:
+        _oraciones = _oraciones[:max_oraciones]
+
+    _pidio_consejo = any(
+        p in mensaje_usuario.lower() for p in ("consejo", "ayuda", "ayudame", "ayúdame")
+    )
+    if len(_oraciones) > 1 and _oraciones[-1].rstrip().endswith("?") and not _pidio_consejo:
+        _oraciones = _oraciones[:-1]
+
+    _resultado = " ".join(_oraciones).strip()
+    if _resultado and _resultado[-1] not in ".!":
+        _resultado += "."
+    return _resultado or texto.strip()
 
 
 # ── Caché de macros (consistencia recomendación → registro) ──────────────────
@@ -1519,6 +2397,28 @@ def _normalizar_nombre(nombre: str) -> str:
     tokens = n.split()
     tokens = [_SINONIMOS_ALIMENTOS.get(t, t) for t in tokens]
     return " ".join(tokens)
+
+
+_STOPWORDS_BASE_TEXTUAL = frozenset({
+    "de", "la", "el", "los", "las", "con", "y", "en", "del", "al", "un", "una",
+})
+
+
+def _extraccion_tiene_base_textual(nombre_extraido: str, mensaje_original: str) -> bool:
+    """Red de seguridad determinista (sin costo de tokens) contra alucinaciones
+    del LLM: verifica que el nombre extraído tenga al menos una palabra
+    significativa presente en el mensaje real del usuario. La Regla 0 del
+    prompt ya le pide al LLM no inventar nada cuando no hay alimento/ejercicio
+    real, pero esa instrucción no es garantía (validado en pruebas: el mismo
+    bug reapareció con mensajes distintos) — esto la respalda con código."""
+    palabras = [
+        p for p in _normalizar_nombre(nombre_extraido or "").split()
+        if len(p) > 3 and p not in _STOPWORDS_BASE_TEXTUAL
+    ]
+    if not palabras:
+        return True  # nombre muy corto/genérico para verificar — no bloquear
+    msg_norm = _normalizar_nombre(mensaje_original or "")
+    return any(p in msg_norm for p in palabras)
 
 
 def _cache_key(nombre: str) -> str:
