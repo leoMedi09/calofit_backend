@@ -297,6 +297,21 @@ REGLAS DE RESPUESTA:
     Usa los ingredientes originales del plato sin ofrecer variantes no solicitadas.
   Si Condiciones incluye Diabetes → evita azúcar, miel, carbos refinados en la receta.
 
+CÓMO USAR LA APP ('cómo uso la app', 'cómo registro mi comida/ejercicio',
+'dónde veo mi progreso', 'cómo funciona esto'):
+  ⚠️ Esto es la ÚNICA fuente real de la interfaz — NO inventes botones, pantallas
+  ni pasos que no estén aquí. Si no sabes algo de la app que no esté en esta
+  lista, dilo en general sin inventar un botón específico.
+  - Registrar comida o ejercicio: se escribe directo en el chat, en lenguaje
+    natural (ej. "comí pollo con arroz" o "hice 3 series de 10 sentadillas con
+    20kg"). También hay 2 íconos junto al cuadro de texto del chat: uno naranja
+    (🍽️) para registro rápido de comida, uno verde (🏋️) para armar una rutina
+    de ejercicio.
+  - Navegación: la barra inferior tiene 5 pestañas — Inicio (resumen del día),
+    Asistente (este chat), Balance, Seguimiento (progreso histórico), Perfil.
+  - No hay botón literal llamado "Registrar comida" en la pantalla principal —
+    el registro es conversacional, no un formulario con menú de tipo de comida.
+
 RECETAS ('cómo se hace X', 'receta de X'):
   Empieza DIRECTAMENTE: "Ingredientes: ..."
   Formato: Ingredientes (4-6 items) → Preparación (4-5 pasos numerados).
@@ -2086,6 +2101,45 @@ async def respuesta_chat_llm(
     if any(k in _m_lower_hora for k in ("qué hora es", "que hora es", "qué hora son", "que hora son")):
         from app.core.utils import get_peru_now
         return f"Son las {get_peru_now().strftime('%H:%M')} (hora de Perú)."
+
+    # ── Intercept "cómo uso la app / cómo registro mi comida/ejercicio" ──────────
+    # Respuesta fija, sin pasar por el LLM: probado que el modelo inventaba
+    # botones y pantallas que no existen (ej. recomendó apps externas como
+    # MyFitnessPal, o describió un "botón Registrar comida" inexistente) —
+    # para una pregunta de FAQ con respuesta conocida, la regla en el prompt
+    # no bastó, igual que pasó con otros casos hoy.
+    _m_norm_app = _normalizar_nombre(mensaje)
+    _pregunta_uso_app = (
+        ("como uso" in _m_norm_app or "como funciona" in _m_norm_app)
+        and ("app" in _m_norm_app or "esto" in _m_norm_app or "aplicacion" in _m_norm_app)
+    )
+    # "registr" (no "como registro") cubre registro/registrar/registrando/
+    # registra — "como registro" exacto no coincidía con "cómo registrAR"
+    # (infinitivo), que es como lo escribió el usuario real que encontró el bug.
+    _pregunta_registro_comida = "registr" in _m_norm_app and "comida" in _m_norm_app
+    _pregunta_registro_ejercicio = "registr" in _m_norm_app and "ejercicio" in _m_norm_app
+    _pregunta_progreso = "donde veo" in _m_norm_app and ("progreso" in _m_norm_app or "balance" in _m_norm_app)
+
+    if _pregunta_registro_comida:
+        return (
+            "Para registrar comida solo escribe en este chat lo que comiste, por "
+            "ejemplo \"comí pollo con arroz\" — también puedes tocar el ícono "
+            "naranja 🍽️ junto al cuadro de texto para un registro rápido."
+        )
+    if _pregunta_registro_ejercicio:
+        return (
+            "Para registrar ejercicio escribe en este chat qué hiciste, por "
+            "ejemplo \"hice 3 series de 10 sentadillas con 20kg\" — también puedes "
+            "tocar el ícono verde 🏋️ junto al cuadro de texto para armar una rutina."
+        )
+    if _pregunta_progreso:
+        return "Tu progreso histórico está en la pestaña \"Seguimiento\" de la barra inferior."
+    if _pregunta_uso_app:
+        return (
+            "Puedes escribirme directo en este chat para registrar comidas o "
+            "ejercicios, o pedirme recomendaciones. La barra inferior tiene Inicio, "
+            "Asistente, Balance, Seguimiento y Perfil para navegar la app."
+        )
 
     # ── Intercept "puedo comer/tomar X?" — respuesta corta sin receta ────────────
     import re as _re_puedo
