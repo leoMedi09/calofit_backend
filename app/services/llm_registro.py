@@ -306,7 +306,8 @@ CÓMO USAR LA APP ('cómo uso la app', 'cómo registro mi comida/ejercicio',
     natural (ej. "comí pollo con arroz" o "hice 3 series de 10 sentadillas con
     20kg"). También hay 2 íconos junto al cuadro de texto del chat: uno naranja
     (🍽️) para registro rápido de comida, uno verde (🏋️) para armar una rutina
-    de ejercicio.
+    de ejercicio. También se puede dictar por voz con el ícono del micrófono
+    (el texto aparece en el cuadro para revisar antes de enviar).
   - Navegación: la barra inferior tiene 5 pestañas — Inicio (resumen del día),
     Asistente (este chat), Balance, Seguimiento (progreso histórico), Perfil.
   - No hay botón literal llamado "Registrar comida" en la pantalla principal —
@@ -2124,21 +2125,24 @@ async def respuesta_chat_llm(
         return (
             "Para registrar comida solo escribe en este chat lo que comiste, por "
             "ejemplo \"comí pollo con arroz\" — también puedes tocar el ícono "
-            "naranja 🍽️ junto al cuadro de texto para un registro rápido."
+            "naranja 🍽️ junto al cuadro de texto para un registro rápido, o dictarlo "
+            "por voz con el ícono del micrófono."
         )
     if _pregunta_registro_ejercicio:
         return (
             "Para registrar ejercicio escribe en este chat qué hiciste, por "
             "ejemplo \"hice 3 series de 10 sentadillas con 20kg\" — también puedes "
-            "tocar el ícono verde 🏋️ junto al cuadro de texto para armar una rutina."
+            "tocar el ícono verde 🏋️ junto al cuadro de texto para armar una rutina, "
+            "o dictarlo por voz con el ícono del micrófono."
         )
     if _pregunta_progreso:
         return "Tu progreso histórico está en la pestaña \"Seguimiento\" de la barra inferior."
     if _pregunta_uso_app:
         return (
-            "Puedes escribirme directo en este chat para registrar comidas o "
-            "ejercicios, o pedirme recomendaciones. La barra inferior tiene Inicio, "
-            "Asistente, Balance, Seguimiento y Perfil para navegar la app."
+            "Puedes escribirme directo en este chat (o dictar por voz con el ícono "
+            "del micrófono) para registrar comidas o ejercicios, o pedirme "
+            "recomendaciones. La barra inferior tiene Inicio, Asistente, Balance, "
+            "Seguimiento y Perfil para navegar la app."
         )
 
     # ── Intercept "puedo comer/tomar X?" — respuesta corta sin receta ────────────
