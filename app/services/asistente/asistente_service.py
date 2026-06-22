@@ -204,7 +204,7 @@ from app.services.asistente.asistente_ejercicio import (
 )
 from app.services.asistente.asistente_modos import (
     OTRO, RECOMENDAR_EJERCICIO, REGISTRAR_EJERCICIO, REGISTRAR_NUTRICION,
-    _VERBOS_IMPERATIVOS_REGISTRO, resolver_modo_funcion,
+    RX_CORREGIR_REGISTRO, _VERBOS_IMPERATIVOS_REGISTRO, resolver_modo_funcion,
 )
 from app.services.asistente.asistente_nutricion import (
     procesar_secciones_comida,
@@ -523,7 +523,19 @@ class AsistenteService:
             from app.services.llm_registro import registrar_comida_llm
             # No pasar historial — las recomendaciones previas confunden los macros.
             # La consistencia viene de la tabla de referencia en el prompt.
-            _com = await registrar_comida_llm(mensaje, perfil, plan_hoy_data, db, self.ia)
+            # Excepción: "agrégalo en el registro" / "olvidé la palta" no nombra
+            # el alimento en SU PROPIO mensaje (vive en el turno anterior, ej.
+            # "Te faltó la palta") — sin esto, la extracción no encuentra nada
+            # y antes esto caía en chat libre, que inventaba una confirmación
+            # falsa sin tocar la base de datos (balance nunca cambiaba).
+            _mensaje_extraccion = mensaje
+            if RX_CORREGIR_REGISTRO.search(msg_limpio) and historial:
+                _turnos_usuario_prev = [
+                    h.get("content", "") for h in historial if h.get("role") == "user"
+                ]
+                if _turnos_usuario_prev:
+                    _mensaje_extraccion = f"{_turnos_usuario_prev[-1]} {mensaje}"
+            _com = await registrar_comida_llm(_mensaje_extraccion, perfil, plan_hoy_data, db, self.ia)
             _bal = _com.get("balance_actualizado", {})
             return {
                 "asistente":    "CaloFit IA",

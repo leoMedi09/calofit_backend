@@ -26,6 +26,17 @@ _VERBOS_IMPERATIVOS_REGISTRO: tuple[str, ...] = (
     "apunta el", "apunta la", "apunta que",
 )
 
+# Corrección/adición a un registro reciente ("agrégalo en el registro",
+# "agrega la palta", "olvidé poner el aceite", "súmale eso") — el mensaje
+# usualmente NO nombra el alimento (vive en el turno anterior), por eso
+# necesita reusarse tanto para el routing (acá) como para decidir si hay que
+# combinar con el turno anterior antes de extraer (asistente_service.py).
+RX_CORREGIR_REGISTRO = re.compile(
+    r"\b(agr[eé]ga(?:lo|la|le)?|agregalo|agregale|a[ñn]ade(?:lo|la)?|"
+    r"s[uú]male|incl[uú]yelo|olvid[eé]|me\s+olvid[eé]|"
+    r"falt[oó]\s+(?:poner|agregar|incluir|sumar))\b"
+)
+
 
 MODOS_ASISTENTE = frozenset(
     {
@@ -376,6 +387,14 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
     )
     if _RX_CALCULO_NUTRICIONAL.search(_mn):
         return OTRO
+    # Corrección/adición a un registro reciente ("agrégalo en el registro",
+    # "agrega la palta", "olvidé poner el aceite", "súmale eso") — antes esto
+    # caía en chat libre (OTRO) y el LLM inventaba una confirmación de que ya
+    # lo había agregado, sin tocar la base de datos (encontrado en pruebas
+    # reales: el balance mostrado nunca cambiaba). Debe ir a REGISTRAR_NUTRICION
+    # para que se persista de verdad.
+    if RX_CORREGIR_REGISTRO.search(_mn):
+        return REGISTRAR_NUTRICION
     if any(p in _mn for p in _PEDIR_REC_NUT) and not any(e in _mn for e in _EJ_KW) and not _tiene_pasado_bloqueo:
         return RECOMENDAR_NUTRICION
     # Petición de recomendación de ejercicio

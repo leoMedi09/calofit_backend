@@ -455,6 +455,46 @@ async def registrar_comida_llm(
     # Validar que hay alimentos con macros
     _items = datos.get("alimentos", [])
 
+    # ── Chequeo de completitud (solo ruta LLM, no caché) ──────────────────────
+    # Encontrado en pruebas reales: "arroz con palta y mi taza de gelatina" →
+    # el LLM extrajo solo Arroz + Gelatina, omitiendo "palta", a pesar de que
+    # la Regla 9 del prompt es clara (dos alimentos completos unidos por "con"
+    # sin ser un combo reconocido = dos ítems separados). Pasó igual 2/2 veces
+    # con temp=0.0 — no es ruido, es un punto débil estable del modelo para
+    # esta frase. Reintento dirigido en vez de confiar en que la regla del
+    # prompt baste (mismo patrón que el resto de guards de hoy).
+    if not goto_save and _items:
+        _faltantes = _palabras_faltantes_en_extraccion(mensaje, _items)
+        if _faltantes:
+            logger.info("[Registro] Posibles alimentos faltantes: %s — verificando", _faltantes)
+            _prompt_faltante = (
+                f"Mensaje original: \"{mensaje}\"\n"
+                f"Ya se registraron estos alimentos: {', '.join(a.get('nombre','') for a in _items)}.\n"
+                f"El mensaje también menciona: {', '.join(_faltantes)}.\n"
+                f"Si alguna de esas palabras es un alimento o bebida REAL adicional "
+                f"(no un ingrediente ya incluido en los platos de arriba, no un adjetivo, "
+                f"no una palabra normal de la frase), agrégalo. Si ninguna es un alimento "
+                f"adicional real, responde alimentos vacío.\n"
+                f'Responde SOLO JSON: {{"alimentos": [{{"nombre": "...", "es_real": true, '
+                f'"cantidad": 1, "porcion_g": numero, "kcal": numero, "prot_g": numero, '
+                f'"carb_g": numero, "grasa_g": numero}}]}}'
+            )
+            _raw_faltante = await ia_engine._llamar_groq(_prompt_faltante, max_tokens=250, temp=0.0)
+            _datos_faltante = _parse_json(_raw_faltante)
+            if _datos_faltante and _datos_faltante.get("alimentos"):
+                _nuevos = [
+                    a for a in _datos_faltante["alimentos"]
+                    if a.get("es_real", True) is not False
+                    and _extraccion_tiene_base_textual(a.get("nombre", ""), mensaje)
+                ]
+                if _nuevos:
+                    logger.info(
+                        "[Registro] Alimento(s) recuperado(s): %s",
+                        [a.get("nombre") for a in _nuevos],
+                    )
+                    datos["alimentos"].extend(_nuevos)
+                    _items = datos["alimentos"]
+
     # ── Modificadores de tamaño ("medio", "porción pequeña/grande") ──────────
     # El LLM tiende a ignorar estos modificadores y devolver la porción
     # estándar. Se corrige escalando porcion_g/kcal/macros del único ítem
@@ -2477,6 +2517,36 @@ def _extraccion_tiene_base_textual(nombre_extraido: str, mensaje_original: str) 
         return True  # nombre muy corto/genérico para verificar — no bloquear
     msg_norm = _normalizar_nombre(mensaje_original or "")
     return any(p in msg_norm for p in palabras)
+
+
+# Stopwords para el chequeo de COMPLETITUD (lo opuesto a _extraccion_tiene_base_textual:
+# en vez de validar que lo extraído venga del mensaje, valida que el mensaje no
+# tenga algo que el LLM dejó fuera). Deliberadamente conservador — palabras de
+# 4+ letras fuera de esta lista chica, para minimizar falsos positivos.
+_STOPWORDS_COMPLETITUD = frozenset({
+    "hola", "buenas", "buenos", "comi", "come", "comer", "tome", "tomo",
+    "bebi", "cene", "almorce", "desayune", "hoy", "ayer", "con", "para",
+    "por", "mis", "tus", "sus", "una", "unos", "unas", "taza", "vaso",
+    "plato", "porcion", "racion", "rebanada", "tajada", "lonja", "rodaja",
+    "trozo", "pedazo", "cucharada", "cucharadita", "puñado", "copa",
+    "botella", "lata", "jarra", "gramos", "litros", "cantidad", "tambien",
+})
+
+
+def _palabras_faltantes_en_extraccion(mensaje: str, alimentos: list[dict]) -> list[str]:
+    """Detecta palabras del mensaje que parecen alimentos pero no aparecen en
+    ningún nombre extraído — ej. "arroz con palta y gelatina" → si solo se
+    extrajo "Arroz" y "Gelatina", "palta" queda detectada como posible
+    omisión. No es prueba definitiva (puede ser un adjetivo o palabra normal),
+    por eso el caller debe verificar con un reintento antes de aceptarla."""
+    palabras_extraidas = set(
+        _normalizar_nombre(" ".join(a.get("nombre", "") for a in alimentos)).split()
+    )
+    palabras_msg = [
+        p for p in _normalizar_nombre(mensaje or "").split()
+        if len(p) >= 4 and p not in _STOPWORDS_COMPLETITUD and p not in _STOPWORDS_BASE_TEXTUAL
+    ]
+    return [p for p in palabras_msg if p not in palabras_extraidas]
 
 
 def _cache_key(nombre: str) -> str:
