@@ -467,14 +467,20 @@ async def registrar_comida_llm(
         _faltantes = _palabras_faltantes_en_extraccion(mensaje, _items)
         if _faltantes:
             logger.info("[Registro] Posibles alimentos faltantes: %s — verificando", _faltantes)
+            _nombres_ya_registrados = ', '.join(a.get('nombre', '') for a in _items)
             _prompt_faltante = (
                 f"Mensaje original: \"{mensaje}\"\n"
-                f"Ya se registraron estos alimentos: {', '.join(a.get('nombre','') for a in _items)}.\n"
-                f"El mensaje también menciona: {', '.join(_faltantes)}.\n"
-                f"Si alguna de esas palabras es un alimento o bebida REAL adicional "
+                f"Ya se registraron estos alimentos: {_nombres_ya_registrados}.\n"
+                f"El mensaje también menciona estas palabras sueltas: {', '.join(_faltantes)}.\n"
+                f"Si alguna de esas palabras es un alimento o bebida REAL ADICIONAL "
                 f"(no un ingrediente ya incluido en los platos de arriba, no un adjetivo, "
-                f"no una palabra normal de la frase), agrégalo. Si ninguna es un alimento "
-                f"adicional real, responde alimentos vacío.\n"
+                f"no un verbo o palabra de comando del usuario como 'agrega'/'falta'/'olvidé', "
+                f"no una palabra normal de la frase), agrégalo.\n"
+                f"⚠️ PROHIBIDO repetir cualquiera de estos alimentos ya registrados: "
+                f"{_nombres_ya_registrados} — si la palabra suelta se refiere a algo "
+                f"que ya está en esa lista, NO lo incluyas de nuevo.\n"
+                f"Si ninguna palabra suelta es un alimento adicional real y distinto, "
+                f"responde alimentos vacío.\n"
                 f'Responde SOLO JSON: {{"alimentos": [{{"nombre": "...", "es_real": true, '
                 f'"cantidad": 1, "porcion_g": numero, "kcal": numero, "prot_g": numero, '
                 f'"carb_g": numero, "grasa_g": numero}}]}}'
@@ -482,10 +488,17 @@ async def registrar_comida_llm(
             _raw_faltante = await ia_engine._llamar_groq(_prompt_faltante, max_tokens=250, temp=0.0)
             _datos_faltante = _parse_json(_raw_faltante)
             if _datos_faltante and _datos_faltante.get("alimentos"):
+                # No confiar solo en la instrucción del prompt de "no repitas" —
+                # verificar con código que el nombre recuperado no sea ya uno de
+                # los registrados (encontrado en pruebas: "Te faltó la palta" +
+                # "Agrégalo en el registro" volvía a traer "Palta" duplicada
+                # porque "falto" disparó otro reintento sin relación real).
+                _nombres_ya_norm = {_normalizar_nombre(a.get("nombre", "")) for a in _items}
                 _nuevos = [
                     a for a in _datos_faltante["alimentos"]
                     if a.get("es_real", True) is not False
                     and _extraccion_tiene_base_textual(a.get("nombre", ""), mensaje)
+                    and _normalizar_nombre(a.get("nombre", "")) not in _nombres_ya_norm
                 ]
                 if _nuevos:
                     logger.info(
@@ -2530,6 +2543,13 @@ _STOPWORDS_COMPLETITUD = frozenset({
     "plato", "porcion", "racion", "rebanada", "tajada", "lonja", "rodaja",
     "trozo", "pedazo", "cucharada", "cucharadita", "puñado", "copa",
     "botella", "lata", "jarra", "gramos", "litros", "cantidad", "tambien",
+    # Verbos de comando ("agrega que comí X") — sin esto, "agrega" se
+    # detectaba como un posible alimento faltante y disparaba un reintento
+    # que terminaba duplicando el ítem real (ej. "Huevo frito" x2).
+    "agrega", "agregalo", "agregale", "agregar", "anota", "anotalo",
+    "registra", "registralo", "incluye", "incluyelo", "guarda", "guardalo",
+    "ponme", "apunta", "apuntalo", "registro", "sumale", "suma",
+    "falto", "faltaba", "faltó", "falta", "olvide", "olvidé", "olvido",
 })
 
 

@@ -523,19 +523,27 @@ class AsistenteService:
             from app.services.llm_registro import registrar_comida_llm
             # No pasar historial — las recomendaciones previas confunden los macros.
             # La consistencia viene de la tabla de referencia en el prompt.
-            # Excepción: "agrégalo en el registro" / "olvidé la palta" no nombra
-            # el alimento en SU PROPIO mensaje (vive en el turno anterior, ej.
-            # "Te faltó la palta") — sin esto, la extracción no encuentra nada
-            # y antes esto caía en chat libre, que inventaba una confirmación
-            # falsa sin tocar la base de datos (balance nunca cambiaba).
-            _mensaje_extraccion = mensaje
-            if RX_CORREGIR_REGISTRO.search(msg_limpio) and historial:
+            _com = await registrar_comida_llm(mensaje, perfil, plan_hoy_data, db, self.ia)
+            # "Agrégalo en el registro" / "olvidé la palta" no nombra el alimento
+            # en SU PROPIO mensaje (vive en el turno anterior, ej. "Te faltó la
+            # palta") — pero "Agrega que comí un huevo frito" SÍ se basta solo.
+            # No decidir por estructura del mensaje (regex) si hay que combinar
+            # con el turno anterior — decidir según si la extracción del mensaje
+            # actual SOLO ya encontró algo real. Combinar siempre (aunque el
+            # mensaje ya tuviera su propio alimento) duplicaba lo ya registrado
+            # del turno anterior (encontrado en pruebas reales: arroz/gelatina
+            # se volvían a registrar y se contaban doble).
+            if (
+                not _com.get("success")
+                and RX_CORREGIR_REGISTRO.search(msg_limpio)
+                and historial
+            ):
                 _turnos_usuario_prev = [
                     h.get("content", "") for h in historial if h.get("role") == "user"
                 ]
                 if _turnos_usuario_prev:
-                    _mensaje_extraccion = f"{_turnos_usuario_prev[-1]} {mensaje}"
-            _com = await registrar_comida_llm(_mensaje_extraccion, perfil, plan_hoy_data, db, self.ia)
+                    _mensaje_combinado = f"{_turnos_usuario_prev[-1]} {mensaje}"
+                    _com = await registrar_comida_llm(_mensaje_combinado, perfil, plan_hoy_data, db, self.ia)
             _bal = _com.get("balance_actualizado", {})
             return {
                 "asistente":    "CaloFit IA",
