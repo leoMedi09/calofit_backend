@@ -424,6 +424,32 @@ class AsistenteService:
         if not es_saludo:
             asyncio.create_task(self._analizar_salud_background(mensaje, perfil, db))
 
+        # ── Saludo puro ("hola", sin nada más) → saludo correcto según la hora
+        # real de Perú, sin pasar por el LLM. Antes el LLM generaba saludos como
+        # "estás a punto de empezar tu día" sin saber la hora real — a las 11pm
+        # eso no tiene sentido. Solo se intercepta si NO queda contenido aparte
+        # del saludo (si dice "Hola, ¿cuánta proteína necesito?" debe seguir el
+        # flujo normal, no cortarse en un saludo).
+        if es_saludo:
+            _resto_saludo = msg_limpio
+            for _s in _KW_SALUDO:
+                _resto_saludo = _resto_saludo.replace(_s, "")
+            _resto_saludo = re.sub(r'[^\wáéíóúñ]+', '', _resto_saludo)
+            if len(_resto_saludo) <= 2:
+                from app.core.utils import get_peru_now
+                _hora_actual = get_peru_now().hour
+                if 5 <= _hora_actual < 12:
+                    _saludo_hora = "Buenos días"
+                elif 12 <= _hora_actual < 19:
+                    _saludo_hora = "Buenas tardes"
+                else:
+                    _saludo_hora = "Buenas noches"
+                return _build_response(
+                    perfil, "CHAT", "OTRO",
+                    calorias_meta, consumo_real, quemadas_real, plan_hoy_data,
+                    f"{_saludo_hora}, {perfil.first_name}. ¿En qué te ayudo hoy?"
+                )
+
         # ── Guardia anti-no-alimento (2 capas) ───────────────────────────────
         _tokens_norm = set(_deaccent(msg_limpio).split())
 
