@@ -192,30 +192,10 @@ async def obtener_historial_chat(
     ]
 
 
-@router.post("/log-inteligente")
-async def registro_inteligente_nlp(
-    request: ChatRequest,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    """
-    Registrar comida o ejercicio por texto/voz (NLP).
-    Si envías consulta_id desde una card, se usan los mismos valores mostrados.
-    """
-    try:
-        resultado = await asistente_service.registrar_por_nlp(
-            mensaje=request.mensaje,
-            db=db,
-            current_user=current_user,
-            consulta_id=request.consulta_id,
-        )
-        return resultado
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        print(f"❌ ERROR EN /log-inteligente: {str(e)}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+# /log-inteligente (NLP de comida/ejercicio por voz, arquitectura vieja) se
+# eliminó: el frontend migró a "todo va por /consultar" (ver comentario en
+# chat_screen.dart) y registrarPorVoz() quedó sin ningún caller. Confirmado
+# sin referencias en todo lib/ antes de borrar.
 
 
 @router.post("/log-manual")

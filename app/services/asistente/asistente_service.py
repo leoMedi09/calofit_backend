@@ -860,30 +860,9 @@ class AsistenteService:
             "respuesta_estructurada": resp_est,
         }
 
-    # ── 2. Registro por NLP ───────────────────────────────────────────────────
-
-    async def registrar_por_nlp(
-        self, mensaje: str, db: Session, current_user, consulta_id: str = None
-    ):
-        perfil = db.query(Client).filter(Client.email == current_user.email).first()
-        if not perfil:
-            raise ValueError("Perfil de cliente no encontrado")
-
-        if consulta_id and consulta_id.strip():
-            payload = get_consulta_cached(consulta_id.strip())
-            if payload:
-                return registrar_desde_cache(payload, perfil, db)
-
-        edad = (datetime.now().year - perfil.birth_date.year) if perfil.birth_date else 25
-        try:
-            _, plan_hoy_data, _ = obtener_plan_hoy(perfil, edad, db)
-        except Exception:
-            plan_hoy_data = {"calorias_dia": 0, "proteinas_g": 0, "carbohidratos_g": 0, "grasas_g": 0}
-
-        from app.services.asistente.asistente_ejercicio import frase_registro_actividad_fisica, frase_vocabulario_gimnasio
-        if frase_registro_actividad_fisica(mensaje) or frase_vocabulario_gimnasio(mensaje):
-            return await registro_ejercicio_handler.registrar(mensaje, perfil, db, self.ia)
-        return await registro_comida_handler.registrar(mensaje, perfil, plan_hoy_data, db, self.ia)
+    # registrar_por_nlp() (arquitectura vieja, /log-inteligente) se eliminó —
+    # el frontend ya no lo llama, todo el registro por texto/voz va por
+    # consultar() -> registrar_comida_llm()/registrar_ejercicio_llm().
 
     # ── 2b. Registro manual ───────────────────────────────────────────────────
 

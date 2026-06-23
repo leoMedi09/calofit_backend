@@ -37,6 +37,29 @@ Para alimentos peruanos usa INS/CENAN 2017. Para el resto, USDA FoodData Central
 NO inventes ni improvises valores — usa tu conocimiento real de estas bases de datos.
 SÉ DETERMINISTA: el mismo alimento con la misma cantidad siempre debe dar el mismo resultado.
 
+⚠️ EXCEPCIÓN DE MÁXIMA PRIORIDAD — DATOS DE ETIQUETA DADOS POR EL USUARIO:
+Si el usuario menciona valores nutricionales explícitos de un producto (calorías
+y/o macros — sin importar si los da por porción, por 100g/100ml, o como total
+de lo que consumió, ni cómo los exprese: "tiene X kcal", "trae Y de proteína
+cada 100ml", "la etiqueta dice...", etc.), esos números SIEMPRE tienen prioridad
+sobre tu propio conocimiento del producto. NO los reemplaces con tu estimación
+de marca/producto genérico — escala esos números EXACTOS a la cantidad real que
+consumió (ej. si dice "320 ml" y los valores son "por 100ml", multiplica ×3.2).
+Esto aplica a CUALQUIER producto, no solo marcas reconocidas — el usuario puede
+estar leyendo la etiqueta real que tiene enfrente, que es más preciso que tu
+conocimiento general.
+
+⚠️ PRODUCTOS DE MARCA SIN DATOS DADOS (sin etiqueta mencionada por el usuario):
+Si el usuario nombra un producto comercial/de marca específico (peruano o de
+cualquier país: Inca Kola, Gloria, Pilsen, Coca-Cola, Sublime, etc.) SIN dar
+sus propios números, usa tu conocimiento REAL de ESE producto específico
+(sus valores nutricionales típicos reales), NO una estimación genérica de la
+categoría ("gaseosa" genérica, "chocolate" genérico). Si reconoces la marca,
+sé tan preciso como puedas con sus valores reales conocidos. Si NO reconoces
+la marca o no estás seguro de sus valores reales, sí usa una estimación
+razonable de su categoría general — pero nunca inventes un valor "de marca"
+falso presentándolo como si fuera específico.
+
 ⚠️ VERIFICACIÓN OBLIGATORIA antes de escribir el JSON:
    Paso 1 — macros: ¿Son los valores de prot_g/carb_g/grasa_g coherentes con lo que
    USDA/INS-CENAN indica para ESE alimento? Un huevo tiene grasa, el arroz tiene carbos, el
@@ -279,6 +302,12 @@ Mensaje actual: "{mensaje}"
 REGLAS DE RESPUESTA:
 ⛔ REGLAS ABSOLUTAS (se aplican SIEMPRE, sin excepción):
   1. PROHIBIDO cualquier markdown: **negrita**, *cursiva*, # títulos. Solo texto plano.
+  1b. PROHIBIDO usar abreviaturas tipo etiqueta para macros: "P:Xg C:Yg G:Zg",
+      "kcal:", "prot:". Esos números van en PROSA natural, como los diría una
+      persona: "tiene 112 kcal, con 1g de proteína, 27g de carbohidratos y casi
+      nada de grasa" — NUNCA pierdas ningún valor numérico ni cambies las
+      cantidades por sonar natural, solo cambia CÓMO se presentan (texto
+      corrido, no pares clave:valor).
   2. PROHIBIDO empezar con frases de relleno: "Leonardo, me alegra...", "Qué buena pregunta...", "Es un placer...". Empieza directo al tema.
   3. PROHIBIDO terminar con pregunta: "¿Quieres saber más?", "¿Te gustaría...?". Termina con punto.
      Única excepción: si el usuario pidió "consejo" o "ayuda" de forma EXPLÍCITA con esa palabra,
@@ -339,6 +368,8 @@ PREGUNTAS SIMPLES: máximo 2-3 oraciones directas.
   Porciones estándar: palta=240kcal/unidad · plátano=107kcal · huevo=85kcal · arroz=260kcal/plato.
   "palta" = aguacate/avocado. NUNCA confundir con "pata".
   Vegano pregunta por animal → responde NO directamente.
+  Responde en una frase natural con los 4 valores (kcal y los 3 macros) — ver regla 1b,
+  NUNCA en formato de etiqueta.
 
 - CÁLCULO nutricional ('cuánta proteína necesito', 'cuántas calorías necesito al día'):
   ⚠️ Esto es una pregunta de NÚMERO, no una petición de plato — PROHIBIDO responder
@@ -1387,8 +1418,12 @@ async def respuesta_recomendacion_llm(
     ).get(momento_reco, "")
 
     # 3. Detectar preferencia de ingrediente específico en el mensaje
+    # Tope de 2 palabras (no 25 caracteres libres) — sin esto, "con quinua
+    # para el almuerzo" capturaba la frase completa en vez de solo "quinua",
+    # y el LLM recibía una instrucción imposible de cumplir.
     _ing_match = _re_reco.search(
-        r'(?:con|de|que\s+tenga|a\s+base\s+de)\s+([a-záéíóúüñ][a-záéíóúüñ\s]{1,25})',
+        r'(?:con|de|que\s+tenga|a\s+base\s+de)\s+([a-záéíóúüñ]+(?:\s+[a-záéíóúüñ]+)?)'
+        r'(?=\s+(?:para|en|hoy|ahora|al|por)\b|[.,?]|$)',
         _msg_low_reco,
     )
     pref_ingrediente_reco = ""
@@ -1397,8 +1432,11 @@ async def respuesta_recomendacion_llm(
         _PALABRAS_IGNORAR = {"hoy", "comer", "ti", "mi", "algo", "uno", "plato", "poco"}
         if _ing_detectado not in _PALABRAS_IGNORAR and len(_ing_detectado) > 2:
             pref_ingrediente_reco = (
-                f"El usuario pidió algo con: **{_ing_detectado}**. "
-                f"Al menos 1 de los 3 platos debe incluir ese ingrediente."
+                f"⚠️ El usuario pidió ESPECÍFICAMENTE algo con: **{_ing_detectado}**. "
+                f"Esto tiene prioridad sobre la variedad: los 3 platos DEBEN incluir "
+                f"'{_ing_detectado}' de alguna forma (como ingrediente principal o "
+                f"visible en la preparación) — no lo menciones en uno solo y dejes "
+                f"los otros 2 libres."
             )
 
     # 3.5. Detectar objetivo de PROTEÍNA en el mensaje
@@ -1715,6 +1753,70 @@ async def respuesta_recomendacion_llm(
             respuesta_llm_reco = _FALLBACK_SEGURO_MOMENTO.get(
                 momento_reco, _FALLBACK_SEGURO_MOMENTO["ALMUERZO"]
             )
+
+    # Guard de ingrediente pedido explícitamente ("qué puedo comer con palta",
+    # "algo con quinua") — encontrado en pruebas reales: la instrucción del
+    # prompt ("al menos 1 de 3") no siempre se respetaba (0/3 platos con
+    # quinua en una prueba). Verificación de código + reintento dirigido,
+    # mismo patrón que el guard dietético de arriba.
+    if pref_ingrediente_reco:
+        _ing_norm = _normalizar_nombre(_ing_detectado)
+        _lineas_reco = [l for l in (respuesta_llm_reco or "").split("\n") if l.strip()]
+        # Por LÍNEA (plato), no "en algún lugar del texto" — si solo 1 de 3
+        # platos lo menciona, sigue sin cumplir lo que el usuario pidió.
+        _n_con_ingrediente = sum(1 for l in _lineas_reco if _ing_norm in _normalizar_nombre(l))
+        _tiene_ingrediente = bool(_lineas_reco) and _n_con_ingrediente == len(_lineas_reco)
+        if not _tiene_ingrediente:
+            logger.warning(
+                "[Reco] Ingrediente pedido '%s' ausente de los 3 platos — reintentando",
+                _ing_detectado,
+            )
+            _prompt_retry_ing = (
+                f"Lista EXACTAMENTE 3 platos de {momento_reco.lower()} peruanos "
+                f"({round(restante)} kcal disponibles) que incluyan '{_ing_detectado}' "
+                f"como ingrediente — LOS 3, no solo uno. Si '{_ing_detectado}' no calza "
+                f"de forma natural en un plato de fondo, inclúyelo como acompañamiento "
+                f"o guarnición de ese plato.\n"
+                f"SOLO este formato:\n"
+                f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                f"Sin frases extra, sin ingredientes, sin pasos."
+            )
+            respuesta_llm_reco = await ia_engine._llamar_groq(
+                _prompt_retry_ing, max_tokens=150, temp=0.2
+            )
+            # Segundo intento si el primero tampoco lo logró (ingredientes
+            # "difíciles" como palta/quinua en platos de fondo tradicionales):
+            # instrucción más explícita, indicando CÓMO encajarlo si no calza
+            # como ingrediente principal.
+            _lineas_retry1 = [l for l in (respuesta_llm_reco or "").split("\n") if l.strip()]
+            _n_retry1 = sum(1 for l in _lineas_retry1 if _ing_norm in _normalizar_nombre(l))
+            if not (_lineas_retry1 and _n_retry1 == len(_lineas_retry1)):
+                logger.warning(
+                    "[Reco] Reintento 1 tampoco logró '%s' en los 3 platos — 2do reintento",
+                    _ing_detectado,
+                )
+                _prompt_retry_ing2 = (
+                    f"Lista EXACTAMENTE 3 platos de {momento_reco.lower()} peruanos "
+                    f"({round(restante)} kcal disponibles). REGLA OBLIGATORIA: cada uno "
+                    f"de los 3 nombres de plato debe mencionar literalmente la palabra "
+                    f"'{_ing_detectado}' — agrégala como guarnición/acompañamiento si no "
+                    f"es el ingrediente principal (ej. 'Lomo Saltado con {_ing_detectado}', "
+                    f"'Ensalada de {_ing_detectado}', 'Sopa con {_ing_detectado}').\n"
+                    f"SOLO este formato:\n"
+                    f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                    f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                    f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                    f"Sin frases extra."
+                )
+                respuesta_llm_reco = await ia_engine._llamar_groq(
+                    _prompt_retry_ing2, max_tokens=150, temp=0.2
+                )
+            # No hay fallback determinista aquí (no se puede inventar un plato
+            # con un ingrediente arbitrario sin hardcodear) — si ningún
+            # reintento lo logra, se acepta el resultado igual, mejor que
+            # cortar la recomendación por completo.
 
     # Guard de coherencia culinaria: el LLM a veces combina palabras reales
     # de forma inventada (ej. "Pachamanca de quinoa" — la pachamanca es con
@@ -2317,9 +2419,18 @@ async def respuesta_chat_llm(
             k_r = round(4*p_r + 4*c_r + 9*g_r, 1)
             grm = float(primer.get("porcion_g", 100) or 100)
             nombre_r = primer.get("nombre", "")
+            _unidad_r = 'ml' if 'ml' in mensaje.lower() or 'jugo' in mensaje.lower() or 'leche' in mensaje.lower() else 'g'
+            # Prosa natural en vez de "P:Xg C:Yg G:Zg" — este return es un
+            # template fijo en código, no pasa por el LLM ni por el recorte de
+            # abajo, así que el formato se arregla aquí directamente.
+            _partes_r = []
+            for _val, _nom in ((p_r, "proteína"), (c_r, "carbohidratos"), (g_r, "grasa")):
+                _partes_r.append(
+                    f"casi nada de {_nom}" if _val < 0.5 else f"{_formato_num(_val)}g de {_nom}"
+                )
             return (
-                f"{nombre_r} ({grm:.0f}{'ml' if 'ml' in mensaje.lower() or 'jugo' in mensaje.lower() or 'leche' in mensaje.lower() else 'g'}) "
-                f"tiene {k_r:.0f} kcal — P:{p_r:.1f}g C:{c_r:.1f}g G:{g_r:.1f}g."
+                f"{nombre_r} ({grm:.0f}{_unidad_r}) tiene {k_r:.0f} kcal, "
+                f"con {_partes_r[0]}, {_partes_r[1]} y {_partes_r[2]}."
             )
 
     _max_tok = 500 if (_es_receta or _es_tecnica) else 200
@@ -2448,7 +2559,40 @@ async def respuesta_chat_llm(
     if not _es_receta and not _es_tecnica:
         resultado = _recortar_respuesta_chat(resultado, mensaje)
 
+    # Garantía determinista de formato (igual razón que el recorte de arriba):
+    # pese a la regla del prompt, el LLM sigue usando "P:Xg C:Yg G:Zg" en vez
+    # de prosa natural — esto reescribe el patrón sin tocar ningún número.
+    resultado = _naturalizar_macros(resultado)
+
     return resultado
+
+
+_RE_MACROS_ETIQUETA = re.compile(
+    r'[.\s]*[—\-]?\s*P:\s*([\d.]+)\s*g\s*C:\s*([\d.]+)\s*g\s*G:\s*([\d.]+)\s*g\.?',
+    re.IGNORECASE,
+)
+
+
+def _formato_num(n: float) -> str:
+    return str(int(n)) if n == int(n) else f"{n:.1f}".rstrip("0").rstrip(".")
+
+
+def _naturalizar_macros(texto: str) -> str:
+    """Reescribe "P:Xg C:Yg G:Zg" (formato de etiqueta) a prosa natural, sin
+    cambiar ningún valor numérico — solo CÓMO se presentan. El prompt ya pide
+    esto (regla 1b de _PROMPT_CHAT) pero el LLM no lo respeta de forma
+    confiable, mismo patrón que el resto de hoy: regla de prompt + garantía
+    de código."""
+    def _reemplazar(m: re.Match) -> str:
+        p, c, g = float(m.group(1)), float(m.group(2)), float(m.group(3))
+        partes = []
+        for valor, nombre in ((p, "proteína"), (c, "carbohidratos"), (g, "grasa")):
+            if valor < 0.5:
+                partes.append(f"casi nada de {nombre}")
+            else:
+                partes.append(f"{_formato_num(valor)}g de {nombre}")
+        return f", con {partes[0]}, {partes[1]} y {partes[2]}."
+    return _RE_MACROS_ETIQUETA.sub(_reemplazar, texto)
 
 
 def _recortar_respuesta_chat(texto: str, mensaje_usuario: str, max_oraciones: int = 3) -> str:
@@ -2515,6 +2659,26 @@ _STOPWORDS_BASE_TEXTUAL = frozenset({
 })
 
 
+# Vocabulario nutricional genérico — NUNCA es en sí mismo el nombre de un
+# alimento, sin importar el producto ("kcal", "etiqueta", "proteína" no son
+# comida, son palabras que describen comida). No es una lista de productos/
+# marcas (eso seguiría siendo conversacional) — es un cierre léxico chico y
+# fijo del propio dominio de nutrición, igual que "el/la/de" son stopwords de
+# español. Encontrado en pruebas: al dar datos de etiqueta ("160 kcal, 6g de
+# proteína por 100ml..."), el checker de completitud marcaba "kcal" como
+# posible alimento faltante y el LLM del reintento lo aceptó como real.
+_PALABRAS_NO_ALIMENTO_GENERICAS = frozenset({
+    "kcal", "cal", "calorias", "calorías", "caloria", "caloría",
+    "proteina", "proteína", "proteinas", "proteínas",
+    "carbohidrato", "carbohidratos", "carbohidrato",
+    "grasa", "grasas", "macro", "macros", "macronutriente", "macronutrientes",
+    "etiqueta", "etiquetas", "nutricional", "nutricionales", "nutricion",
+    "nutrición", "porcion", "porción", "porciones", "racion", "ración",
+    "informacion", "información", "valor", "valores", "dice", "indica",
+    "segun", "según", "cada", "tiene", "trae", "contiene",
+})
+
+
 def _extraccion_tiene_base_textual(nombre_extraido: str, mensaje_original: str) -> bool:
     """Red de seguridad determinista (sin costo de tokens) contra alucinaciones
     del LLM: verifica que el nombre extraído tenga al menos una palabra
@@ -2522,12 +2686,18 @@ def _extraccion_tiene_base_textual(nombre_extraido: str, mensaje_original: str) 
     prompt ya le pide al LLM no inventar nada cuando no hay alimento/ejercicio
     real, pero esa instrucción no es garantía (validado en pruebas: el mismo
     bug reapareció con mensajes distintos) — esto la respalda con código."""
+    _nombre_norm = _normalizar_nombre(nombre_extraido or "")
     palabras = [
-        p for p in _normalizar_nombre(nombre_extraido or "").split()
+        p for p in _nombre_norm.split()
         if len(p) > 3 and p not in _STOPWORDS_BASE_TEXTUAL
     ]
     if not palabras:
         return True  # nombre muy corto/genérico para verificar — no bloquear
+    # Si TODAS las palabras del nombre son vocabulario nutricional genérico
+    # ("kcal", "etiqueta"...), no es un alimento real sin importar que la
+    # palabra literalmente aparezca en el mensaje.
+    if all(p in _PALABRAS_NO_ALIMENTO_GENERICAS for p in palabras):
+        return False
     msg_norm = _normalizar_nombre(mensaje_original or "")
     return any(p in msg_norm for p in palabras)
 
@@ -2562,9 +2732,16 @@ def _palabras_faltantes_en_extraccion(mensaje: str, alimentos: list[dict]) -> li
     palabras_extraidas = set(
         _normalizar_nombre(" ".join(a.get("nombre", "") for a in alimentos)).split()
     )
+    _PUNTUACION_BORDE = ",.;:!?()¡¿\"'"
     palabras_msg = [
-        p for p in _normalizar_nombre(mensaje or "").split()
-        if len(p) >= 4 and p not in _STOPWORDS_COMPLETITUD and p not in _STOPWORDS_BASE_TEXTUAL
+        p for p in (
+            t.strip(_PUNTUACION_BORDE) for t in _normalizar_nombre(mensaje or "").split()
+        )
+        if len(p) >= 4
+        and p not in _STOPWORDS_COMPLETITUD
+        and p not in _STOPWORDS_BASE_TEXTUAL
+        and p not in _PALABRAS_NO_ALIMENTO_GENERICAS
+        and not any(c.isdigit() for c in p)  # "320ml", "100ml" no son alimentos
     ]
     return [p for p in palabras_msg if p not in palabras_extraidas]
 
