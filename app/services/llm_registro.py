@@ -515,6 +515,10 @@ async def registrar_comida_llm(
                 f"(no un ingrediente ya incluido en los platos de arriba, no un adjetivo, "
                 f"no un verbo o palabra de comando del usuario como 'agrega'/'falta'/'olvidé', "
                 f"no una palabra normal de la frase), agrégalo.\n"
+                f"⚠️ 'Causa' al final de la frase, dirigida a alguien (ej. 'arroz con pollo "
+                f"causa', 'oe causa'), es una muletilla peruana informal (equivale a 'amigo'/"
+                f"'compadre') — NO es el plato Causa. Solo es el plato si aparece como "
+                f"'causa de [ingrediente]' o como el alimento principal descrito.\n"
                 f"⚠️ PROHIBIDO repetir cualquiera de estos alimentos ya registrados: "
                 f"{_nombres_ya_registrados} — si la palabra suelta se refiere a algo "
                 f"que ya está en esa lista, NO lo incluyas de nuevo.\n"
@@ -2865,7 +2869,12 @@ _STOPWORDS_COMPLETITUD = frozenset({
     # Verbos coloquiales de consumo ("acabo de chapar 3 huevos") — sin esto
     # disparaban un reintento de LLM innecesario (el LLM sí responde
     # correctamente "no es alimento", pero es una llamada extra sin sentido).
-    "acabo", "chapar",
+    "acabo", "chapar", "eche", "echarme", "echarse",
+    # "platazo" (aumentativo coloquial de "plato") — mismo problema que
+    # "plato" ya excluido arriba: "ya me eché un platazo de arroz con
+    # pollo" marcaba "platazo" como alimento faltante y el reintento lo
+    # confirmaba como item fantasma separado.
+    "platazo",
     # Modificadores de porción ("medio plato", "un cuarto de") — ya se manejan
     # aparte (factor de escala 0.5/0.25/etc. más abajo); sin excluirlos aquí,
     # "medio" se marcaba como posible alimento faltante y el reintento
@@ -2905,7 +2914,27 @@ def _palabras_faltantes_en_extraccion(mensaje: str, alimentos: list[dict]) -> li
         and p not in _PALABRAS_NO_ALIMENTO_GENERICAS
         and not any(c.isdigit() for c in p)  # "320ml", "100ml" no son alimentos
     ]
-    return [p for p in palabras_msg if _singular(p) not in _extraidas_singular]
+    _candidatas = [p for p in palabras_msg if _singular(p) not in _extraidas_singular]
+    # "Causa" es plato real (causa limeña) PERO también muletilla peruana de
+    # cierre ("arroz con pollo causa" = "..., amigo") — el LLM del reintento
+    # confirma "Causa" como alimento real incluso con instrucción explícita en
+    # contra (probado: su conocimiento del plato pesa más que la aclaración).
+    # Señal determinista confiable: como muletilla, "causa" va SIEMPRE al
+    # final de la frase, nunca seguida de "de"/ingrediente. Si aparece ahí, se
+    # descarta antes de llegar al reintento (no se confía en que el LLM lo
+    # distinga solo).
+    if _candidatas and _candidatas[-1] == "causa":
+        _palabras_msg_full = [
+            w.rstrip(_PUNTUACION_BORDE) for w in _normalizar_nombre(mensaje or "").split()
+        ]
+        if _palabras_msg_full and _palabras_msg_full[-1] == "causa":
+            # Plato real casi siempre lleva artículo justo antes ("una causa",
+            # "la causa") — la muletilla vocativa nunca ("...pollo causa").
+            _idx_causa = len(_palabras_msg_full) - 1
+            _palabra_previa = _palabras_msg_full[_idx_causa - 1] if _idx_causa > 0 else ""
+            if _palabra_previa not in ("un", "una", "el", "la"):
+                _candidatas = _candidatas[:-1]
+    return _candidatas
 
 
 def _cache_key(nombre: str) -> str:
