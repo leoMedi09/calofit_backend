@@ -2846,7 +2846,22 @@ def _extraccion_tiene_base_textual(nombre_extraido: str, mensaje_original: str) 
     if all(p in _PALABRAS_NO_ALIMENTO_GENERICAS for p in palabras):
         return False
     msg_norm = _normalizar_nombre(mensaje_original or "")
-    return any(p in msg_norm for p in palabras)
+    if any(p in msg_norm for p in palabras):
+        return True
+    # Coincidencia difusa (typos pequeños) — encontrado en pruebas reales:
+    # "...pollo con arroz y ENSALDA" (typo, falta una "a") con extracción
+    # correcta "Ensalada" se rechazaba por esta guardia, ya que "ensalada"
+    # no es substring literal de "ensalda" — el LLM corrigió bien el typo y
+    # el guard determinista lo confundía con una alucinación. Mismo enfoque
+    # de similitud (difflib) que ya usa el proyecto para detectar colisiones
+    # de alimentos en _buscar_colision_local().
+    import difflib as _difflib_base
+    palabras_msg = [w for w in msg_norm.split() if len(w) > 3]
+    for p in palabras:
+        for w in palabras_msg:
+            if _difflib_base.SequenceMatcher(None, p, w).ratio() >= 0.8:
+                return True
+    return False
 
 
 # Stopwords para el chequeo de COMPLETITUD (lo opuesto a _extraccion_tiene_base_textual:
@@ -2914,7 +2929,17 @@ def _palabras_faltantes_en_extraccion(mensaje: str, alimentos: list[dict]) -> li
         and p not in _PALABRAS_NO_ALIMENTO_GENERICAS
         and not any(c.isdigit() for c in p)  # "320ml", "100ml" no son alimentos
     ]
-    _candidatas = [p for p in palabras_msg if _singular(p) not in _extraidas_singular]
+    # Palabras pegadas sin espacios ("conarrozyensalada") — encontrado en
+    # pruebas reales: ningún alimento extraído coincide EXACTO con esa palabra
+    # larga, pero "arroz"/"ensalada" SÍ están ya cubiertos como substring
+    # dentro de ella. Sin este chequeo, la palabra completa se marcaba como
+    # candidata, el reintento la interpretaba como "Ensalada" y la duplicaba.
+    def _ya_cubierta_como_substring(p: str) -> bool:
+        return any(len(w) >= 4 and w in p for w in palabras_extraidas)
+    _candidatas = [
+        p for p in palabras_msg
+        if _singular(p) not in _extraidas_singular and not _ya_cubierta_como_substring(p)
+    ]
     # "Causa" es plato real (causa limeña) PERO también muletilla peruana de
     # cierre ("arroz con pollo causa" = "..., amigo") — el LLM del reintento
     # confirma "Causa" como alimento real incluso con instrucción explícita en
