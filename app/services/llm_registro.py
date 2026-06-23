@@ -2862,6 +2862,10 @@ _STOPWORDS_COMPLETITUD = frozenset({
     "agrega", "agregalo", "agregale", "agregar", "anota", "anotalo",
     "registra", "registralo", "incluye", "incluyelo", "guarda", "guardalo",
     "ponme", "apunta", "apuntalo", "registro", "sumale", "suma",
+    # Verbos coloquiales de consumo ("acabo de chapar 3 huevos") — sin esto
+    # disparaban un reintento de LLM innecesario (el LLM sí responde
+    # correctamente "no es alimento", pero es una llamada extra sin sentido).
+    "acabo", "chapar",
     # Modificadores de porción ("medio plato", "un cuarto de") — ya se manejan
     # aparte (factor de escala 0.5/0.25/etc. más abajo); sin excluirlos aquí,
     # "medio" se marcaba como posible alimento faltante y el reintento
@@ -2881,6 +2885,15 @@ def _palabras_faltantes_en_extraccion(mensaje: str, alimentos: list[dict]) -> li
     palabras_extraidas = set(
         _normalizar_nombre(" ".join(a.get("nombre", "") for a in alimentos)).split()
     )
+    # Normalización simple de plural ("huevos"→"huevo", "fritos"→"frito") —
+    # encontrado en pruebas reales: "acabo de chapar 3 HUEVOS FRITOS con pan"
+    # con extracción correcta "Huevo frito" (singular) marcaba "huevos" y
+    # "fritos" como posibles alimentos faltantes (no coincidían como texto
+    # exacto), el reintento los confirmaba como alimento real, y terminaban
+    # duplicados en el registro (4 filas extra de "Huevos" en comida_registros).
+    def _singular(p: str) -> str:
+        return p[:-1] if p.endswith("s") and len(p) > 4 else p
+    _extraidas_singular = {_singular(w) for w in palabras_extraidas}
     _PUNTUACION_BORDE = ",.;:!?()¡¿\"'"
     palabras_msg = [
         p for p in (
@@ -2892,7 +2905,7 @@ def _palabras_faltantes_en_extraccion(mensaje: str, alimentos: list[dict]) -> li
         and p not in _PALABRAS_NO_ALIMENTO_GENERICAS
         and not any(c.isdigit() for c in p)  # "320ml", "100ml" no son alimentos
     ]
-    return [p for p in palabras_msg if p not in palabras_extraidas]
+    return [p for p in palabras_msg if _singular(p) not in _extraidas_singular]
 
 
 def _cache_key(nombre: str) -> str:
