@@ -836,9 +836,25 @@ async def registrar_ejercicio_llm(
         peso_ej  = datos.get("peso_kg")
         met      = float(datos.get("met", 5.0) or 5.0)
         intensidad = datos.get("intensidad") or ("Alta" if met >= 8 else ("Media" if met >= 5 else "Baja"))
+        # El LLM a veces devuelve duracion_min=0 pese a haber series/reps reales
+        # (encontrado en pruebas: "press banca inclinado 3 por 5 repeticiones"
+        # → duracion_min=0, kcal_quemadas=0 registrado, aunque sí se hizo el
+        # ejercicio). Estimación determinista de respaldo: ~3s por repetición +
+        # 60s de descanso entre series — mismo criterio que ya usa
+        # rutina_service.py para estimar duración de una rutina.
+        if duracion <= 0 and series and reps:
+            duracion = round((int(series) * int(reps) * 3 + int(series) * 60) / 60, 1)
         kcal_formula = round(met * peso_kg * 3.5 / 200 * duracion, 1)
         kcal_llm     = round(float(datos.get("kcal_quemadas", 0) or 0), 1)
-        kcal = kcal_formula if kcal_llm > kcal_formula * 2.5 or kcal_llm < kcal_formula * 0.3 else kcal_llm
+        # Si kcal_formula es 0 (duracion real 0, sin series/reps para estimar),
+        # comparar kcal_llm contra ella siempre "parece" desproporcionado
+        # (cualquier valor positivo es ">2.5×0") y el guard lo sobrescribía a 0
+        # incluso cuando kcal_llm era razonable. En ese caso degenerado, confiar
+        # en kcal_llm si es positivo, no forzar 0.
+        if kcal_formula <= 0:
+            kcal = kcal_llm if kcal_llm > 0 else 0.0
+        else:
+            kcal = kcal_formula if kcal_llm > kcal_formula * 2.5 or kcal_llm < kcal_formula * 0.3 else kcal_llm
 
         try:
             db.execute(text("""
