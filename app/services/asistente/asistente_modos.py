@@ -345,58 +345,30 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
     if any(_m.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO):
         return REGISTRAR_NUTRICION
 
-    # ── Pre-check 1b: petición de recomendación de comida ───────────────────────
-    # "qué puedo comer", "dime qué almorzar", "dame opciones" → RECOMENDAR_NUTRICION
-    # DEBE ir ANTES del pre-check modal para no ser capturado por "puedo"
+    # ── Pre-check 1b: cálculo nutricional puntual ────────────────────────────────
+    # "¿cuánta proteína necesito?" es un número, no un plato — debe ir a OTRO
+    # (donde respuesta_chat_llm puede responder con un cálculo real), nunca a
+    # RECOMENDAR_NUTRICION. Se mantiene como pre-check porque SIEMPRE devuelve
+    # el camino seguro (OTRO sigue razonando con el LLM, no fuerza una tarjeta).
     import unicodedata as _ud
     _mn = "".join(c for c in _ud.normalize("NFD", _m) if _ud.category(c) != "Mn")
-    _PEDIR_REC_NUT = (
-        "que puedo comer", "que puedo almorzar", "que puedo cenar",
-        "que puedo desayunar", "que puedo merendar",
-        "dime que comer", "dime que almorzar", "dime que cenar",
-        "que me recomiendas comer", "que me recomiendas almorzar",
-        "que comer ahora", "que almorzar hoy", "que cenar hoy",
-        "opciones de comida", "opciones para almorzar", "opciones para cenar",
-        "que puedo comer en este momento",
-        # Señales directas de hambre/snack (antes dependían del LLM clasificador)
-        "tengo hambre", "tengo antojo",
-        "una merienda", "un snack",
-        "ideas para comer", "ideas para el desayuno", "ideas para el almuerzo",
-        "ideas para la cena", "ideas para la merienda",
-        "que deberia comer", "que deberia almorzar", "que deberia cenar",
-        "que deberia desayunar",
-    )
-    # Solo bloquean recomendación de COMIDA los keywords que indican contexto de EJERCICIO puro.
-    # "entren" y "ejercicio" (singular) se eliminan: "qué puedo comer después de entrenar"
-    # es RECOMENDAR_NUTRICION aunque mencione entrenar.
-    _EJ_KW = ("gym", "rutina", "ejercicios")
-    # Guard: si el mensaje contiene verbo de consumo pasado ("comí un snack", "cené pollo")
-    # NO es recomendación aunque contenga "un snack" u otras palabras de _PEDIR_REC_NUT.
-    _PASADO_BLOQUEO_REC = ("comi", "desayune", "almorce", "cene", "bebi", "me comi", "me tome", "me bebi", "ya comi", "ya desayune")
-    _tiene_pasado_bloqueo = any(
-        _mn.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", _mn)
-        for v in _PASADO_BLOQUEO_REC
-    )
-    # Consulta de CÁLCULO nutricional ("¿cuánta proteína necesito?") es distinta
-    # de pedir un plato ("qué puedo comer") — antes ambas caían en
-    # RECOMENDAR_NUTRICION y el usuario recibía un plato en vez de un número.
-    # Va a OTRO, donde respuesta_chat_llm puede responder con un cálculo real.
     _RX_CALCULO_NUTRICIONAL = re.compile(
         r"\bcuant[oa]s?\b.{0,15}\b(proteina|proteína|calorias|calorías|"
         r"carbohidratos|grasas|macros)\b"
     )
     if _RX_CALCULO_NUTRICIONAL.search(_mn):
         return OTRO
-    # Corrección/adición a un registro reciente ("agrégalo en el registro",
-    # "agrega la palta", "olvidé poner el aceite", "súmale eso") — antes esto
-    # caía en chat libre (OTRO) y el LLM inventaba una confirmación de que ya
-    # lo había agregado, sin tocar la base de datos (encontrado en pruebas
-    # reales: el balance mostrado nunca cambiaba). Debe ir a REGISTRAR_NUTRICION
-    # para que se persista de verdad.
-    if RX_CORREGIR_REGISTRO.search(_mn):
-        return REGISTRAR_NUTRICION
-    if any(p in _mn for p in _PEDIR_REC_NUT) and not any(e in _mn for e in _EJ_KW) and not _tiene_pasado_bloqueo:
-        return RECOMENDAR_NUTRICION
+    # NOTA: "qué me recomiendas comer" y "olvidé/agrégalo al registro" se
+    # clasificaban antes con listas de frases hardcodeadas aquí mismo. Se
+    # quitaron (2026-06-23): el LLM clasificador (R7/R8 en ia_service.py) ya
+    # entiende ambos patrones correctamente sin necesitar coincidencia literal
+    # — y la lista literal tenía falsos positivos sin arreglo posible por
+    # parche (ej. "qué me recomiendas comer, chancho a esta hora" forzaba
+    # recomendar_nutricion sin dejar que el LLM viera que había un alimento
+    # específico nombrado; "olvidé traer mi botella" forzaba registrar_nutricion
+    # por la sola palabra "olvidé", sin relación con comida). Ver auditoría en
+    # la conversación del diario de ingeniería — el mismo patrón que ya
+    # documenta el bloque de "CÓDIGO ELIMINADO" más abajo en este archivo.
     # Petición de recomendación de ejercicio
     _PEDIR_REC_EJ = (
         "que ejercicios puedo", "que ejercicios hago", "dime que ejercicios",
@@ -412,12 +384,16 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
         "es bueno ", "es malo ", "es buena ", "es mala ",
         "seria bueno ", "es recomendable ", "es posible ", "conviene ",
     )
-    # Excepción: "qué puedo hacer (hoy/para X)" es una pregunta ABIERTA pidiendo
-    # una recomendación (ejercicio o comida) — no es una pregunta de permiso
-    # como "¿puedo correr?" o "¿puedo comer X?". Sin esta excepción, cualquier
-    # petición de recomendación que use "qué puedo hacer" cae aquí y se pierde
-    # el formato/contexto específico de RECOMENDAR_EJERCICIO o RECOMENDAR_NUTRICION.
-    _es_pregunta_abierta_que_hacer = bool(re.search(r"\bque\s+puedo\s+hacer\b", _mn))
+    # Excepción: "qué puedo hacer/comer/almorzar/..." (hoy/ahora/para X) es una
+    # pregunta ABIERTA pidiendo una recomendación (ejercicio o comida) — no es
+    # una pregunta de permiso sobre un alimento/acción específica ya nombrada
+    # ("¿puedo correr?", "¿puedo comer chancho?"). Sin esta excepción, cualquier
+    # petición abierta de ideas que use "qué puedo + verbo" cae a OTRO y pierde
+    # la tarjeta/motor de recomendación (KNN para comida, plan para ejercicio)
+    # — el LLM improvisa un solo alimento al azar en vez de usar el motor real.
+    _es_pregunta_abierta_que_hacer = bool(re.search(
+        r"\bque\s+puedo\s+(hacer|comer|almorzar|cenar|desayunar|merendar)\b", _mn
+    ))
     if not _es_pregunta_abierta_que_hacer and any(
         _mn.startswith(p) or f" {p}" in _mn for p in _MODALES
     ):
