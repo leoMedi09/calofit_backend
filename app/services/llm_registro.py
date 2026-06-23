@@ -498,22 +498,6 @@ async def registrar_comida_llm(
     # Validar que hay alimentos con macros
     _items = datos.get("alimentos", [])
 
-    # Consistencia con lo ya mostrado al usuario — encontrado en pruebas
-    # reales: "¿es bueno comer chisitos?" (chat) respondió "casi nada de
-    # grasa", pero registrar "comí chisitos" (extracción separada, sin
-    # memoria compartida) dio grasa_g=20 — dos llamadas independientes al
-    # LLM sin ninguna fuente de verdad común. get_cached_macros()/
-    # cache_macros() ya existían (escritos desde recomendaciones y consultas
-    # de kcal) pero NUNCA se leían en el registro — el caché era de solo
-    # escritura. Si ya se mostraron macros para este alimento en este
-    # proceso (últimas 2h), reusarlos en vez de la extracción fresca.
-    for _it_cache in _items:
-        _cached = get_cached_macros(_it_cache.get("nombre", ""))
-        if _cached:
-            for _campo_c in ("kcal", "prot_g", "carb_g", "grasa_g"):
-                if _cached.get(_campo_c) is not None:
-                    _it_cache[_campo_c] = _cached[_campo_c]
-
     # Tope por ÍTEM individual — encontrado en pruebas reales: al combinar
     # "Olluco con Chancho" en un solo ítem (fix de combo, ver Regla 9), el LLM
     # estimó 1200 kcal/400g (300 kcal/100g) de forma estable (2/2 veces a
@@ -639,19 +623,51 @@ async def registrar_comida_llm(
     if _match_gramos_explicitos and len(_items) == 1 and not _factor_porcion:
         _gramos_pedidos = float(_match_gramos_explicitos.group(1).replace(',', '.'))
         _it0 = _items[0]
-        _porcion_actual = float(_it0.get("porcion_g", 0) or 0)
-        if _porcion_actual > 0 and abs(_porcion_actual - _gramos_pedidos) > _porcion_actual * 0.15:
+        # Si el LLM omitió "porcion_g" (None), asumir 100g — es la base
+        # implícita que el propio prompt usa cuando no se especifica porción
+        # (mismo criterio que el resto del código, ej. la consulta de kcal:
+        # "primer.get('porcion_g', 100)"). Sin esto, "porcion_g" ausente
+        # daba _porcion_actual=0 y este fix nunca se aplicaba.
+        _porcion_actual = float(_it0.get("porcion_g") or 100)
+        if abs(_porcion_actual - _gramos_pedidos) > _porcion_actual * 0.15:
             _factor_gramos = _gramos_pedidos / _porcion_actual
             logger.warning(
                 "[Registro] '%sg' pedido pero LLM devolvio porcion_g=%s — re-escalando",
                 _gramos_pedidos, _porcion_actual,
             )
+            _it0["porcion_g"] = _porcion_actual  # asegurar valor base antes de escalar
             for _campo in ("porcion_g", "kcal", "prot_g", "carb_g", "grasa_g"):
                 if _it0.get(_campo) is not None:
                     _it0[_campo] = round(float(_it0[_campo]) * _factor_gramos, 1)
+            # Marca: esta porción es un pedido puntual del usuario ("50g"), no
+            # la referencia estándar del alimento — no debe sobreescribir el
+            # caché de consistencia (ver más abajo) con una porción atípica,
+            # o una mención genérica posterior ("comí chisitos", sin gramaje)
+            # heredaría por error esos 50g en vez de la referencia de 100g.
+            _it0["_porcion_explicita_usuario"] = True
             for _campo_total in ("prot_total", "carb_total", "grasa_total", "kcal_total"):
                 if datos.get(_campo_total) is not None:
                     datos[_campo_total] = round(float(datos[_campo_total]) * _factor_gramos, 1)
+
+    # Consistencia con lo ya mostrado al usuario — encontrado en pruebas
+    # reales: "¿cuántas kcal tiene el chisito?" (chat) respondió valores
+    # distintos a "comí chisitos" (extracción separada, sin memoria
+    # compartida) — dos llamadas independientes al LLM sin fuente de verdad
+    # común. get_cached_macros()/cache_macros() ya existían (escritos desde
+    # recomendaciones y consultas de kcal) pero NUNCA se leían en el
+    # registro. Va DESPUÉS del fix de gramaje explícito de arriba para que
+    # "porcion_g" ya refleje lo que el usuario pidió (ej. 50g), no lo que el
+    # LLM omitió — sin este orden, "comí una bolsa de 50g de chisitos" tras
+    # preguntar por el chisito (100g) aplicaba 408 kcal de 100g sin escalar.
+    for _it_cache in _items:
+        _cached = get_cached_macros(_it_cache.get("nombre", ""))
+        if _cached and _cached.get("porcion_g"):
+            _porcion_cacheada = float(_cached["porcion_g"])
+            _porcion_pedida = float(_it_cache.get("porcion_g") or _porcion_cacheada)
+            _factor_escala = _porcion_pedida / _porcion_cacheada if _porcion_cacheada > 0 else 1.0
+            for _campo_c in ("kcal", "prot_g", "carb_g", "grasa_g"):
+                if _cached.get(_campo_c) is not None:
+                    _it_cache[_campo_c] = round(float(_cached[_campo_c]) * _factor_escala, 1)
 
     _prot_items  = sum(float(a.get("prot_g",  0) or 0) for a in _items)
     _carb_items  = sum(float(a.get("carb_g",  0) or 0) for a in _items)
@@ -794,10 +810,15 @@ async def registrar_comida_llm(
         # Guardar para consistencia: si luego el usuario pregunta en el chat
         # "¿cuántas kcal tiene X?" sobre este mismo alimento, debe ver los
         # mismos números que se acaban de registrar, no una estimación nueva.
-        cache_macros(nombre_item, {
-            "nombre": nombre_item, "kcal": k_item,
-            "prot_g": p_item, "carb_g": c_item, "grasa_g": g_item,
-        })
+        # Excepto si la porción vino de un pedido puntual del usuario ("50g")
+        # — no debe convertirse en la referencia "estándar" para menciones
+        # genéricas futuras de este mismo alimento.
+        if not item.get("_porcion_explicita_usuario"):
+            cache_macros(nombre_item, {
+                "nombre": nombre_item, "kcal": k_item,
+                "prot_g": p_item, "carb_g": c_item, "grasa_g": g_item,
+                "porcion_g": float(item.get("porcion_g", 100) or 100) / max(cantidad_item, 1),
+            })
         for _ in range(cantidad_item):
             registro = ComidaRegistro(
                 client_id=perfil.id,
@@ -2613,7 +2634,8 @@ async def respuesta_chat_llm(
                 if item.get("nombre") and k_i > 0:
                     cache_macros(item["nombre"], {
                         "nombre": item["nombre"], "kcal": k_i,
-                        "prot_g": p_i, "carb_g": c_i, "grasa_g": g_i
+                        "prot_g": p_i, "carb_g": c_i, "grasa_g": g_i,
+                        "porcion_g": float(item.get("porcion_g", 100) or 100),
                     })
             # Construir respuesta con los valores exactos
             primer = d_macros["alimentos"][0]
