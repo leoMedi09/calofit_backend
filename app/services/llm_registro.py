@@ -856,6 +856,13 @@ async def registrar_ejercicio_llm(
         else:
             kcal = kcal_formula if kcal_llm > kcal_formula * 2.5 or kcal_llm < kcal_formula * 0.3 else kcal_llm
 
+        # Escribir la duración corregida de vuelta en "datos" — el dict de
+        # retorno más abajo vuelve a leer duracion_min desde ejercicios_raw
+        # (sum(e.get("duracion_min",0) for e in ejercicios_raw)) y sin esto
+        # seguía mostrando 0min en la tarjeta del chat aunque la base de datos
+        # ya tenía el valor correcto (encontrado comparando ambos).
+        datos["duracion_min"] = duracion
+
         try:
             db.execute(text("""
                 INSERT INTO workout_logs
