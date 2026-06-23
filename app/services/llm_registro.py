@@ -1216,9 +1216,14 @@ async def respuesta_recomendacion_llm(
     # de horario ambiguos (se pueden decir tanto a las 8pm como a la 1am) y se
     # resuelven más abajo consultando la hora real, en vez de forzar siempre
     # CENA/DESAYUNO sin importar qué hora es de verdad.
+    # Incluye conjugaciones de primera persona ("ceno", "meriendo") además del
+    # infinitivo/sustantivo — encontrado en pruebas reales: "qué ceno" caía al
+    # horario del reloj (a las 16h daba rango de MERIENDA, 80-300 kcal) porque
+    # "ceno" no es substring de "cena"/"cenar", ignorando lo que el usuario
+    # pidió explícitamente.
     _MOMENTO_KEYWORDS_RECO = {
-        "CENA":      ["cenar", "cena"],
-        "MERIENDA":  ["merienda", "snack", "media tarde", "media mañana", "antojo", "tarde"],
+        "CENA":      ["cenar", "cena", "ceno", "cenare", "cenaré"],
+        "MERIENDA":  ["merienda", "meriendo", "merendar", "snack", "media tarde", "media mañana", "antojo", "tarde"],
         "ALMUERZO":  ["almorzar", "almuerzo", "mediodía", "mediodia"],
         "DESAYUNO":  ["desayunar", "desayuno", "mañana"],
     }
