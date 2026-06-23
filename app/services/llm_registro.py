@@ -1537,6 +1537,50 @@ async def respuesta_recomendacion_llm(
                 f"los otros 2 libres."
             )
 
+    # 3.2. Detectar NEGACIÓN/exclusión puntual en el mensaje ("no quiero comer
+    # carne hoy") — encontrado en pruebas reales: el motor KNN seguía
+    # recomendando "Arroz con Pollo" pese a la negación explícita, porque no
+    # existía ningún mecanismo que la detectara (la negación no es una
+    # condición médica guardada en el perfil, es una preferencia puntual del
+    # mensaje). Reutiliza los mismos tokens por categoría que ya existen para
+    # Vegano/Vegetariano/Lactosa/Celíaco/Diabetes — no se inventa una lista
+    # nueva de alimentos, solo se reusa la ya construida.
+    from app.services.recomendador_platos import _CONDICION_TOKENS as _COND_TOKENS_NEG
+    _NEG_CATEGORIA_A_TOKENS = {
+        "carne": _COND_TOKENS_NEG["Vegetariano"],
+        "carnes": _COND_TOKENS_NEG["Vegetariano"],
+        "pescado": {"pescado", "salmon", "salmón", "atun", "atún", "trucha",
+                     "caballa", "corvina", "cachema", "lisa", "mero", "tollo", "anchoveta"},
+        "mariscos": {"mariscos", "camaron", "camarón", "langostino", "pulpo", "calamar"},
+        "lacteos": _COND_TOKENS_NEG["Intolerancia a la Lactosa"],
+        "lácteos": _COND_TOKENS_NEG["Intolerancia a la Lactosa"],
+        "gluten": _COND_TOKENS_NEG["Celíaco"],
+        "dulce": _COND_TOKENS_NEG["Diabetes"],
+        "azucar": _COND_TOKENS_NEG["Diabetes"],
+        "azúcar": _COND_TOKENS_NEG["Diabetes"],
+    }
+    # Captura de 1 sola palabra (no 2 como en pref_ingrediente_reco) — encontrado
+    # en pruebas reales: "no quiero comer carne HOY, que almuerzo" capturaba
+    # "carne hoy" (2 palabras) porque "hoy" quedaba atrapado en el grupo
+    # opcional antes de que el lookahead lo detectara como filler. Las
+    # categorías negadas (carne/pescado/lácteos/gluten/dulce) son casi siempre
+    # 1 palabra, así que se prioriza fiabilidad sobre cobertura de frases largas.
+    _neg_match = _re_reco.search(
+        r'\bno\s+(?:quiero|puedo|deseo)\s+(?:comer\s+)?([a-záéíóúüñ]+)'
+        r'(?=\s+(?:hoy|ahora|por\s+favor)\b|[.,?]|$)',
+        _msg_low_reco,
+    )
+    exclusion_reco = ""
+    _tokens_exclusion_msg: set[str] = set()
+    if _neg_match:
+        _excl_detectado = _neg_match.group(1).strip().rstrip('.,?')
+        if len(_excl_detectado) > 2:
+            _tokens_exclusion_msg = _NEG_CATEGORIA_A_TOKENS.get(_excl_detectado, {_excl_detectado})
+            exclusion_reco = (
+                f"⚠️ El usuario dijo explícitamente que NO quiere comer: **{_excl_detectado}**. "
+                f"Ninguno de los 3 platos debe contener esto ni sus variantes/derivados obvios."
+            )
+
     # 3.5. Detectar objetivo de PROTEÍNA en el mensaje
     _objetivo_proteina_match = _re_reco.search(
         r'prote[ií]na|prote[ií]co|masa muscular|ganar m[uú]sculo|aumentar m[uú]sculo|volumen muscular',
@@ -1695,6 +1739,7 @@ async def respuesta_recomendacion_llm(
         + (f"{_masa_muscular_txt}\n\n" if _masa_muscular_txt else "")
         + (f"{objetivo_proteina_reco}\n\n" if objetivo_proteina_reco else "")
         + (f"PREFERENCIA: {pref_ingrediente_reco}\n\n" if pref_ingrediente_reco else "")
+        + (f"EXCLUSIÓN: {exclusion_reco}\n\n" if exclusion_reco else "")
         + _ya_sugeridos_txt
         + _knn_candidatos_txt
         + _condiciones_medicas_txt  # ← justo antes del formato: máxima prioridad LLM
@@ -1738,7 +1783,7 @@ async def respuesta_recomendacion_llm(
     for _cond_msg in _detectar_dieta_en_mensaje(mensaje):
         if _cond_msg not in _condiciones_dieta_check:
             _condiciones_dieta_check.append(_cond_msg)
-    _tokens_dieta_check = _tokens_prohibidos(_condiciones_dieta_check)
+    _tokens_dieta_check = _tokens_prohibidos(_condiciones_dieta_check) | _tokens_exclusion_msg
 
     # Calificadores que vuelven SEGURO un alimento normalmente prohibido
     # (ej. "queso deslactosado" no debe disparar el filtro de Lactosa).
