@@ -369,14 +369,12 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
     # por la sola palabra "olvidé", sin relación con comida). Ver auditoría en
     # la conversación del diario de ingeniería — el mismo patrón que ya
     # documenta el bloque de "CÓDIGO ELIMINADO" más abajo en este archivo.
-    # Petición de recomendación de ejercicio
-    _PEDIR_REC_EJ = (
-        "que ejercicios puedo", "que ejercicios hago", "dime que ejercicios",
-        "ejercicios segun mi plan", "ejercicios según mi plan",
-        "que ejercicios hacer", "ejercicios para hoy",
-    )
-    if any(p in _mn for p in _PEDIR_REC_EJ):
-        return RECOMENDAR_EJERCICIO
+    # NOTA: "qué ejercicios puedo/dime qué ejercicios/ejercicios para hoy" se
+    # clasificaban con una lista de frases hardcodeadas aquí mismo. Se quitó
+    # (2026-06-23, mismo criterio que _PEDIR_REC_NUT): en mensajes compuestos
+    # como "ejercicios para hoy, pero antes dime si puedo comer plátano" el
+    # hardcode forzaba recomendar_ejercicio e ignoraba la pregunta de comida
+    # real; el LLM solo clasifica bien ambos casos (el simple y el compuesto).
 
     # ── Pre-check 2: modal de permiso = SIEMPRE pregunta, nunca registro ─────────
     _MODALES = (
@@ -384,15 +382,16 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
         "es bueno ", "es malo ", "es buena ", "es mala ",
         "seria bueno ", "es recomendable ", "es posible ", "conviene ",
     )
-    # Excepción: "qué puedo hacer/comer/almorzar/..." (hoy/ahora/para X) es una
-    # pregunta ABIERTA pidiendo una recomendación (ejercicio o comida) — no es
-    # una pregunta de permiso sobre un alimento/acción específica ya nombrada
-    # ("¿puedo correr?", "¿puedo comer chancho?"). Sin esta excepción, cualquier
-    # petición abierta de ideas que use "qué puedo + verbo" cae a OTRO y pierde
-    # la tarjeta/motor de recomendación (KNN para comida, plan para ejercicio)
-    # — el LLM improvisa un solo alimento al azar en vez de usar el motor real.
+    # Excepción: "qué (ejercicios/comida) puedo hacer/comer/almorzar/..." es
+    # una pregunta ABIERTA pidiendo una recomendación (ejercicio o comida) —
+    # no es una pregunta de permiso sobre un alimento/acción específica ya
+    # nombrada ("¿puedo correr?", "¿puedo comer chancho?"). El "\w+\s+){0,2}"
+    # permite un sustantivo opcional entre "qué" y "puedo" (ej. "qué
+    # EJERCICIOS puedo hacer") — encontrado en pruebas reales: sin esto,
+    # "qué ejercicios puedo hacer hoy" caía a OTRO en vez de
+    # RECOMENDAR_EJERCICIO porque la regex exigía "qué" y "puedo" adyacentes.
     _es_pregunta_abierta_que_hacer = bool(re.search(
-        r"\bque\s+puedo\s+(hacer|comer|almorzar|cenar|desayunar|merendar)\b", _mn
+        r"\bque\s+(?:\w+\s+){0,2}puedo\s+(hacer|comer|almorzar|cenar|desayunar|merendar)\b", _mn
     ))
     if not _es_pregunta_abierta_que_hacer and any(
         _mn.startswith(p) or f" {p}" in _mn for p in _MODALES
@@ -423,48 +422,22 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
     if _tiene_consumo and "?" not in _m:
         return REGISTRAR_NUTRICION
 
-    # ── Pre-check 4: verbos de ejercicio pasado inequívocos ──────────────────────
-    # Usamos límites de palabra (\b) y el texto normalizado _mn para evitar coincidencias parciales
-    _EJ_CLARO_NORM = (
-        "entrene", "entrenei", "corri", "camine", "nade", "fui al gym", "fui al gimnasio",
-        "hice press", "hice sentadilla", "hice curl", "hice dominada", "hice peso muerto",
-        "hice remo", "hice jalon", "hice fondos", "hice cardio", "hice pesas", "hice ejercicio",
-        "hice flexiones", "hice burpees", "hice abdominales", "termine de entrenar",
-        "acabo de entrenar", "acabo de hacer ejercicio", "tire press",
-        "sali a correr", "salí a correr", "sali a trotar", "salí a trotar",
-        "sali a caminar", "salí a caminar", "sali a entrenar", "salí a entrenar",
-        "correr durante", "trotar durante", "caminar durante",
-    )
-    _tiene_ej = any(
-        _mn.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", _mn)
-        for v in _EJ_CLARO_NORM
-    )
-    # Guard: si el mensaje tiene intención de COMIDA explícita, el ejercicio es mención
-    # incidental ("ya entrené en la mañana, necesito almorzar") — no registrar ejercicio.
-    _COMIDA_PRIORITARIA_NUT = (
-        "almorzar", "desayunar", "cenar", "merendar",
-        "que como", "dame opciones", "dame ideas",
-        "que recomiendas", "que me recomiendas",
-        "necesito comer", "quiero comer",
-        "para el almuerzo", "para la cena", "para el desayuno",
-    )
-    _comida_es_prioritaria = any(p in _mn for p in _COMIDA_PRIORITARIA_NUT)
-    if _tiene_ej and "?" not in _m and not _comida_es_prioritaria:
-        return REGISTRAR_EJERCICIO
-
-    # ── Pre-check 4b: patrón de volumen de ejercicio SIN verbo ───────────────────
-    # "sentadillas 4x12 con 80kg", "press banca 3*10 70kg", "prensa 4×15 100kg"
-    # El usuario reporta series×reps@peso sin usar "hice" explícitamente.
-    import re as _re_vol
-    _NOMBRES_EJ = (
-        "sentadill", "press", "curl", "remo", "jalon", "jalón", "fondos",
-        "prensa", "dominad", "peso muerto", "extensi", "elevaci", "hip thrust",
-        "burpee", "plancha", "abdominal",
-    )
-    _tiene_nombre_ej = any(n in _mn for n in _NOMBRES_EJ)
-    _tiene_volumen   = bool(_re_vol.search(r'\d+\s*[x\*×]\s*\d+', _mn))
-    if _tiene_nombre_ej and _tiene_volumen and "?" not in _m:
-        return REGISTRAR_EJERCICIO
+    # NOTA: "hice press/sentadilla/...", "terminé de entrenar", y el patrón
+    # "sentadillas 4x12 con 80kg" sin verbo se clasificaban con dos listas de
+    # frases hardcodeadas aquí mismo (pre-checks 4 y 4b). Se quitaron
+    # (2026-06-23, mismo criterio que el resto de esta auditoría):
+    # - "terminé de entrenar y tengo mucha hambre, qué ceno" forzaba
+    #   registrar_ejercicio (vía "termine de entrenar") e ignoraba la petición
+    #   real de cena, fallando con "no identifiqué ningún ejercicio" — el
+    #   guard de comida-prioritaria existente solo cubría el infinitivo
+    #   ("cenar"), no la forma conjugada ("ceno"), y nunca lo cubrirá del
+    #   todo por lista — siempre hay una conjugación nueva.
+    # - "leí que sentadillas 4x12 con 80kg es lo que hacen los profesionales"
+    #   o "mi entrenador me dijo que haga press banca 3x10" forzaban
+    #   registrar_ejercicio aunque el usuario no reportaba haber HECHO nada —
+    #   esto creaba un registro fantasma con kcal quemadas falsas en la BD.
+    # El LLM solo clasifica bien tanto los casos simples ("hice sentadillas
+    # 3x10", "sentadillas 4x12 con 80kg") como los compuestos/adversariales.
 
     # ── LLM 70B: clasificación definitiva para todo lo demás ─────────────────────
     try:

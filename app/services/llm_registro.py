@@ -1516,7 +1516,14 @@ async def respuesta_recomendacion_llm(
     if _ing_match:
         _ing_detectado = _ing_match.group(1).strip().rstrip('.,?')
         _PALABRAS_IGNORAR = {"hoy", "comer", "ti", "mi", "algo", "uno", "plato", "poco"}
-        if _ing_detectado not in _PALABRAS_IGNORAR and len(_ing_detectado) > 2:
+        # Encontrado en pruebas reales: "qué como ... si tengo dolor DE rodilla"
+        # capturaba "rodilla" como ingrediente pedido (el patrón "de + palabra"
+        # no distingue comida de cuerpo/lesión) y lo inyectaba literalmente en
+        # los nombres de plato ("Lomo Saltado con Rodilla"). _TEMA_EJERCICIO_KW
+        # ya lista body parts/lesión — ninguna de esas palabras es un ingrediente.
+        _palabras_ing = set(_ing_detectado.split())
+        _es_no_comida = bool(_palabras_ing & set(_TEMA_EJERCICIO_KW))
+        if _ing_detectado not in _PALABRAS_IGNORAR and not _es_no_comida and len(_ing_detectado) > 2:
             pref_ingrediente_reco = (
                 f"⚠️ El usuario pidió ESPECÍFICAMENTE algo con: **{_ing_detectado}**. "
                 f"Esto tiene prioridad sobre la variedad: los 3 platos DEBEN incluir "
