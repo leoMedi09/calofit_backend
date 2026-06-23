@@ -578,7 +578,7 @@ class AsistenteService:
         # ── REGISTRO EJERCICIO (LLM directo) ──────────────────────────────────
         if modo_funcion == REGISTRAR_EJERCICIO:
             from app.services.llm_registro import registrar_ejercicio_llm
-            _ej = await registrar_ejercicio_llm(mensaje, perfil, db, self.ia)
+            _ej = await registrar_ejercicio_llm(mensaje, perfil, db, self.ia, historial=historial)
             _bal_ej = _ej.get("balance_actualizado", {})
             _hoy_e = get_peru_date()
             _p_e = db.query(ProgresoCalorias).filter(

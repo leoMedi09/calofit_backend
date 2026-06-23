@@ -811,6 +811,7 @@ async def registrar_ejercicio_llm(
     perfil,
     db: Session,
     ia_engine,
+    historial: list = None,
 ) -> dict:
     """Registra UNO O VARIOS ejercicios del mensaje con kcal por LLM."""
     peso_kg = float(getattr(perfil, "weight", 70) or 70)
@@ -944,6 +945,31 @@ async def registrar_ejercicio_llm(
         msg = f"✅ Registré {len(ejercicios_guardados)} ejercicios ({nombres}) — {round(kcal_total)} kcal totales."
         nombre_pill = nombres
         detalle_pill = f"{len(ejercicios_guardados)} ejercicios"
+
+    # Aviso (no bloqueo) si el ejercicio registrado coincide con una lesión
+    # activa mencionada antes en la conversación — encontrado en pruebas
+    # reales: "me duele la rodilla" → el asistente recomienda cuidado →
+    # "hice sentadillas 3x10" se registraba sin ningún aviso, ignorando lo
+    # que el usuario mismo dijo un turno antes. No se bloquea el registro
+    # (el ejercicio sí se hizo, hay que reflejarlo), solo se avisa.
+    try:
+        from app.services.rutina_service import _LESIONES_SUSTITUCION, _detectar_lesiones, filtrar_lesiones_activas
+        _texto_hist_ej_warn = " ".join(str(h.get("content", "")) for h in (historial or []))
+        _lesiones_cand_warn = _detectar_lesiones(
+            list(getattr(perfil, "medical_conditions", None) or []) + [_texto_hist_ej_warn]
+        )
+        _lesiones_activas_warn = filtrar_lesiones_activas(_lesiones_cand_warn, historial, mensaje)
+        _nombres_normalizados = _normalizar_nombre(" ".join(e["nombre"] for e in ejercicios_guardados))
+        for _lesion_w in _lesiones_activas_warn:
+            _riesgosos_w = {r for r in _LESIONES_SUSTITUCION[_lesion_w]["sustituir"] if r != "default"}
+            if any(r in _nombres_normalizados for r in _riesgosos_w):
+                msg += (
+                    f" ⚠️ Mencionaste antes molestia en {_lesion_w} — si sentiste dolor "
+                    f"al hacerlo, considera una alternativa de bajo impacto la próxima vez."
+                )
+                break
+    except Exception as _e_warn_ej:
+        logger.warning("[Registro Ejercicio] Aviso de lesion fallo (no crítico): %s", _e_warn_ej)
 
     return {
         "success": True,
