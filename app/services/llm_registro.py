@@ -838,12 +838,15 @@ async def registrar_ejercicio_llm(
         intensidad = datos.get("intensidad") or ("Alta" if met >= 8 else ("Media" if met >= 5 else "Baja"))
         # El LLM a veces devuelve duracion_min=0 pese a haber series/reps reales
         # (encontrado en pruebas: "press banca inclinado 3 por 5 repeticiones"
-        # → duracion_min=0, kcal_quemadas=0 registrado, aunque sí se hizo el
-        # ejercicio). Estimación determinista de respaldo: ~3s por repetición +
-        # 60s de descanso entre series — mismo criterio que ya usa
-        # rutina_service.py para estimar duración de una rutina.
-        if duracion <= 0 and series and reps:
-            duracion = round((int(series) * int(reps) * 3 + int(series) * 60) / 60, 1)
+        # → duracion_min=0). Estimación determinista de respaldo: ~5 min por
+        # serie (descanso+setup domina sobre el tiempo de la repetición misma)
+        # — calibrado para coincidir con la referencia que el propio prompt ya
+        # usa más abajo ("1 ejercicio 3×10 ≈ 15 min" → 5 min/serie), no con un
+        # cálculo de segundos por repetición que subestimaba mucho (daba ~3.8
+        # min para 3×5 cuando el LLM, al estimar directo, da ~15 min — la
+        # inconsistencia entre ambos era visible para el usuario).
+        if duracion <= 0 and series:
+            duracion = round(int(series) * 5, 1)
         kcal_formula = round(met * peso_kg * 3.5 / 200 * duracion, 1)
         kcal_llm     = round(float(datos.get("kcal_quemadas", 0) or 0), 1)
         # Si kcal_formula es 0 (duracion real 0, sin series/reps para estimar),
