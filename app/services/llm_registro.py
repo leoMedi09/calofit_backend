@@ -149,6 +149,10 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
      "arroz con pollo/pato/pavo/res/chancho/mariscos", "papa con...", "tallarines con...",
      "puré con...", "menestra con..."
    → genera UN ítem único con todos sus componentes incluidos en sus macros.
+   · OLLUCO (también escrito "oyuco"/"oluco") CON cualquier carne (chancho, charqui,
+     carne seca) es UN guiso tradicional — SIEMPRE UN solo ítem "Olluco con [carne]"
+     con TODA la carne ya incluida en sus macros. NUNCA generes "Olluco" y "Chancho"
+     como dos ítems separados — la carne NO es un alimento aparte en este plato.
    ⚠️ Si "X" y "Y" son DOS PLATOS/ALIMENTOS COMPLETOS E INDEPENDIENTES que simplemente se
    comieron juntos (ej: "pollo saltado con plátano sancochado", "arroz con pollo con una gaseosa",
    "lomo saltado con una ensalada"), trátalos como DOS ítems SEPARADOS, cada uno con sus
@@ -493,6 +497,36 @@ async def registrar_comida_llm(
 
     # Validar que hay alimentos con macros
     _items = datos.get("alimentos", [])
+
+    # Tope por ÍTEM individual — encontrado en pruebas reales: al combinar
+    # "Olluco con Chancho" en un solo ítem (fix de combo, ver Regla 9), el LLM
+    # estimó 1200 kcal/400g (300 kcal/100g) de forma estable (2/2 veces a
+    # temp=0.0) — supera incluso su propio rango documentado para platos de
+    # fondo con proteína grasa (800-1000 kcal máx). Mismo patrón que los topes
+    # de sopa/momento: no seguir ajustando el prompt para un número, taparlo
+    # con código. 1100 kcal es el umbral de alerta ya documentado para un
+    # "menú completo" — ningún ítem individual debería superarlo.
+    # Usa el kcal RECALCULADO desde P/C/G (4-4-9), no el campo "kcal" crudo del
+    # LLM — encontrado en pruebas reales: el LLM reportó kcal=1200 pero sus
+    # propios macros (60p/120c/80g) recalculan a 1440 (4*60+4*120+9*80) — el
+    # campo crudo no era ni consistente con sus propios macros. Si se escala
+    # desde el crudo (1200→1100, factor 0.92), el recálculo final con los
+    # macros YA escalados da 1320, no 1100 — el tope no se respeta de verdad.
+    _KCAL_MAX_POR_ITEM = 1100
+    for _it_cap in _items:
+        _p_cap = float(_it_cap.get("prot_g", 0) or 0)
+        _c_cap = float(_it_cap.get("carb_g", 0) or 0)
+        _g_cap = float(_it_cap.get("grasa_g", 0) or 0)
+        _kcal_real_it = 4 * _p_cap + 4 * _c_cap + 9 * _g_cap
+        if _kcal_real_it > _KCAL_MAX_POR_ITEM:
+            _factor_it = _KCAL_MAX_POR_ITEM / _kcal_real_it
+            for _campo_it in ("kcal", "prot_g", "carb_g", "grasa_g", "porcion_g"):
+                if _it_cap.get(_campo_it) is not None:
+                    _it_cap[_campo_it] = round(float(_it_cap[_campo_it]) * _factor_it, 1)
+            logger.warning(
+                "[Registro] Item '%s' excedia %s kcal reales (%s, via P/C/G) — re-escalado",
+                _it_cap.get("nombre"), _KCAL_MAX_POR_ITEM, round(_kcal_real_it, 1),
+            )
 
     # ── Chequeo de completitud (solo ruta LLM, no caché) ──────────────────────
     # Encontrado en pruebas reales: "arroz con palta y mi taza de gelatina" →
@@ -2936,9 +2970,21 @@ def _palabras_faltantes_en_extraccion(mensaje: str, alimentos: list[dict]) -> li
     # candidata, el reintento la interpretaba como "Ensalada" y la duplicaba.
     def _ya_cubierta_como_substring(p: str) -> bool:
         return any(len(w) >= 4 and w in p for w in palabras_extraidas)
+    # Typo del usuario distinto a la corrección del LLM ("oyuco" vs "Olluco",
+    # el modelo corrige bien la ortografía) — ni substring ni singular/plural
+    # lo detectan como cubierto. Misma tolerancia difusa (difflib) que ya se
+    # usa en _extraccion_tiene_base_textual() para este mismo tipo de typo.
+    import difflib as _difflib_completitud
+    def _ya_cubierta_difusa(p: str) -> bool:
+        return any(
+            _difflib_completitud.SequenceMatcher(None, p, w).ratio() >= 0.7
+            for w in palabras_extraidas if len(w) >= 4
+        )
     _candidatas = [
         p for p in palabras_msg
-        if _singular(p) not in _extraidas_singular and not _ya_cubierta_como_substring(p)
+        if _singular(p) not in _extraidas_singular
+        and not _ya_cubierta_como_substring(p)
+        and not _ya_cubierta_difusa(p)
     ]
     # "Causa" es plato real (causa limeña) PERO también muletilla peruana de
     # cierre ("arroz con pollo causa" = "..., amigo") — el LLM del reintento
