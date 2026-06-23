@@ -565,6 +565,32 @@ async def registrar_comida_llm(
         for _campo_total in ("prot_total", "carb_total", "grasa_total", "kcal_total"):
             if datos.get(_campo_total) is not None:
                 datos[_campo_total] = round(float(datos[_campo_total]) * _factor_porcion, 1)
+
+    # Gramaje EXPLÍCITO en número ("50g de arroz con pollo") — encontrado en
+    # pruebas reales: el LLM devolvió porcion_g=350 ignorando los "50g" que
+    # el usuario pidió explícitamente (Regla 12 del prompt no es garantía,
+    # mismo patrón que el resto de hoy). Solo con 1 ítem, para no adivinar a
+    # cuál de varios alimentos se refiere el número.
+    _match_gramos_explicitos = re.search(
+        r'\b(\d+(?:[.,]\d+)?)\s*(?:gr|grs|gramos?|g)\b', _msg_low_porcion
+    )
+    if _match_gramos_explicitos and len(_items) == 1 and not _factor_porcion:
+        _gramos_pedidos = float(_match_gramos_explicitos.group(1).replace(',', '.'))
+        _it0 = _items[0]
+        _porcion_actual = float(_it0.get("porcion_g", 0) or 0)
+        if _porcion_actual > 0 and abs(_porcion_actual - _gramos_pedidos) > _porcion_actual * 0.15:
+            _factor_gramos = _gramos_pedidos / _porcion_actual
+            logger.warning(
+                "[Registro] '%sg' pedido pero LLM devolvio porcion_g=%s — re-escalando",
+                _gramos_pedidos, _porcion_actual,
+            )
+            for _campo in ("porcion_g", "kcal", "prot_g", "carb_g", "grasa_g"):
+                if _it0.get(_campo) is not None:
+                    _it0[_campo] = round(float(_it0[_campo]) * _factor_gramos, 1)
+            for _campo_total in ("prot_total", "carb_total", "grasa_total", "kcal_total"):
+                if datos.get(_campo_total) is not None:
+                    datos[_campo_total] = round(float(datos[_campo_total]) * _factor_gramos, 1)
+
     _prot_items  = sum(float(a.get("prot_g",  0) or 0) for a in _items)
     _carb_items  = sum(float(a.get("carb_g",  0) or 0) for a in _items)
     _grasa_items = sum(float(a.get("grasa_g", 0) or 0) for a in _items)
@@ -2745,6 +2771,12 @@ _STOPWORDS_COMPLETITUD = frozenset({
     "agrega", "agregalo", "agregale", "agregar", "anota", "anotalo",
     "registra", "registralo", "incluye", "incluyelo", "guarda", "guardalo",
     "ponme", "apunta", "apuntalo", "registro", "sumale", "suma",
+    # Modificadores de porción ("medio plato", "un cuarto de") — ya se manejan
+    # aparte (factor de escala 0.5/0.25/etc. más abajo); sin excluirlos aquí,
+    # "medio" se marcaba como posible alimento faltante y el reintento
+    # alucinó un ítem fantasma "Plato" para "comí medio plato de lomo saltado".
+    "medio", "media", "mitad", "cuarto", "cuarta", "chico", "chica",
+    "pequeño", "pequeña", "grande", "mediano", "mediana", "doble",
     "falto", "faltaba", "faltó", "falta", "olvide", "olvidé", "olvido",
 })
 
