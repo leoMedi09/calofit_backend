@@ -498,6 +498,22 @@ async def registrar_comida_llm(
     # Validar que hay alimentos con macros
     _items = datos.get("alimentos", [])
 
+    # Consistencia con lo ya mostrado al usuario — encontrado en pruebas
+    # reales: "¿es bueno comer chisitos?" (chat) respondió "casi nada de
+    # grasa", pero registrar "comí chisitos" (extracción separada, sin
+    # memoria compartida) dio grasa_g=20 — dos llamadas independientes al
+    # LLM sin ninguna fuente de verdad común. get_cached_macros()/
+    # cache_macros() ya existían (escritos desde recomendaciones y consultas
+    # de kcal) pero NUNCA se leían en el registro — el caché era de solo
+    # escritura. Si ya se mostraron macros para este alimento en este
+    # proceso (últimas 2h), reusarlos en vez de la extracción fresca.
+    for _it_cache in _items:
+        _cached = get_cached_macros(_it_cache.get("nombre", ""))
+        if _cached:
+            for _campo_c in ("kcal", "prot_g", "carb_g", "grasa_g"):
+                if _cached.get(_campo_c) is not None:
+                    _it_cache[_campo_c] = _cached[_campo_c]
+
     # Tope por ÍTEM individual — encontrado en pruebas reales: al combinar
     # "Olluco con Chancho" en un solo ítem (fix de combo, ver Regla 9), el LLM
     # estimó 1200 kcal/400g (300 kcal/100g) de forma estable (2/2 veces a
@@ -775,6 +791,13 @@ async def registrar_comida_llm(
         # del LLM, que puede no ser consistente con sus propios macros. Así Σ kcal de
         # las filas de este ítem == 4*prot_item + 4*carb_item + 9*grasa_item del total.
         k_item = round(4 * p_item + 4 * c_item + 9 * g_item, 1)
+        # Guardar para consistencia: si luego el usuario pregunta en el chat
+        # "¿cuántas kcal tiene X?" sobre este mismo alimento, debe ver los
+        # mismos números que se acaban de registrar, no una estimación nueva.
+        cache_macros(nombre_item, {
+            "nombre": nombre_item, "kcal": k_item,
+            "prot_g": p_item, "carb_g": c_item, "grasa_g": g_item,
+        })
         for _ in range(cantidad_item):
             registro = ComidaRegistro(
                 client_id=perfil.id,
