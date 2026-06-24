@@ -602,8 +602,19 @@ async def registrar_comida_llm(
     _factor_porcion = None
     if re.search(r'\bmedi[oa]\b|\bmitad\b', _msg_low_porcion):
         _factor_porcion = 0.5
+    # "tres cuartos"/"3/4" ANTES de "un cuarto" — encontrado en pruebas reales:
+    # el LLM interpretó "tres cuartos de palta" como cantidad=3 (¡3 paltas
+    # enteras!), confundiendo el numerador de la fracción con una cantidad de
+    # unidades — necesita corrección determinista, no basta con que el LLM
+    # lo razone solo.
+    elif re.search(r'\btres cuartos\b|\btres cuartas partes\b|\b3/4\b', _msg_low_porcion):
+        _factor_porcion = 0.75
     elif re.search(r'\bun cuarto\b|\bcuarta parte\b|\b1/4\b', _msg_low_porcion):
         _factor_porcion = 0.25
+    elif re.search(r'\bdos tercios\b|\b2/3\b', _msg_low_porcion):
+        _factor_porcion = 0.667
+    elif re.search(r'\bun tercio\b|\btercera parte\b|\b1/3\b', _msg_low_porcion):
+        _factor_porcion = 0.333
     elif re.search(r'porci[oó]n (chica|pequeñ[ao])|plato (chico|pequeñ[oa])', _msg_low_porcion):
         _factor_porcion = 0.65
     elif re.search(r'porci[oó]n (grande|extra)|plato grande|doble porci[oó]n', _msg_low_porcion):
@@ -616,6 +627,11 @@ async def registrar_comida_llm(
             for _campo in ("porcion_g", "kcal", "prot_g", "carb_g", "grasa_g"):
                 if _it.get(_campo) is not None:
                     _it[_campo] = round(float(_it[_campo]) * _factor_porcion, 1)
+            # "cantidad" debe quedar en 1 — encontrado en pruebas reales: el LLM
+            # confundió "tres cuartos de palta" con cantidad=3 (3 paltas
+            # enteras) en vez de 3/4 de una. Sin este reset, el bucle de
+            # inserción multiplicaría el error: 3 filas × kcal ya reducido.
+            _it["cantidad"] = 1
             _it["_factor_acumulado"] = _it.get("_factor_acumulado", 1.0) * _factor_porcion
             _it["_porcion_explicita_usuario"] = True  # "medio"/"un cuarto" tampoco es la porción estándar
         for _campo_total in ("prot_total", "carb_total", "grasa_total", "kcal_total"):
