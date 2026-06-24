@@ -2908,9 +2908,21 @@ def _normalizar_nombre(nombre: str) -> str:
     n = nombre.lower().strip()
     n = "".join(c for c in _ud2.normalize("NFD", n) if _ud2.category(c) != "Mn")
     n = _re2.sub(r"\s+", " ", n)
-    # Reemplazar sinónimos token a token
+    # Reemplazar sinónimos token a token — prueba la forma singular si la
+    # palabra exacta (plural) no es una clave. Encontrado en pruebas reales:
+    # "Palta" (extracción) se normaliza a "aguacate" (sinónimo), pero
+    # "paltas" (plural, en el mensaje original del usuario) no coincidía con
+    # la clave "palta" del diccionario y se quedaba sin normalizar —
+    # comparar "aguacate" contra "paltas" fallaba en _extraccion_tiene_base_
+    # textual() y el ítem real se rechazaba como si fuera una alucinación.
+    def _sinonimo(t: str) -> str:
+        if t in _SINONIMOS_ALIMENTOS:
+            return _SINONIMOS_ALIMENTOS[t]
+        if t.endswith("s") and len(t) > 4 and t[:-1] in _SINONIMOS_ALIMENTOS:
+            return _SINONIMOS_ALIMENTOS[t[:-1]]
+        return t
     tokens = n.split()
-    tokens = [_SINONIMOS_ALIMENTOS.get(t, t) for t in tokens]
+    tokens = [_sinonimo(t) for t in tokens]
     return " ".join(tokens)
 
 
