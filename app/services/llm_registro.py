@@ -497,6 +497,14 @@ async def registrar_comida_llm(
 
     # Validar que hay alimentos con macros
     _items = datos.get("alimentos", [])
+    # Factor acumulado por ítem — registra cuánto se escaló cada ítem desde
+    # la extracción cruda (por "medio"/"un cuarto" o por gramaje explícito),
+    # para que el caché de consistencia (más abajo) pueda aplicar la MISMA
+    # reducción sobre el valor cacheado en vez de depender de "porcion_g"
+    # (que puede quedar None/sin tocar incluso cuando kcal/macros sí se
+    # escalaron, dando una razón de porciones poco confiable).
+    for _it_init in _items:
+        _it_init["_factor_acumulado"] = 1.0
 
     # Tope por ÍTEM individual — encontrado en pruebas reales: al combinar
     # "Olluco con Chancho" en un solo ítem (fix de combo, ver Regla 9), el LLM
@@ -608,6 +616,8 @@ async def registrar_comida_llm(
             for _campo in ("porcion_g", "kcal", "prot_g", "carb_g", "grasa_g"):
                 if _it.get(_campo) is not None:
                     _it[_campo] = round(float(_it[_campo]) * _factor_porcion, 1)
+            _it["_factor_acumulado"] = _it.get("_factor_acumulado", 1.0) * _factor_porcion
+            _it["_porcion_explicita_usuario"] = True  # "medio"/"un cuarto" tampoco es la porción estándar
         for _campo_total in ("prot_total", "carb_total", "grasa_total", "kcal_total"):
             if datos.get(_campo_total) is not None:
                 datos[_campo_total] = round(float(datos[_campo_total]) * _factor_porcion, 1)
@@ -639,6 +649,7 @@ async def registrar_comida_llm(
             for _campo in ("porcion_g", "kcal", "prot_g", "carb_g", "grasa_g"):
                 if _it0.get(_campo) is not None:
                     _it0[_campo] = round(float(_it0[_campo]) * _factor_gramos, 1)
+            _it0["_factor_acumulado"] = _it0.get("_factor_acumulado", 1.0) * _factor_gramos
             # Marca: esta porción es un pedido puntual del usuario ("50g"), no
             # la referencia estándar del alimento — no debe sobreescribir el
             # caché de consistencia (ver más abajo) con una porción atípica,
@@ -662,9 +673,14 @@ async def registrar_comida_llm(
     for _it_cache in _items:
         _cached = get_cached_macros(_it_cache.get("nombre", ""))
         if _cached and _cached.get("porcion_g"):
-            _porcion_cacheada = float(_cached["porcion_g"])
-            _porcion_pedida = float(_it_cache.get("porcion_g") or _porcion_cacheada)
-            _factor_escala = _porcion_pedida / _porcion_cacheada if _porcion_cacheada > 0 else 1.0
+            # Usa el factor ACUMULADO de este ítem (cuánto ya se escaló por
+            # "medio"/"un cuarto" o gramaje explícito), no una razón de
+            # porcion_g — encontrado en pruebas reales: "comí medio palta"
+            # aplicaba bien el 0.5 a la extracción fresca, pero porcion_g
+            # quedaba None (el LLM no siempre lo devuelve), así que la razón
+            # de porciones daba 1.0 y el caché pisaba el valor ya reducido
+            # con el de referencia completo (162 kcal en vez de 81).
+            _factor_escala = float(_it_cache.get("_factor_acumulado", 1.0))
             for _campo_c in ("kcal", "prot_g", "carb_g", "grasa_g"):
                 if _cached.get(_campo_c) is not None:
                     _it_cache[_campo_c] = round(float(_cached[_campo_c]) * _factor_escala, 1)
