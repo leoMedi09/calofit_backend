@@ -646,7 +646,22 @@ async def registrar_comida_llm(
     # ── Capa 0: buscar en caché de macros (platos recomendados previamente) ──
     # Si el usuario está registrando un plato que el asistente recomendó en esta
     # sesión, se usan los macros exactos cacheados → consistencia perfecta.
-    cached = _buscar_en_cache(mensaje)
+    # Solo aplica si el mensaje describe UN alimento (re-mención simple, ej.
+    # "comí lo mismo de ayer: pollo a la plancha") — encontrado en uso real:
+    # con "arroz" cacheado de un mensaje anterior, "comí arroz y cerdo... y
+    # ensalada... y palta" coincidía como substring y el atajo de caché
+    # devolvía SOLO "Arroz" (con las kcal viejas), descartando los otros 3
+    # alimentos reales del mensaje. Un mensaje con conectores de varios
+    # alimentos (" y ", ",", " más ") nunca debe resolverse con un solo
+    # ítem cacheado — se deja pasar a la extracción LLM completa de abajo.
+    _mensaje_low_cache0 = (mensaje or "").lower()
+    _tiene_varios_alimentos = (
+        " y " in _mensaje_low_cache0
+        or "," in _mensaje_low_cache0
+        or " más " in _mensaje_low_cache0
+        or " mas " in _mensaje_low_cache0
+    )
+    cached = None if _tiene_varios_alimentos else _buscar_en_cache(mensaje)
     if cached:
         kcal  = round(float(cached.get("kcal", 0)), 1)
         prot  = round(float(cached.get("prot_g", 0)), 1)
@@ -1310,7 +1325,7 @@ async def registrar_comida_llm(
     _es_vegano_ctx = any("vegano" in c.lower() for c in ctx.condiciones_medicas)
     _es_veg_ctx = any("vegetariano" in c.lower() for c in ctx.condiciones_medicas)
     _dieta_tipo = "Vegano" if _es_vegano_ctx else ("Vegetariano" if _es_veg_ctx else "Normal")
-    alerta_dieta = _detectar_conflicto_dieta(nombres, _dieta_tipo)
+    alerta_dieta = _detectar_conflicto_dieta(nombres, _dieta_tipo, ctx.condiciones_medicas)
 
     return {
         "success": True,
@@ -1396,7 +1411,7 @@ async def registrar_ejercicio_llm(
     # problemas" → no debe registrar "Rutina completa en el gimnasio").
     ejercicios_raw = [
         e for e in ejercicios_raw
-        if _extraccion_tiene_base_textual(e.get("ejercicio", ""), mensaje)
+        if _extraccion_tiene_base_textual(e.get("ejercicio", ""), mensaje, es_ejercicio=True)
     ]
 
     if not ejercicios_raw:
@@ -3637,13 +3652,37 @@ def _alimento_es_alucinacion(item: dict, db) -> bool:
     return not _existe_en_bd_alimentos(db, item.get("nombre", ""))
 
 
-def _extraccion_tiene_base_textual(nombre_extraido: str, mensaje_original: str) -> bool:
+# Sufijos verbales españoles (de más a menos específico) — para comparar la
+# RAÍZ de un verbo conjugado en 1ra persona ("corrí", "salté", "nadé") contra
+# el infinitivo que devuelve el LLM como "nombre oficial" del ejercicio
+# ("Correr", "Saltar", "Nadar"). Solo se usa como último recurso en el caso
+# de ejercicios — ver _extraccion_tiene_base_textual(es_ejercicio=True).
+_SUFIJOS_VERBALES = ("aste", "iste", "ar", "er", "ir", "e", "i", "o", "a")
+
+
+def _raiz_verbal(palabra: str) -> str:
+    for suf in _SUFIJOS_VERBALES:
+        if palabra.endswith(suf) and len(palabra) - len(suf) >= 3:
+            return palabra[: -len(suf)]
+    return palabra
+
+
+def _extraccion_tiene_base_textual(
+    nombre_extraido: str, mensaje_original: str, es_ejercicio: bool = False,
+) -> bool:
     """Red de seguridad determinista (sin costo de tokens) contra alucinaciones
     del LLM: verifica que el nombre extraído tenga al menos una palabra
     significativa presente en el mensaje real del usuario. La Regla 0 del
     prompt ya le pide al LLM no inventar nada cuando no hay alimento/ejercicio
     real, pero esa instrucción no es garantía (validado en pruebas: el mismo
-    bug reapareció con mensajes distintos) — esto la respalda con código."""
+    bug reapareció con mensajes distintos) — esto la respalda con código.
+
+    es_ejercicio=True activa un fallback adicional de raíz verbal (ver abajo)
+    — solo tiene sentido para ejercicios, cuyo "nombre oficial" suele ser un
+    infinitivo ("Correr") mientras el usuario lo dice conjugado ("corrí").
+    Los alimentos son sustantivos, no verbos, así que ese fallback no se
+    activa para la ruta de comida — evita falsos positivos entre nombres de
+    alimentos que comparten una terminación común (ej. "Palta"/"Pasta")."""
     _nombre_norm = _normalizar_nombre(nombre_extraido or "")
     palabras = [
         p for p in _nombre_norm.split()
@@ -3672,6 +3711,19 @@ def _extraccion_tiene_base_textual(nombre_extraido: str, mensaje_original: str) 
         for w in palabras_msg:
             if _difflib_base.SequenceMatcher(None, p, w).ratio() >= 0.8:
                 return True
+    # Raíz verbal — encontrado en pruebas reales: "Corrí por treinta minutos"
+    # extrae correctamente "Correr" (con duración/kcal/MET reales), pero se
+    # rechazaba aquí porque "corri" (sin tilde tras normalizar) vs "correr"
+    # ni es substring ni llega al 0.8 de difflib (da ~0.73) — quedaba
+    # "No identifiqué ningún ejercicio" pese a que el LLM sí lo identificó.
+    if es_ejercicio:
+        for p in palabras:
+            raiz_p = _raiz_verbal(p)
+            if len(raiz_p) < 3:
+                continue
+            for w in palabras_msg:
+                if _raiz_verbal(w) == raiz_p:
+                    return True
     return False
 
 
@@ -3852,30 +3904,62 @@ _ANIMAL_VEGETARIANO = frozenset({
     "carne", "res", "lomo", "bistec", "cerdo", "chancho", "chicharron de carne",
 })
 
-def _detectar_conflicto_dieta(nombres: list, diet_type: str) -> str | None:
-    """Detecta si algún alimento registrado no corresponde a la dieta del usuario."""
-    if not diet_type or not nombres:
+# Mismos lácteos que ya están en _ANIMAL_VEGANO, pero la intolerancia a la
+# lactosa es una CONDICIÓN MÉDICA independiente de la dieta (vegano/vegetariano)
+# — un usuario puede tener lactosa sin ser vegano, como Diabetes+Hipertensión+
+# Lactosa sin ningún vegetarianismo. Antes _detectar_conflicto_dieta() solo
+# miraba diet_type (vegano/vegetariano) y nunca condiciones médicas, así que
+# "Leche"/"Yogur" nunca avisaban nada para alguien con intolerancia real.
+_LACTEOS_LACTOSA = frozenset({"leche", "queso", "yogur", "mantequilla", "crema"})
+_CALIFICADORES_SIN_LACTOSA = (
+    "deslactosado", "deslactosada", "sin lactosa", "vegetal",
+    "almendra", "soya", "soja", "avena", "coco",
+)
+
+
+def _detectar_conflicto_dieta(
+    nombres: list, diet_type: str, condiciones_medicas: list | None = None,
+) -> str | None:
+    """Detecta si algún alimento registrado no corresponde a la dieta
+    (vegano/vegetariano) o a una condición médica (intolerancia a la
+    lactosa) del usuario — son chequeos independientes, pueden darse los dos
+    a la vez o ninguno."""
+    if not nombres:
         return None
-    dieta = diet_type.lower().strip()
-    prohibidos = set()
-    if "vegano" in dieta:
-        prohibidos = _ANIMAL_VEGANO
-    elif "vegetariano" in dieta:
-        prohibidos = _ANIMAL_VEGETARIANO
-    if not prohibidos:
+
+    conflictos_dieta: list[str] = []
+    dieta = (diet_type or "").lower().strip()
+    prohibidos = _ANIMAL_VEGANO if "vegano" in dieta else (
+        _ANIMAL_VEGETARIANO if "vegetariano" in dieta else set()
+    )
+    if prohibidos:
+        for nombre in nombres:
+            n_lower = nombre.lower()
+            if any(p in n_lower for p in prohibidos):
+                conflictos_dieta.append(nombre)
+
+    conflictos_lactosa: list[str] = []
+    condiciones_str = " ".join(condiciones_medicas or []).lower()
+    if "lactosa" in condiciones_str:
+        for nombre in nombres:
+            n_lower = nombre.lower()
+            if any(lact in n_lower for lact in _LACTEOS_LACTOSA) and not any(
+                c in n_lower for c in _CALIFICADORES_SIN_LACTOSA
+            ):
+                conflictos_lactosa.append(nombre)
+
+    if not conflictos_dieta and not conflictos_lactosa:
         return None
-    conflictos = []
-    for nombre in nombres:
-        n_lower = nombre.lower()
-        for p in prohibidos:
-            if p in n_lower:
-                conflictos.append(nombre)
-                break
-    if not conflictos:
-        return None
-    tipo = "vegana" if "vegano" in dieta else "vegetariana"
-    items = ", ".join(conflictos[:2])
-    return f"⚠️ {items} no es parte de tu dieta {tipo}. Registrado igual para mantener tu historial."
+
+    avisos = []
+    if conflictos_dieta:
+        tipo = "vegana" if "vegano" in dieta else "vegetariana"
+        items = ", ".join(list(dict.fromkeys(conflictos_dieta))[:2])
+        avisos.append(f"⚠️ {items} no es parte de tu dieta {tipo}.")
+    if conflictos_lactosa:
+        items = ", ".join(list(dict.fromkeys(conflictos_lactosa))[:2])
+        avisos.append(f"⚠️ {items} tiene lactosa — registraste intolerancia a la lactosa.")
+    return " ".join(avisos) + " Registrado igual para mantener tu historial."
 
 
 def _limpiar_markdown(texto: str) -> str:
