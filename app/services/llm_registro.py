@@ -53,6 +53,56 @@ _RX_CORRECCION_REGISTRO = re.compile(
     re.IGNORECASE,
 )
 
+# ── Detección de items incomestibles/peligrosos ───────────────────────────────
+# Lista de palabras/frases que NO son alimentos — materiales, sustancias
+# peligrosas o claramente incomestibles. Si el mensaje las contiene, el
+# registro se rechaza de forma determinista sin necesidad de llamar al LLM.
+# ⚠️ NO incluir palabras ambiguas que también sean alimentos o ingredientes:
+#   "vidrio" claro (glass) vs "ají de vidrio" (una variedad de ají) → se usa \b
+#   para asegurar que sea la palabra completa, no un substring.
+_RX_NO_ALIMENTO_PELIGROSO = re.compile(
+    r'\b(?:'
+    r'vidrio|cristal|vidrios|'
+    r'tierra(?!\s+(?:de\s+)?(?:man[ií]|ma[ií]z|trigo))|'
+    r'metal(?:es)?|hierro(?!\s+(?:fundido|forjado))|acero|aluminio|'
+    r'cemento|hormig[o\u00f3]n|cal(?:\s+viva)?|yeso|argamasa|'
+    r'pintura|barniz|thinner|solvente|aguarr[a\u00e1]s|'
+    r'pl[a\u00e1]stico|caucho|goma\s+de\s+borrar|'
+    r'clavos|tornillos|tuercas|alambre|cables?\s+el[e\u00e9]ctricos?|'
+    r'gasolina|di[e\u00e9]sel|kerosene|aceite\s+de\s+motor|'
+    r'detergente|lej[i\u00ed]a|cloro(?!\s+de\s+piscina)|amoniaco|sosa\s+c[a\u00e1]ustica|'
+    r'veneno|raticida|pesticida|insecticida|herbicida|'
+    r'medicamento[s]?\s+(?:en\s+exceso|mezclados?)|'
+    r'tiza|gis|carb[o\u00f3]n(?:\s+mineral)?|carbon(?:cillo)?\s+mineral'
+    r')\b',
+    re.IGNORECASE,
+)
+
+# Contextos que anulan el match — frases donde la palabra es parte de un
+# alimento o utensilio de cocina legítimo, no un material peligroso.
+_NO_ALIMENTO_CONTEXTOS_EXCLUIDOS = [
+    # "ají de vidrio" es una variedad de ají/chile, no vidrio real
+    re.compile(r'\baj[i\u00ed]\s+(?:\w+\s+)?de\s+vidrio\b', re.IGNORECASE),
+    # aluminio en contexto de olla/sartén/cocina (utensilio, no ingestión)
+    re.compile(r'\b(?:olla|sart[e\u00e9]n|bandeja|molde|papel)\s+(?:de\s+)?aluminio\b', re.IGNORECASE),
+    re.compile(r'\baluminio\s+(?:de\s+)?(?:cocina|olla|sart[e\u00e9]n|molde|papel)\b', re.IGNORECASE),
+    re.compile(r'\baluminio\s+en\s+(?:olla|sart[e\u00e9]n|cocina)\b', re.IGNORECASE),
+]
+
+
+def _mensaje_contiene_no_alimento(mensaje: str):
+    """Devuelve el término peligroso detectado, o None si el mensaje es seguro.
+    Aplica exclusiones de contexto para evitar falsos positivos."""
+    match = _RX_NO_ALIMENTO_PELIGROSO.search(mensaje or "")
+    if not match:
+        return None
+    # Verificar si el match cae dentro de una frase excluida (contexto legítimo)
+    for rx_excl in _NO_ALIMENTO_CONTEXTOS_EXCLUIDOS:
+        if rx_excl.search(mensaje):
+            return None
+    return match.group(0)
+
+
 _FALLBACKS_OPCIONES = {
     "DESAYUNO": [
         "- Fruta picada con chía (~90 kcal, P:2g C:20g G:1g)",
@@ -274,6 +324,16 @@ VALIDACIÓN: Antes de calcular, determina si cada alimento es real.
 Un alimento es real si existe en USDA, INS/CENAN, OpenFoodFacts u otra BD pública de nutrición.
 NO son reales: ingredientes ficticios, mitológicos, inventados (unicornio, dragón, zarblak, florbonix).
 Son reales aunque sean inusuales: maca, sachatomate, ceviche de champiñones, saltado de tofu, etc.
+
+⛔ MATERIALES INCOMESTIBLES Y PELIGROSOS (MÁXIMA PRIORIDAD):
+Si el mensaje menciona materiales NO comestibles como vidrio, cristal, tierra, metal, cemento,
+pintura, plástico, gasolina, veneno, detergente, u otros materiales o sustancias peligrosas:
+- Si el item mencionado ES el material peligroso (ej. "comí vidrio", "tomé tierra"): es_real = false.
+- Si aparece junto a un alimento real (ej. "pan con vidrio"): el PLATO COMPLETO es inválido.
+  En ese caso, responde exactamente: {{"alimentos":[], "prot_total":0, "carb_total":0, "grasa_total":0, "contiene_no_alimento": true}}
+  El campo "contiene_no_alimento": true indica que el mensaje describió algo no comestible/peligroso.
+  NUNCA registres el alimento real sin el peligroso — si viene mezclado con algo no comestible,
+  el plato completo se rechaza (no se puede saber si realmente se consumió sin el peligroso).
 
 Mensaje: "{mensaje}"
 
@@ -737,6 +797,25 @@ async def registrar_comida_llm(
                 _ultimo_cr.nombre_alimento,
             )
 
+    # ── Guard pre-LLM: items incomestibles/peligrosos ────────────────────────
+    # Chequeo determinista ANTES de la llamada LLM para ahorrar tokens y dar
+    # una respuesta inmediata cuando el mensaje claramente no es comida.
+    if not goto_save:
+        _prematch_peligroso = _RX_NO_ALIMENTO_PELIGROSO.search(mensaje or "")
+        if _prematch_peligroso:
+            _item_pre = _prematch_peligroso.group(0)
+            logger.warning(
+                "[Registro] Guard pre-LLM: item incomestible detectado: '%s'", _item_pre
+            )
+            return {
+                "success": False,
+                "tipo_detectado": "no_alimento",
+                "mensaje": (
+                    f"⚠️ '{_item_pre.capitalize()}' no es un alimento — no puedo registrarlo. "
+                    f"Si crees que fue un error de escritura, corrígelo e intenta de nuevo."
+                ),
+            }
+
     # ── Capa 1: estimación LLM (si no hay caché) ──────────────────────────────
     if not goto_save:
         try:
@@ -777,6 +856,37 @@ async def registrar_comida_llm(
             "success": False,
             "tipo_detectado": "no_identificado",
             "mensaje": f"No pude procesar todos los alimentos, {perfil.first_name}. ¿Puedes repetirlo dividido por comida? Ej: 'en el desayuno comí X'",
+        }
+
+    # ── Guard post-LLM: items incomestibles/peligrosos ───────────────────
+    # Segunda línea de defensa: casos que el pre-guard no capturó (ej. cuando
+    # el mensaje fue reescrito por la lógica de corrección arriba).
+    _item_peligroso = _mensaje_contiene_no_alimento(mensaje)
+    if _item_peligroso:
+        logger.warning(
+            "[Registro] Item incomestible/peligroso detectado: '%s' en mensaje: '%s'",
+            _item_peligroso, mensaje[:100]
+        )
+        return {
+            "success": False,
+            "tipo_detectado": "no_alimento",
+            "mensaje": (
+                f"⚠️ '{_item_peligroso.capitalize()}' no es un alimento — no puedo registrarlo. "
+                f"Si crees que fue un error de escritura, corrígelo e intenta de nuevo."
+            ),
+        }
+    # Verificar si el LLM detectó un plato con material peligroso (campo especial)
+    if datos.get("contiene_no_alimento"):
+        logger.warning(
+            "[Registro] LLM detectó material no comestible en: '%s'", mensaje[:100]
+        )
+        return {
+            "success": False,
+            "tipo_detectado": "no_alimento",
+            "mensaje": (
+                "⚠️ El mensaje describe algo que no es comestible. "
+                "No puedo registrar un alimento mezclado con materiales peligrosos o no comestibles."
+            ),
         }
 
     # Filtrar alimentos no reales (es_real: false) antes de validar
