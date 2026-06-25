@@ -3,3 +3,11 @@ __pycache__/
 *.pyc
 .git/
 .env
+.pytest_cache/
+htmlcov/
+.coverage
+# tests/ no se excluye en local: docker-compose monta ./calofit_backend:/app
+# como volumen, así que el contenido real para `docker exec ... pytest` es
+# el del filesystem local, no el que se copia en build. Sí reduce el tamaño
+# de una imagen construida para producción (ej. Railway) sin volumen.
+tests/

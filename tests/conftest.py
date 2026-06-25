@@ -43,11 +43,20 @@ def test_db_url():
 @pytest.fixture(scope="session")
 def test_engine(test_db_url):
     """Engine de SQLAlchemy para tests (sesión completa)."""
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, text
     from app.core.database import Base
 
     engine = create_engine(test_db_url, echo=False, pool_pre_ping=True)
     logger.info(f"[TEST] Conectando a BD de test: {test_db_url}")
+
+    # BD_Calofit (producción/desarrollo real) ya tiene estas extensiones
+    # activas; test_calofit se crea desde cero y no las trae — sin esto,
+    # cualquier query que use unaccent()/similaridad de texto (varias en
+    # app/services/) falla con UndefinedFunction y aborta la transacción.
+    with engine.connect() as _conn_ext:
+        _conn_ext.execute(text("CREATE EXTENSION IF NOT EXISTS unaccent"))
+        _conn_ext.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        _conn_ext.commit()
 
     # Crear todas las tablas
     Base.metadata.create_all(bind=engine)
@@ -83,6 +92,24 @@ def db(test_engine, TestingSessionLocal):
     session.close()
     transaction.rollback()
     connection.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Aislamiento de estado global entre tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _limpiar_macro_cache():
+    """_macro_cache (llm_registro.py) es un dict en memoria de proceso, sin
+    relación con la BD de test ni con el rollback por test — un alimento
+    cacheado por un test con Groq real (ej. "arroz", "huevos") sobrevive y
+    contamina la extracción de otro test que use el mismo nombre, haciendo
+    que el resultado dependa del ORDEN de ejecución de la suite. Se limpia
+    antes y después de cada test para que cada uno empiece en blanco."""
+    from app.services.llm_registro import _macro_cache
+    _macro_cache.clear()
+    yield
+    _macro_cache.clear()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

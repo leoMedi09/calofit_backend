@@ -32,6 +32,8 @@ class Settings:
     ).strip().lower() in ("1", "true", "yes", "on")
     FATSECRET_CLIENT_ID: str = os.getenv("FATSECRET_CLIENT_ID", "")
     FATSECRET_CLIENT_SECRET: str = os.getenv("FATSECRET_CLIENT_SECRET", "")
+    # USDA FoodData Central (fallback de alimentos no encontrados en BD local)
+    USDA_API_KEY: str = os.getenv("USDA_API_KEY", "")
     # Si es true, no se llama a FatSecret aunque existan credenciales (pruebas / fallback local).
     DISABLE_FATSECRET: bool = os.getenv("DISABLE_FATSECRET", "").lower() in ("1", "true", "yes")
     DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"

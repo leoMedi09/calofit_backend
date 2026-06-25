@@ -109,6 +109,30 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
         "jugo",
         "refresco",
         "cerveza",
+        "hamburguesa",
+        "lenteja",
+        "piqueo",
+        "manzana",
+        "platano",
+        "plátano",
+        "leche",
+        "avena",
+        "huevo",
+        "pan",
+        "fruta",
+        "carne",
+        "pescado",
+        "ceviche",
+        "queso",
+        "yogur",
+        "metí",
+        "meti",
+        "zampé",
+        "zampe",
+        "chupé",
+        "chupe",
+        "probé",
+        "probe",
     )
     ej_ctx = (
         "ejercicio",
@@ -170,6 +194,12 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
         "ya comi", "ya comí", "ya almorcé", "ya desayuné",
         # "me hice un desayuno/almuerzo" — construcción coloquial de preparación+consumo
         "me hice un", "me hice una",
+        # Lenguaje informal / jerga
+        "me metí", "me meti", "metí", "meti",
+        "me zampé", "me zampe", "zampé", "zampe",
+        "me chupé", "me chupe", "chupé", "chupe",
+        "piqueo", "pique", "piqué", "piqueando",
+        "probé", "probe", "me probé", "me probe",
     )
     # Usamos límites de palabra (\b) para evitar coincidencias parciales (ej. darme comidas -> me comi)
     _verbos_log_count = sum(
@@ -414,6 +444,7 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
         "me comi", "me tome", "acabo de comer", "acabo de tomar", "acabo de beber",
         "termine de comer", "he desayunado", "he almorzado", "he cenado",
         "he comido", "he bebido",
+        "me meti", "meti", "me zampe", "zampe", "chupe", "me chupe", "piqueo", "probe", "tome"
     )
     _tiene_consumo = any(
         _mn.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", _mn)

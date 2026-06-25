@@ -20,18 +20,10 @@ from app.core.utils import get_peru_date
 from app.models.nutricion import PlanDiario, PlanNutricional
 
 
-# Normalización de objetivos (español libre → clave canónica)
-_OBJ_CANON = {
-    "perder":           "perder peso",
-    "perder peso":      "perder peso",
-    "mantener":         "mantenimiento",
-    "mantener peso":    "mantenimiento",
-    "mantenimiento":    "mantenimiento",
-    "ganar":            "ganar masa",
-    "ganar masa":       "ganar masa",
-    "ganar musculo":    "ganar masa",
-    "ganar músculo":    "ganar masa",
-}
+# La normalización de objetivos se centralizó en objetivo_utils.
+# _OBJ_CANON fue eliminado — los 5 valores controlados del frontend
+# se mapean ahora mediante normalizar_objetivo() a DEFICIT / MANTENIMIENTO / SUPERAVIT.
+from app.core.objetivo_utils import normalizar_objetivo as _norm_obj
 
 _NIVEL_MAP = {
     "Sedentario": 1.2, "Ligero": 1.375, "Moderado": 1.55,
@@ -65,7 +57,7 @@ def _calcular_macros_dinamicos(perfil, edad: int) -> dict:
 
 def obtener_plan_hoy(perfil, edad: int, db: Session):
     """
-    Devuelve (plan_maestro, plan_hoy_data dict, usa_fallback bool).
+    Devuelve (plan_maestro, plan_hoy_data, usa_fallback bool).
 
     plan_hoy_data contiene siempre los macros alineados con el perfil actual:
       - Si goal cambió respecto al plan guardado → recalcula.
@@ -121,11 +113,12 @@ def obtener_plan_hoy(perfil, edad: int, db: Session):
 
     # ── Decidir si recalcular calorías/macros ────────────────────────────────
     status_plan  = (plan_maestro.status or "").strip().lower()
-    plan_obj_raw = (plan_maestro.objetivo or "").strip().lower()
-    perf_obj_raw = (getattr(perfil, "goal", "") or "").strip().lower()
 
-    plan_obj_canon  = _OBJ_CANON.get(plan_obj_raw, plan_obj_raw)
-    perf_obj_canon  = _OBJ_CANON.get(perf_obj_raw, perf_obj_raw)
+    # Detectar cambio de objetivo usando normalización canónica — cubre los
+    # 5 valores controlados del frontend, incluyendo ganar_leve y perder_leve
+    # que el antiguo _OBJ_CANON no tenía.
+    plan_obj_canon  = _norm_obj(plan_maestro.objetivo)
+    perf_obj_canon  = _norm_obj(perfil.goal)
     objetivo_cambio = plan_obj_canon != perf_obj_canon
 
     # Recalcular si:

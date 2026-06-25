@@ -451,7 +451,9 @@ PESOS_UNIDAD: dict[str, float] = {
     "galleta":              15.0,   # 1 galleta de soda/vainilla (~15g)
 }
 
-USDA_API_KEY = "uFeX5hag2c1mmeR7ueaJj0K86VmsgnQsoxhsyyBt"
+from app.core.config import settings
+
+USDA_API_KEY = settings.USDA_API_KEY
 NUTRIENT_IDS = {
     1008: "calorias_100g",
     1003: "proteina_100g",

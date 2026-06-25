@@ -13,12 +13,213 @@ from __future__ import annotations
 import json
 import logging
 import re
+import asyncio
+import httpx
 from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+
+# ── Balance calórico vs meta — punto único de cálculo ─────────────────────────
+# Compartido por respuesta_recomendacion_llm() y respuesta_chat_llm(): antes
+# cada uno comparaba el consumo contra un total distinto (uno sumaba lo
+# quemado al disponible, el otro no) y solo uno tenía la excepción de masa
+# muscular — así que el mismo estado calórico real podía leerse como "exceso"
+# en una ruta y como normal en la otra. Esta función es ahora la única fuente
+# de verdad para restante/excedido/% y para si corresponde advertir.
+# ── Normalización de objetivos ────────────────────────────────────────────────
+# Fuente principal: app.core.objetivo_utils — mapa cerrado de los 5 valores
+# controlados por el frontend. No depende de regex ni texto libre.
+from app.core.objetivo_utils import es_superavit as _es_superavit_goal
+from app.core.user_context import UserContext
+
+_RX_CANTIDAD_AMBIGUA = re.compile(
+    r'\b(?:no\s+(?:estoy\s+seguro|se|sé)\s+si|creo\s+que|tal\s+vez|quiz[aá]s|mas\s+o\s+menos|más\s+o\s+menos|aprox|entre\s+\d+\s+y\s+\d+|o\s+(?:media|una|dos)|un\s+poco(?:\s+de)?|algo(?:\s+de)?|bastante)\b',
+    re.IGNORECASE
+)
+
+# Intención de corregir un registro YA hecho (no un alimento nuevo). El
+# mensaje de corrección a menudo no repite el nombre del alimento ("Corrección,
+# fueron tres") — sin el nombre, el LLM no tiene nada que extraer. Se detecta
+# aquí de forma determinista y se resuelve con el último ComidaRegistro real
+# del día (ver bloque al inicio de registrar_comida_llm).
+_RX_CORRECCION_REGISTRO = re.compile(
+    r'\bcorrecci[oó]n\b|\bme\s+equivoqu[eé]\b|\ben\s+realidad\b|\bno\s+fueron\b|'
+    r'\bfueron\s+m[aá]s\b|\bfueron\s+menos\b|\bno\s+fue\b|\bfue\s+m[aá]s\b|\bfue\s+menos\b|'
+    r'\b(?:era|eran)\b',
+    re.IGNORECASE,
+)
+
+_FALLBACKS_OPCIONES = {
+    "DESAYUNO": [
+        "- Fruta picada con chía (~90 kcal, P:2g C:20g G:1g)",
+        "- Avena tibia con agua (~150 kcal, P:5g C:27g G:3g)",
+        "- Tostada integral con palta (~130 kcal, P:3g C:16g G:7g)",
+        "- Plátano con frutos secos (~180 kcal, P:4g C:28g G:7g)",
+        "- Batido de frutas sin azúcar (~110 kcal, P:2g C:25g G:1g)",
+    ],
+    "ALMUERZO": [
+        "- Lentejas guisadas con verduras (~350 kcal, P:18g C:55g G:5g)",
+        "- Sopa de verduras con quinua (~300 kcal, P:10g C:50g G:5g)",
+        "- Ensalada de garbanzos y palta (~280 kcal, P:8g C:35g G:12g)",
+        "- Tofu a la plancha con brócoli y arroz (~380 kcal, P:22g C:45g G:10g)",
+        "- Crema de zapallo y arvejas (~290 kcal, P:9g C:42g G:8g)",
+    ],
+    "CENA": [
+        "- Sopa de verduras ligera (~150 kcal, P:5g C:22g G:4g)",
+        "- Ensalada de espinacas y palta (~200 kcal, P:4g C:18g G:13g)",
+        "- Menestra de frejol ligera (~240 kcal, P:12g C:38g G:4g)",
+        "- Tostadas con hummus y pepino (~180 kcal, P:6g C:26g G:6g)",
+        "- Tortilla vegetal de champiñones (~220 kcal, P:10g C:12g G:15g)",
+    ],
+    "MERIENDA": [
+        "- Fruta de estación (~80 kcal, P:1g C:20g G:0g)",
+        "- Puñado de almendras y nueces (~160 kcal, P:5g C:8g G:13g)",
+        "- Tostada integral con palta (~120 kcal, P:3g C:15g G:6g)",
+        "- Rodajas de manzana con canela (~70 kcal, P:1g C:17g G:0g)",
+        "- Taza de quinua cocida ligera (~130 kcal, P:4g C:24g G:2g)",
+    ]
+}
+
+def obtener_fallback_aleatorio(momento: str) -> str:
+    import random
+    m = (momento or "ALMUERZO").upper().strip()
+    if m not in _FALLBACKS_OPCIONES:
+        m = "ALMUERZO"
+    opciones = _FALLBACKS_OPCIONES[m]
+    # Elegir las 3 primeras opciones de forma determinista para evitar flakiness en pruebas
+    seleccion = opciones[:min(3, len(opciones))]
+    return "\n".join(seleccion)
+
+
+async def _llamar_groq_con_excepciones(ia_engine, prompt: str, max_tokens: int = 800, temp: float = 0.7, model: str = None) -> str:
+    import asyncio
+    import httpx
+    raw = await ia_engine._llamar_groq(prompt, max_tokens=max_tokens, temp=temp, model=model)
+    if not raw or not raw.strip():
+        raise ValueError("Respuesta vacía del LLM")
+    raw_lower = raw.lower()
+    if "timed out" in raw_lower or "timeout" in raw_lower or "no pudimos completar la respuesta a tiempo" in raw_lower:
+        raise asyncio.TimeoutError("Groq Timeout Error")
+    if "429" in raw_lower or "rate_limit" in raw_lower or "rate limit" in raw_lower or "límite de consultas alcanzado" in raw_lower:
+        raise ConnectionError("Groq Rate Limit Error (429)")
+    if raw.startswith("[Error:") or "[error:" in raw_lower:
+        raise ConnectionError(f"Groq API connection/HTTP error: {raw}")
+    return raw
+
+
+def _obtener_fallback_chat_seguro(perfil, tema: str) -> str:
+    conds = list(getattr(perfil, "medical_conditions", None) or [])
+    res_txt = "Lo siento, hubo un inconveniente al conectar con el servidor. "
+    if tema == "ejercicio":
+        res_txt += "Te sugiero realizar una caminata ligera de 15 minutos o estiramientos suaves para mantenerte activo de forma segura."
+    else:
+        res_txt += "Te sugiero opciones seguras locales como avena tibia con agua, tostadas integrales con palta o fruta picada."
+        if conds:
+            res_txt += f" (Teniendo en cuenta tus condiciones: {', '.join(conds)})."
+    return res_txt
+
+
+
+
+def _asegurar_contexto(perfil, consumido: float = 0.0, quemado: float = 0.0, plan_hoy: dict = None, ctx: Optional[UserContext] = None) -> UserContext:
+    if ctx is not None:
+        return ctx
+    return UserContext.build(perfil, consumido, quemado, plan_hoy or {})
+
+def obtener_fallback_restricciones_medicas(condiciones: list[str]) -> str:
+    restricciones = []
+    for cond in condiciones:
+        cond_lower = cond.lower().strip()
+        if "vegano" in cond_lower:
+            restricciones.append("VEGANO: PROHIBIDO todo producto animal (carne, pollo, pescado, huevo, leche, queso, yogur, mantequilla, miel).")
+        elif "vegetariano" in cond_lower:
+            restricciones.append("VEGETARIANO: PROHIBIDO todo tipo de carne, pollo y pescado.")
+        elif "diabetes" in cond_lower or "diabético" in cond_lower or "diabetico" in cond_lower:
+            restricciones.append("DIABETES: evitar azúcares refinados, miel, dulces y alimentos de alto índice glucémico (pan blanco, arroz blanco en exceso). Preferir carbohidratos complejos y fibra.")
+        elif "hipertensión" in cond_lower or "hipertension" in cond_lower or "hipertenso" in cond_lower:
+            restricciones.append("HIPERTENSIÓN: limitar sodio, sal de mesa añadida, embutidos, enlatados y alimentos ultraprocesados.")
+        elif "lactosa" in cond_lower or "intolerancia a la lactosa" in cond_lower:
+            restricciones.append("INTOLERANCIA A LA LACTOSA: PROHIBIDO lácteos enteros. Permitido versiones deslactosadas o alternativas vegetales.")
+        elif "celiaco" in cond_lower or "celíaco" in cond_lower or "gluten" in cond_lower:
+            restricciones.append("CELIAQUÍA / SIN GLUTEN: PROHIBIDO trigo, cebada, centeno y derivados. Solo alimentos certificados gluten-free.")
+        else:
+            restricciones.append(f"{cond}: Seguir las pautas de alimentación recomendadas por tu médico para esta condición.")
+    
+    if restricciones:
+        return (
+            "⛔ RESTRICCIONES MÉDICAS OBLIGATORIAS (FALLBACK LOCAL) — aplica en los 3 platos:\n"
+            + "\n".join(f"• {r}" for r in restricciones)
+            + "\n⚠️ Aplica cada restricción SOLO si el plato normalmente lleva ese ingrediente.\n"
+            + "🚨 PRIORIDAD ABSOLUTA: estas restricciones médicas pesan MÁS que cualquier ejemplo anterior.\n\n"
+        )
+    return ""
+
+# Fuente secundaria: detección en el mensaje actual del usuario.
+# Solo cubre el caso donde el usuario menciona explícitamente su objetivo
+# en el chat antes de haber actualizado su perfil. El mensaje tiene
+# prioridad temporal sobre el perfil cuando lo dice explícitamente.
+_RX_SUPERAVIT_MENSAJE = re.compile(
+    r'masa muscular|ganar m[uú]sculo|aumentar m[uú]sculo|volumen muscular|bulking',
+    re.IGNORECASE,
+)
+
+
+def _calcular_balance_meta(
+    consumido: float, meta: float, quemado: float, objetivo: str = "", mensaje: str = "",
+) -> dict:
+    """Calcula el balance calórico real del día — mismo criterio que la UI:
+    total disponible = meta + quemado (las calorías quemadas se suman al
+    presupuesto). Devuelve también el bloque de texto ya armado para el
+    prompt y la advertencia en lenguaje natural, así ningún caller recalcula
+    ni redacta la regla por su cuenta.
+    """
+    _total_disponible = meta + quemado
+    restante = max(0.0, _total_disponible - consumido)
+    excedido = max(0.0, consumido - _total_disponible)
+    pct = round(consumido / _total_disponible * 100) if _total_disponible > 0 else 0
+    # Fuente principal: objetivo del perfil (valores controlados del frontend)
+    # Fuente secundaria: mención explícita en el mensaje actual (prioridad temporal)
+    es_masa_muscular = (
+        _es_superavit_goal(objetivo)
+        or bool(_RX_SUPERAVIT_MENSAJE.search(mensaje or ""))
+    )
+
+    bloque_balance = ""
+    advertencia_natural = None
+    if es_masa_muscular and excedido > 0:
+        bloque_balance = (
+            "ℹ️ BALANCE VS META: el objetivo del usuario es ganar masa muscular — un consumo "
+            "por encima de la meta calórica es ESPERADO y CORRECTO para este objetivo. "
+            "PROHIBIDO decir que \"excedió su meta\" o sugerir que coma menos por este motivo.\n\n"
+        )
+        advertencia_natural = (
+            "Como tu objetivo es ganar masa muscular, estar en superávit es esperado y correcto."
+        )
+    elif excedido > 0:
+        bloque_balance = (
+            f"⚠️ BALANCE VS META: el usuario YA EXCEDIÓ su meta calórica de hoy por "
+            f"{round(excedido)} kcal ({pct}% de lo disponible, ya sumadas las calorías "
+            f"quemadas por ejercicio). Dilo de forma directa y sin contradicciones.\n\n"
+        )
+        advertencia_natural = (
+            f"Ya superaste tu meta de hoy por {round(excedido)} kcal — "
+            f"si aún quieres comer algo, mejor que sea ligero."
+        )
+
+
+    return {
+        "total_disponible": _total_disponible,
+        "restante": restante,
+        "excedido": excedido,
+        "pct": pct,
+        "es_masa_muscular": es_masa_muscular,
+        "bloque_balance": bloque_balance,
+        "advertencia_natural": advertencia_natural,
+    }
 
 
 # ── Prompts ──────────────────────────────────────────────────────────────────
@@ -184,6 +385,7 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
 14. CONSISTENCIA: para un mismo alimento y la misma porción, usa SIEMPRE los valores nutricionales
     estándar (USDA/INS-CENAN) de ese alimento — NO improvises valores nuevos cada vez. Si tienes
     duda entre varias preparaciones, usa la versión más común/estándar en Perú.
+15. AMBIGÜEDAD DE CANTIDADES: Si el usuario expresa incertidumbre o duda sobre la cantidad (ej. "no estoy seguro de si era media o una taza", "creo que eran dos huevos"), estima la cantidad de forma razonable y conservadora basada en el contexto y usa el valor medio o el más probable.
 """
 
 _PROMPT_EJERCICIO = _IDENTIDAD + """
@@ -418,11 +620,13 @@ PREGUNTAS SIMPLES: máximo 2-3 oraciones directas.
   ✓ "Almorzaste causa ferreñafana y cenaste un cebiche de caballa."
   ✗ "Almorcé causa ferreñafana y cenaste un cebiche de caballa." ← mezcla de personas, incorrecto.
 
-⛔ BALANCE VS META (CRÍTICO):
-  Si consumido > meta → el usuario YA EXCEDIÓ su meta. Dilo de forma directa y sin contradicciones
-  ("ya superaste tu meta por X kcal, ten cuidado"). NUNCA digas que "está cumpliendo su objetivo"
-  si el consumo es mayor a la meta — son afirmaciones contradictorias.
-  Si consumido <= meta → puedes decir cuánto le queda disponible.
+{bloque_balance_meta}⛔ BALANCE VS META (CRÍTICO):
+  Usa EXCLUSIVAMENTE la advertencia de balance indicada arriba (si la hay) — NO calcules tú
+  mismo si excedió la meta a partir de los números del perfil, ni mezcles "meta" con "lo
+  disponible" (lo disponible ya incluye lo quemado). Si arriba no aparece ninguna advertencia
+  de balance, NO digas que excedió su meta ni menciones un exceso — puedes decir cuánto le
+  queda disponible. NUNCA digas que "está cumpliendo su objetivo" si SÍ hay advertencia de
+  exceso arriba — son afirmaciones contradictorias.
 """
 
 
@@ -435,8 +639,10 @@ async def registrar_comida_llm(
     db: Session,
     ia_engine,
     historial: list = None,
+    ctx: Optional[UserContext] = None,
 ) -> dict:
     """Registra comida con macros estimados por LLM. Sin lookup de BD."""
+    ctx = _asegurar_contexto(perfil, plan_hoy=plan_hoy, ctx=ctx)
     # ── Capa 0: buscar en caché de macros (platos recomendados previamente) ──
     # Si el usuario está registrando un plato que el asistente recomendó en esta
     # sesión, se usan los macros exactos cacheados → consistencia perfecta.
@@ -465,13 +671,73 @@ async def registrar_comida_llm(
         datos = None
         goto_save = False
 
+    # ── Corrección de un registro anterior ────────────────────────────────────
+    # "Comí dos huevos" → "Corrección, fueron tres": el mensaje de corrección
+    # no siempre repite el nombre del alimento, así que el LLM no tiene nada
+    # que extraer por sí solo. Se busca el ComidaRegistro más reciente del día
+    # y se agrupan las filas que comparten texto_original (= mismo mensaje
+    # original que las creó, sin columna nueva) para saber exactamente qué
+    # reemplazar. Esas filas se eliminan y se restan del progreso ANTES de
+    # registrar la corrección — evita duplicar y evita dejar calorías viejas.
+    _filas_previas_correccion: list | None = None
+    if not goto_save and _RX_CORRECCION_REGISTRO.search(mensaje or ""):
+        from app.core.utils import get_peru_date as _get_hoy_correccion
+        from app.models.comida_registro import ComidaRegistro as _CRCorreccion
+        _hoy_correccion = _get_hoy_correccion()
+        _ultimo_cr = (
+            db.query(_CRCorreccion)
+            .filter(_CRCorreccion.client_id == perfil.id, _CRCorreccion.fecha == _hoy_correccion)
+            .order_by(_CRCorreccion.id.desc())
+            .first()
+        )
+        if _ultimo_cr:
+            _filas_previas_correccion = (
+                db.query(_CRCorreccion)
+                .filter(
+                    _CRCorreccion.client_id == perfil.id,
+                    _CRCorreccion.fecha == _hoy_correccion,
+                    _CRCorreccion.nombre_alimento == _ultimo_cr.nombre_alimento,
+                    _CRCorreccion.texto_original == _ultimo_cr.texto_original,
+                )
+                .all()
+            )
+            # Mensaje autosuficiente para el extractor existente — no se toca
+            # _PROMPT_COMIDA ni su formato, solo se le da el nombre que faltaba.
+            mensaje = f"{_ultimo_cr.nombre_alimento} - {mensaje}"
+            logger.info(
+                "[Registro] Corrección detectada — reescribiendo mensaje con alimento previo '%s'",
+                _ultimo_cr.nombre_alimento,
+            )
+
     # ── Capa 1: estimación LLM (si no hay caché) ──────────────────────────────
     if not goto_save:
-        prompt = _PROMPT_COMIDA.format(mensaje=mensaje)
-        # Siempre usar 900 tokens — mensajes con 3 comidas y cantidades específicas
-        # necesitan espacio para el JSON completo (5-9 items = ~700-800 tokens)
-        raw = await ia_engine._llamar_groq(prompt, max_tokens=900, temp=0.0)
-        datos = _parse_json(raw)
+        try:
+            prompt = _PROMPT_COMIDA.format(mensaje=mensaje)
+            # Siempre usar 900 tokens — mensajes con 3 comidas y cantidades específicas
+            # necesitan espacio para el JSON completo (5-9 items = ~700-800 tokens)
+            raw = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=900, temp=0.0)
+            datos = _parse_json(raw)
+        except asyncio.TimeoutError as e:
+            logger.error("[LLM Timeout in registrar_comida_llm]: %s", e)
+            return {
+                "success": False,
+                "tipo_detectado": "error",
+                "mensaje": "No pude conectar a tiempo con el asistente nutricional. Por favor intenta de nuevo en unos segundos."
+            }
+        except ConnectionError as e:
+            logger.error("[LLM ConnectionError in registrar_comida_llm]: %s", e)
+            return {
+                "success": False,
+                "tipo_detectado": "error",
+                "mensaje": "El asistente nutricional está temporalmente ocupado o sin conexión. Por favor intenta de nuevo en unos momentos."
+            }
+        except Exception as e:
+            logger.exception("[General Error in registrar_comida_llm LLM call]: %s", e)
+            return {
+                "success": False,
+                "tipo_detectado": "error",
+                "mensaje": "Hubo un inconveniente al procesar tu comida con el asistente. Por favor intenta de nuevo."
+            }
 
     # Guard temprano: si datos es None (JSON truncado o inválido) → pedir aclaración
     if not datos:
@@ -496,9 +762,59 @@ async def registrar_comida_llm(
                 a for a in datos["alimentos"]
                 if _extraccion_tiene_base_textual(a.get("nombre", ""), mensaje)
             ]
+            # "Almuerzo"/"Desayuno" alucinados como si fueran el alimento en
+            # sí (el momento del día no es comida) — encontrado en auditoría
+            # real: "Registré mi almuerzo" inventaba 790 kcal para "Almuerzo".
+            datos["alimentos"] = [
+                a for a in datos["alimentos"]
+                if not _es_solo_palabra_momento_dia(a.get("nombre", ""))
+            ]
+            # Alimentos inexistentes/alucinados (ej. "umas") con macros todos
+            # en 0 y sin coincidencia en la BD local — rechazo conservador,
+            # nunca bloquea alimentos reales con macros propios (ver docstring).
+            datos["alimentos"] = [
+                a for a in datos["alimentos"]
+                if not _alimento_es_alucinacion(a, db)
+            ]
+            # Plato compuesto reconocido ("Arroz con lentejas") + sus propios
+            # ingredientes extraídos también por separado → quedarse solo con
+            # el plato completo, evita contar las mismas kcal dos veces.
+            datos["alimentos"] = _filtrar_componentes_de_plato_compuesto(datos["alimentos"])
+            # Contenedor genérico ("Batido", "Jugo", "Sopa"...) + ≥2
+            # ingredientes sueltos en la misma extracción → el contenedor es
+            # redundante, se conservan los ingredientes reales.
+            datos["alimentos"] = _filtrar_contenedor_generico_con_ingredientes(datos["alimentos"])
 
     # Validar que hay alimentos con macros
     _items = datos.get("alimentos", [])
+
+    # ── Regla de Ambigüedad Cuantitativa ─────────────────────────────────────
+    _es_ambiguo = bool(_RX_CANTIDAD_AMBIGUA.search(mensaje or ""))
+    if _es_ambiguo:
+        _es_generico = True
+        _GENERIC_FOOD_NAMES = {"comida", "alimento", "algo", "cena", "almuerzo", "desayuno", "piqueo", "picar", "cosa", "plato", "nutricion", "menu", "todo"}
+        for item in _items:
+            name_low = item.get("nombre", "").lower()
+            if len(name_low) > 2 and not any(g in name_low for g in _GENERIC_FOOD_NAMES):
+                _es_generico = False
+                break
+        
+        if not _items or _es_generico:
+            return {
+                "success": False,
+                "tipo_detectado": "no_identificado",
+                "mensaje": f"No logré identificar qué alimento específico consumiste. ¿Podrías indicarme qué comiste exactamente?",
+            }
+        else:
+            # Estimación conservadora: escala macros/kcal/porcion al 70%
+            for item in _items:
+                for field in ("prot_g", "carb_g", "grasa_g"):
+                    if item.get(field) is not None:
+                        item[field] = round(float(item[field]) * 0.7, 1)
+                if item.get("kcal") is not None:
+                    item["kcal"] = round(float(item["kcal"]) * 0.7, 1)
+                if item.get("porcion_g") is not None:
+                    item["porcion_g"] = round(float(item["porcion_g"]) * 0.7, 1)
     # Factor acumulado por ítem — registra cuánto se escaló cada ítem desde
     # la extracción cruda (por "medio"/"un cuarto" o por gramaje explícito),
     # para que el caché de consistencia (más abajo) pueda aplicar la MISMA
@@ -572,8 +888,12 @@ async def registrar_comida_llm(
                 f'"cantidad": 1, "porcion_g": numero, "kcal": numero, "prot_g": numero, '
                 f'"carb_g": numero, "grasa_g": numero}}]}}'
             )
-            _raw_faltante = await ia_engine._llamar_groq(_prompt_faltante, max_tokens=250, temp=0.0)
-            _datos_faltante = _parse_json(_raw_faltante)
+            try:
+                _raw_faltante = await _llamar_groq_con_excepciones(ia_engine, _prompt_faltante, max_tokens=250, temp=0.0)
+                _datos_faltante = _parse_json(_raw_faltante)
+            except Exception as _e_falt:
+                logger.warning("[Registro] Error en llamada secundaria de faltante: %s", _e_falt)
+                _datos_faltante = None
             if _datos_faltante and _datos_faltante.get("alimentos"):
                 # No confiar solo en la instrucción del prompt de "no repitas" —
                 # verificar con código que el nombre recuperado no sea ya uno de
@@ -593,6 +913,22 @@ async def registrar_comida_llm(
                         [a.get("nombre") for a in _nuevos],
                     )
                     datos["alimentos"].extend(_nuevos)
+                    # Mismos guards que en la extracción principal, aplicados
+                    # también a lo recuperado aquí (momento del día, alucinación,
+                    # plato compuesto, contenedor genérico).
+                    datos["alimentos"] = [
+                        a for a in datos["alimentos"]
+                        if not _es_solo_palabra_momento_dia(a.get("nombre", ""))
+                    ]
+                    datos["alimentos"] = [
+                        a for a in datos["alimentos"]
+                        if not _alimento_es_alucinacion(a, db)
+                    ]
+                    # Mismo guard que en la extracción principal: si lo "recuperado"
+                    # ya es parte de un plato compuesto existente (ej. "lentejas"
+                    # cuando ya está "Arroz con lentejas"), no agregarlo aparte.
+                    datos["alimentos"] = _filtrar_componentes_de_plato_compuesto(datos["alimentos"])
+                    datos["alimentos"] = _filtrar_contenedor_generico_con_ingredientes(datos["alimentos"])
                     _items = datos["alimentos"]
 
     # ── Modificadores de tamaño ("medio", "porción pequeña/grande") ──────────
@@ -703,9 +1039,23 @@ async def registrar_comida_llm(
                 if _cached.get(_campo_c) is not None:
                     _it_cache[_campo_c] = round(float(_cached[_campo_c]) * _factor_escala, 1)
 
-    _prot_items  = sum(float(a.get("prot_g",  0) or 0) for a in _items)
-    _carb_items  = sum(float(a.get("carb_g",  0) or 0) for a in _items)
-    _grasa_items = sum(float(a.get("grasa_g", 0) or 0) for a in _items)
+    # prot_g/carb_g/grasa_g son POR UNIDAD (ver loop de inserción más abajo:
+    # "dos paltas" → prot_g es el de UNA palta). El total del día debe
+    # multiplicar por la cantidad, igual que el loop que inserta una fila por
+    # unidad en comida_registros — si no, "tres huevos" en un solo ítem suma
+    # las kcal de UN huevo al progreso del día mientras comida_registros
+    # guarda las 3 filas reales, dejando el total diario desincronizado del
+    # detalle auditado (encontrado al validar el flujo de corrección).
+    def _cantidad_clamp_agg(a: dict) -> int:
+        try:
+            q = int(float(a.get("cantidad", 1) or 1))
+        except (TypeError, ValueError):
+            q = 1
+        return max(1, min(q, 10))
+
+    _prot_items  = sum(float(a.get("prot_g",  0) or 0) * _cantidad_clamp_agg(a) for a in _items)
+    _carb_items  = sum(float(a.get("carb_g",  0) or 0) * _cantidad_clamp_agg(a) for a in _items)
+    _grasa_items = sum(float(a.get("grasa_g", 0) or 0) * _cantidad_clamp_agg(a) for a in _items)
     # No exigir macros > 0: alimentos/bebidas reales con 0 kcal (café negro, agua,
     # té sin azúcar, gaseosa zero) son válidos y deben registrarse igual.
     if not _items:
@@ -741,6 +1091,9 @@ async def registrar_comida_llm(
     advertencia_cantidad = None
     _factor_momento = 1.0
     advertencia_momento = None
+    
+    _es_ambiguo = bool(_RX_CANTIDAD_AMBIGUA.search(mensaje or ""))
+    
     if kcal > _KCAL_MAX_RAZONABLE:
         _factor_cap = _KCAL_MAX_RAZONABLE / kcal
         kcal  = round(kcal * _factor_cap, 1)
@@ -751,6 +1104,11 @@ async def registrar_comida_llm(
             f"⚠️ La cantidad indicada parece excesiva — registré un máximo razonable "
             f"de {round(kcal)} kcal. Si en verdad comiste esa cantidad, regístralo en "
             f"porciones separadas a lo largo del día."
+        )
+    elif _es_ambiguo:
+        advertencia_cantidad = (
+            "⚠️ Detecté cierta duda en la cantidad. Registré una estimación conservadora; si no es correcto, "
+            "puedes decirme para ajustarlo."
         )
 
     # Cap por momento del día — evita que el LLM infle porciones de desayuno/cena/merienda
@@ -810,6 +1168,25 @@ async def registrar_comida_llm(
     from app.core.utils import get_peru_date
     hoy = get_peru_date()
     prog = _get_or_create_progreso(db, perfil.id, hoy, plan_hoy)
+
+    # Si esto es una corrección, revertir primero el registro viejo (filas +
+    # totales del día) antes de sumar el nuevo — reemplaza en vez de acumular.
+    if _filas_previas_correccion:
+        _kcal_previo  = sum(float(f.kcal or 0) for f in _filas_previas_correccion)
+        _prot_previo  = sum(float(f.proteina_g or 0) for f in _filas_previas_correccion)
+        _carb_previo  = sum(float(f.carbohidratos_g or 0) for f in _filas_previas_correccion)
+        _gras_previo  = sum(float(f.grasas_g or 0) for f in _filas_previas_correccion)
+        prog.calorias_consumidas      = max(0, (prog.calorias_consumidas or 0) - _kcal_previo)
+        prog.proteinas_consumidas     = max(0.0, round((prog.proteinas_consumidas or 0) - _prot_previo, 1))
+        prog.carbohidratos_consumidos = max(0.0, round((prog.carbohidratos_consumidos or 0) - _carb_previo, 1))
+        prog.grasas_consumidas        = max(0.0, round((prog.grasas_consumidas or 0) - _gras_previo, 1))
+        for _fila_vieja in _filas_previas_correccion:
+            db.delete(_fila_vieja)
+        logger.info(
+            "[Registro] Corrección aplicada — %s fila(s) revertidas (%.0f kcal)",
+            len(_filas_previas_correccion), _kcal_previo,
+        )
+
     prog.calorias_consumidas      = int((prog.calorias_consumidas or 0) + kcal)
     prog.proteinas_consumidas     = round((prog.proteinas_consumidas or 0) + prot, 1)
     prog.carbohidratos_consumidos = round((prog.carbohidratos_consumidos or 0) + carb, 1)
@@ -832,15 +1209,47 @@ async def registrar_comida_llm(
         # (ej. "150g de arroz" → cantidad:150), nunca debe insertar más de
         # 10 filas por ítem.
         cantidad_item = max(1, min(cantidad_item, 10))
-        # Macros por porción unitaria (aplicando el mismo tope de sanidad que los totales)
+        # Macros por UNA unidad — encontrado en pruebas reales: "porcion_g"
+        # que devuelve el LLM ya es el peso de UNA unidad (ej. 136g para
+        # "dos paltas", el peso de una sola palta, no 272g de las dos juntas)
+        # — la Regla 10 del prompt es explícita: "kcal/macros deben
+        # corresponder al total de porcion_g". Por lo tanto prot_g/carb_g/
+        # grasa_g/kcal YA son por unidad; dividir entre cantidad_item (como
+        # se hacía antes) los reducía a la mitad/tercio sin razón — "dos
+        # paltas" terminaba registrando el equivalente calórico de una sola.
         _factor_total = _factor_cap * _factor_momento * _factor_sopa
-        p_item = round(float(item.get("prot_g", prot / n_items)) * _factor_total / cantidad_item, 1)
-        c_item = round(float(item.get("carb_g", carb / n_items)) * _factor_total / cantidad_item, 1)
-        g_item = round(float(item.get("grasa_g", grasa / n_items)) * _factor_total / cantidad_item, 1)
+        p_item = round(float(item.get("prot_g", prot / n_items)) * _factor_total, 1)
+        c_item = round(float(item.get("carb_g", carb / n_items)) * _factor_total, 1)
+        g_item = round(float(item.get("grasa_g", grasa / n_items)) * _factor_total, 1)
         # kcal SIEMPRE derivado de P/C/G de este ítem (4-4-9) — nunca el "kcal" crudo
-        # del LLM, que puede no ser consistente con sus propios macros. Así Σ kcal de
-        # las filas de este ítem == 4*prot_item + 4*carb_item + 9*grasa_item del total.
+        # del LLM, que puede no ser consistente con sus propios macros.
         k_item = round(4 * p_item + 4 * c_item + 9 * g_item, 1)
+
+        # Capa de seguridad ligera (no un sistema de validación completo):
+        # valores negativos o densidades calóricas físicamente imposibles
+        # (ej. más de 9 kcal/g, el máximo teórico — grasa pura) indican que
+        # algo en la extracción salió mal. Se recorta a un límite sano y se
+        # registra advertencia — no se intenta "adivinar" el valor correcto.
+        _porcion_item_val = float(item.get("porcion_g", 100) or 100)
+        if k_item < 0 or p_item < 0 or c_item < 0 or g_item < 0:
+            logger.warning(
+                "[Registro] Valores negativos para '%s' (kcal=%s p=%s c=%s g=%s) — recortados a 0",
+                nombre_item, k_item, p_item, c_item, g_item,
+            )
+            p_item, c_item, g_item = max(p_item, 0), max(c_item, 0), max(g_item, 0)
+            k_item = round(4 * p_item + 4 * c_item + 9 * g_item, 1)
+        _densidad_kcal_g = (k_item / _porcion_item_val) if _porcion_item_val > 0 else 0
+        if _densidad_kcal_g > 9.5:
+            _factor_densidad = 9.5 / _densidad_kcal_g
+            logger.warning(
+                "[Registro] Densidad calorica imposible para '%s': %.1f kcal/g (max teorico 9) — re-escalado",
+                nombre_item, _densidad_kcal_g,
+            )
+            p_item = round(p_item * _factor_densidad, 1)
+            c_item = round(c_item * _factor_densidad, 1)
+            g_item = round(g_item * _factor_densidad, 1)
+            k_item = round(4 * p_item + 4 * c_item + 9 * g_item, 1)
+
         # Guardar para consistencia: si luego el usuario pregunta en el chat
         # "¿cuántas kcal tiene X?" sobre este mismo alimento, debe ver los
         # mismos números que se acaban de registrar, no una estimación nueva.
@@ -851,7 +1260,7 @@ async def registrar_comida_llm(
             cache_macros(nombre_item, {
                 "nombre": nombre_item, "kcal": k_item,
                 "prot_g": p_item, "carb_g": c_item, "grasa_g": g_item,
-                "porcion_g": float(item.get("porcion_g", 100) or 100) / max(cantidad_item, 1),
+                "porcion_g": _porcion_item_val,
             })
         for _ in range(cantidad_item):
             registro = ComidaRegistro(
@@ -898,7 +1307,10 @@ async def registrar_comida_llm(
     restante  = max(0.0, meta - consumido + quemado)  # igual que la UI: suma quemadas
 
     # Detectar conflicto dietético y generar alerta suave
-    alerta_dieta = _detectar_conflicto_dieta(nombres, getattr(perfil, "diet_type", None))
+    _es_vegano_ctx = any("vegano" in c.lower() for c in ctx.condiciones_medicas)
+    _es_veg_ctx = any("vegetariano" in c.lower() for c in ctx.condiciones_medicas)
+    _dieta_tipo = "Vegano" if _es_vegano_ctx else ("Vegetariano" if _es_veg_ctx else "Normal")
+    alerta_dieta = _detectar_conflicto_dieta(nombres, _dieta_tipo)
 
     return {
         "success": True,
@@ -942,8 +1354,30 @@ async def registrar_ejercicio_llm(
     prompt = _PROMPT_EJERCICIO.format(mensaje=mensaje, peso_kg=peso_kg)
     # Más tokens para mensajes con múltiples ejercicios
     _max = 600 if len(mensaje.split()) > 15 else 300
-    raw = await ia_engine._llamar_groq(prompt, max_tokens=_max, temp=0.0)
-    resultado = _parse_json(raw)
+    try:
+        raw = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=_max, temp=0.0)
+        resultado = _parse_json(raw)
+    except asyncio.TimeoutError as e:
+        logger.error("[LLM Timeout in registrar_ejercicio_llm]: %s", e)
+        return {
+            "success": False,
+            "tipo_detectado": "error",
+            "mensaje": "Hubo un inconveniente de conexión con el servidor (Timeout). No pude registrar tu ejercicio, por favor intenta de nuevo."
+        }
+    except ConnectionError as e:
+        logger.error("[LLM ConnectionError in registrar_ejercicio_llm]: %s", e)
+        return {
+            "success": False,
+            "tipo_detectado": "error",
+            "mensaje": "Hubo un inconveniente de conexión con el servidor. No pude registrar tu ejercicio, por favor intenta de nuevo."
+        }
+    except Exception as e:
+        logger.exception("[General Error in registrar_ejercicio_llm]: %s", e)
+        return {
+            "success": False,
+            "tipo_detectado": "error",
+            "mensaje": "Hubo un inconveniente con el servidor. No pude registrar tu ejercicio, por favor intenta de nuevo."
+        }
 
     # Normalizar: acepta tanto lista como objeto único
     if isinstance(resultado, dict):
@@ -1142,6 +1576,7 @@ def _construir_mensaje_natural_reco(
     palabra_evitada: str | None,
     condicion_relevante: str | None,
     estilo_evitado_momento: str | None,
+    advertencia_meta: str | None = None,
 ) -> str:
     """
     Construye el mensaje final en prosa natural (no lista con guiones) a
@@ -1171,12 +1606,22 @@ def _construir_mensaje_natural_reco(
     if estilo_evitado_momento:
         razones.append("a esta hora evité algo frito o pesado, mejor algo más ligero")
 
+    # Advertencia de meta ya excedida — se antepone como oración propia (no es
+    # una "razón" de por qué se eligieron estos platos, es una advertencia
+    # aparte) — generada de forma 100% determinista aquí, no depende de que
+    # el LLM la mencione por su cuenta. Encontrado en pruebas reales:
+    # RECOMENDAR_NUTRICION nunca recibía el exceso real (se recortaba a 0
+    # kcal disponibles), así que ni con instrucción en el prompt era
+    # confiable — esto lo garantiza siempre que pct>=100 y no es objetivo de
+    # masa muscular (verificado antes de llamar a esta función).
+    _prefijo_meta = f"{advertencia_meta} " if advertencia_meta else ""
+
     if razones:
         intro_razones = "; y ".join(razones)
         intro_razones = intro_razones[0].upper() + intro_razones[1:]
-        return f"{intro_razones}, así que te recomiendo {lista_natural} — {kcal_txt}."
+        return f"{_prefijo_meta}{intro_razones}, así que te recomiendo {lista_natural} — {kcal_txt}."
 
-    return f"Te recomiendo {lista_natural} — {kcal_txt}."
+    return f"{_prefijo_meta}Te recomiendo {lista_natural} — {kcal_txt}."
 
 
 async def respuesta_recomendacion_llm(
@@ -1191,14 +1636,26 @@ async def respuesta_recomendacion_llm(
     db: Session = None,
     plan_macros: dict = None,
     consumido_macros: dict = None,
+    ctx: Optional[UserContext] = None,
 ) -> str:
     """Genera recomendación vía LLM. Para comida: cachea los macros exactos de
     cada plato recomendado → cuando el usuario lo registre, se usarán los mismos
     valores (consistencia perfecta recomendación ↔ registro)."""
-    restante = max(0.0, meta - consumido + quemado)  # igual que la UI: suma quemadas
-    objetivo = getattr(perfil, "goal", "mantener peso") or "mantener peso"
-    dieta    = getattr(perfil, "diet_type", "Normal") or "Normal"
-    condiciones = ", ".join(getattr(perfil, "medical_conditions", None) or []) or "ninguna"
+    ctx = _asegurar_contexto(perfil, consumido, quemado, plan_macros, ctx)
+    objetivo = ctx.objetivo_normalizado
+    # Balance vs meta — _calcular_balance_meta() es el punto único de cálculo,
+    # compartido con respuesta_chat_llm(). Antes "restante" se recortaba a 0
+    # con max(0.0, ...) y PERDÍA la señal de "ya te pasaste por X kcal", así
+    # que "dame una comida para aumentar mis calorías" o preguntas tras un
+    # cambio de tema ignoraban que la meta ya se superó.
+    _balance_reco = _calcular_balance_meta(consumido, meta, quemado, objetivo, mensaje)
+    restante = _balance_reco["restante"]
+    _excedido_kcal_reco = _balance_reco["excedido"]
+    _pct_reco_balance = _balance_reco["pct"]
+    _es_vegano = any("vegano" in c.lower() for c in ctx.condiciones_medicas)
+    _es_vegetariano = any("vegetariano" in c.lower() for c in ctx.condiciones_medicas)
+    dieta = "Vegano" if _es_vegano else ("Vegetariano" if _es_vegetariano else "Normal")
+    condiciones = ", ".join(ctx.condiciones_medicas) or "ninguna"
 
     if modo == "ejercicio":
         # Guard de seguridad por lesión — detecta la lesión tanto en el PERFIL
@@ -1258,63 +1715,66 @@ async def respuesta_recomendacion_llm(
                 f"Prioriza alternativas como: {', '.join(dict.fromkeys(_alternativas_seguras))}.\n"
             )
 
-        prompt = _PROMPT_RECOMENDACION_EJERCICIO.format(
-            nombre=perfil.first_name,
-            objetivo=objetivo,
-            condiciones=condiciones,
-            contexto_lesion=_contexto_lesion,
-            mensaje=mensaje,
-        )
-        respuesta_ej = await ia_engine._llamar_groq(prompt, max_tokens=300, temp=0.7)
+        try:
+            respuesta_ej = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=300, temp=0.7)
 
-        if _lesiones_activas:
-            # _normalizar_nombre quita tildes — sin esto, "jalon" (keyword) nunca
-            # coincide con "Jalón" (como el LLM lo escribe naturalmente).
-            # Este chequeo sigue existiendo como red de seguridad — el contexto
-            # arriba reduce la probabilidad de violación, no la garantiza.
-            _viola_lesion = any(
-                r in _normalizar_nombre(respuesta_ej or "") for r in _ejercicios_riesgosos
-            )
-
-            if _viola_lesion:
-                logger.warning(
-                    "[Reco-Ejercicio] Ejercicio riesgoso para lesión detectada — reintentando"
-                )
-                _justif_lesion = "; ".join(
-                    _LESIONES_SUSTITUCION[l]["justificacion"] for l in _lesiones_activas
-                )
-                _prompt_retry_ej = (
-                    f"Eres entrenador personal. El usuario tiene: {_justif_lesion}.\n"
-                    f"NO sugieras NINGUNO de estos ejercicios ni variantes: "
-                    f"{', '.join(sorted(_ejercicios_riesgosos))}.\n"
-                    f"En su lugar usa alternativas seguras como: {', '.join(_alternativas_seguras)}.\n"
-                    f"Mensaje original del usuario: \"{mensaje}\"\n"
-                    f"Responde en 2-3 frases naturales (sin listas, sin numeración, sin pasos "
-                    f"de ejecución), mencionando 2-3 ejercicios seguros con series/reps. "
-                    f"Sin preguntas al final."
-                )
-                respuesta_ej = await ia_engine._llamar_groq(
-                    _prompt_retry_ej, max_tokens=200, temp=0.3
-                )
-
-                # Verificación final + fallback garantizado en prosa natural (no lista)
-                _aun_viola_ej = any(
+            if _lesiones_activas:
+                # _normalizar_nombre quita tildes — sin esto, "jalon" (keyword) nunca
+                # coincide con "Jalón" (como el LLM lo escribe naturalmente).
+                # Este chequeo sigue existiendo como red de seguridad — el contexto
+                # arriba reduce la probabilidad de violación, no la garantiza.
+                _viola_lesion = any(
                     r in _normalizar_nombre(respuesta_ej or "") for r in _ejercicios_riesgosos
                 )
-                if _aun_viola_ej:
+
+                if _viola_lesion:
                     logger.warning(
-                        "[Reco-Ejercicio] Reintento también riesgoso — usando fallback seguro"
+                        "[Reco-Ejercicio] Ejercicio riesgoso para lesión detectada — reintentando"
                     )
-                    _nombres_unicos = list(dict.fromkeys(_alternativas_seguras))[:3]
-                    if len(_nombres_unicos) > 1:
-                        _lista_segura = ", ".join(_nombres_unicos[:-1]) + " o " + _nombres_unicos[-1]
-                    else:
-                        _lista_segura = _nombres_unicos[0]
-                    respuesta_ej = (
-                        f"Por tu lesión, mejor evitamos ejercicios de alto impacto en esa zona. "
-                        f"Prueba con {_lista_segura} — 3 series de 12 repeticiones, con peso "
-                        f"ligero y movimientos controlados."
+                    _justif_lesion = "; ".join(
+                        _LESIONES_SUSTITUCION[l]["justificacion"] for l in _lesiones_activas
                     )
+                    _prompt_retry_ej = (
+                        f"Eres entrenador personal. El usuario tiene: {_justif_lesion}.\n"
+                        f"NO sugieras NINGUNO de estos ejercicios ni variantes: "
+                        f"{', '.join(sorted(_ejercicios_riesgosos))}.\n"
+                        f"En su lugar usa alternativas seguras como: {', '.join(_alternativas_seguras)}.\n"
+                        f"Mensaje original del usuario: \"{mensaje}\"\n"
+                        f"Responde en 2-3 frases naturales (sin listas, sin numeración, sin pasos "
+                        f"de ejecución), mencionando 2-3 ejercicios seguros con series/reps. "
+                        f"Sin preguntas al final."
+                    )
+                    respuesta_ej = await _llamar_groq_con_excepciones(
+                        ia_engine, _prompt_retry_ej, max_tokens=200, temp=0.3
+                    )
+
+                    # Verificación final + fallback garantizado en prosa natural (no lista)
+                    _aun_viola_ej = any(
+                        r in _normalizar_nombre(respuesta_ej or "") for r in _ejercicios_riesgosos
+                    )
+                    if _aun_viola_ej:
+                        logger.warning(
+                            "[Reco-Ejercicio] Reintento también riesgoso — usando fallback seguro"
+                        )
+                        _nombres_unicos = list(dict.fromkeys(_alternativas_seguras))[:3]
+                        if len(_nombres_unicos) > 1:
+                            _lista_segura = ", ".join(_nombres_unicos[:-1]) + " o " + _nombres_unicos[-1]
+                        else:
+                            _lista_segura = _nombres_unicos[0]
+                        respuesta_ej = (
+                            f"Por tu lesión, mejor evitamos ejercicios de alto impacto en esa zona. "
+                            f"Prueba con {_lista_segura} — 3 series de 12 repeticiones, con peso "
+                            f"ligero y movimientos controlados."
+                        )
+        except asyncio.TimeoutError as e:
+            logger.error("[LLM Timeout in recomendacion ejercicio]: %s", e)
+            respuesta_ej = "Por tu seguridad y debido a un timeout del servidor, te recomiendo realizar una rutina de movilidad suave en casa y caminata de 15 minutos a ritmo cómodo."
+        except ConnectionError as e:
+            logger.error("[LLM ConnectionError in recomendacion ejercicio]: %s", e)
+            respuesta_ej = "Por tu seguridad y debido a un problema de conexión con el servidor, te recomiendo realizar una rutina de movilidad suave en casa y caminata de 15 minutos a ritmo cómodo."
+        except Exception as e:
+            logger.exception("[General Error in recomendacion ejercicio]: %s", e)
+            respuesta_ej = "Por tu seguridad, te recomiendo realizar una rutina de movilidad suave en casa y caminata de 15 minutos a ritmo cómodo."
 
         return respuesta_ej
 
@@ -1352,7 +1812,7 @@ async def respuesta_recomendacion_llm(
     # coincidencias del mensaje, no solo la primera (ej. "queso y algo dulce"
     # → debe mencionar ambas, no solo "queso").
     from app.services.recomendador_platos import _tokens_prohibidos, _CONDICION_TOKENS
-    _condiciones_lista_reco = getattr(perfil, "medical_conditions", None) or []
+    _condiciones_lista_reco = ctx.condiciones_medicas
     _tokens_dieta_msg = _tokens_prohibidos(_condiciones_lista_reco)
 
     _evitados_msg: list[tuple[str, str]] = []  # [(palabra, condición), ...]
@@ -1462,7 +1922,7 @@ async def respuesta_recomendacion_llm(
             _excluidos_48h = [
                 row[0] for row in db.query(HistorialRecomendacion.nombre_plato)
                 .filter(
-                    HistorialRecomendacion.client_id == perfil.id,
+                    HistorialRecomendacion.client_id == ctx.perfil_id,
                     HistorialRecomendacion.created_at >= _desde_48h,
                 )
                 .all()
@@ -1487,9 +1947,7 @@ async def respuesta_recomendacion_llm(
             # anclar el Plato 1 en un alimento prohibido (ej. pescado para un
             # cliente vegano) y el LLM termina usándolo igual.
             from app.services.recomendador_platos import _tokens_prohibidos
-            _tokens_dieta_reco_knn = _tokens_prohibidos(
-                getattr(perfil, "medical_conditions", None) or []
-            )
+            _tokens_dieta_reco_knn = _tokens_prohibidos(ctx.condiciones_medicas)
             if _tokens_dieta_reco_knn:
                 _candidatos_knn = [
                     c for c in _candidatos_knn
@@ -1547,7 +2005,7 @@ async def respuesta_recomendacion_llm(
             f"Si ninguno encaja responde exactamente: ninguno"
         )
         try:
-            _resp_eval = await ia_engine._llamar_groq(_prompt_eval, max_tokens=60, temp=0.0)
+            _resp_eval = await _llamar_groq_con_excepciones(ia_engine, _prompt_eval, max_tokens=60, temp=0.0)
             if _resp_eval and "ninguno" not in _resp_eval.lower():
                 _resp_low = _resp_eval.lower()
                 for c in _candidatos_knn:
@@ -1561,9 +2019,7 @@ async def respuesta_recomendacion_llm(
         except Exception as e:
             logger.warning("[KNN Eval] Evaluador falló: %s — sin ancla KNN", e)
 
-    # 1.5. Detectar Vegano/Vegetariano TEMPRANO — los ejemplos de plato por momento
-    #      (paso 2) deben ser distintos si el cliente no come carne/pescado/lácteos/huevo.
-    _condiciones_list_reco = getattr(perfil, "medical_conditions", None) or []
+    _condiciones_list_reco = ctx.condiciones_medicas
     _condiciones_str_reco = " ".join(_condiciones_list_reco).lower()
     es_vegano_reco = (
         "vegano" in dieta.lower() or "vegetariano" in dieta.lower()
@@ -1636,15 +2092,30 @@ async def respuesta_recomendacion_llm(
     pref_ingrediente_reco = ""
     if _ing_match:
         _ing_detectado = _ing_match.group(1).strip().rstrip('.,?')
-        _PALABRAS_IGNORAR = {"hoy", "comer", "ti", "mi", "algo", "uno", "plato", "poco"}
-        # Encontrado en pruebas reales: "qué como ... si tengo dolor DE rodilla"
-        # capturaba "rodilla" como ingrediente pedido (el patrón "de + palabra"
-        # no distingue comida de cuerpo/lesión) y lo inyectaba literalmente en
-        # los nombres de plato ("Lomo Saltado con Rodilla"). _TEMA_EJERCICIO_KW
-        # ya lista body parts/lesión — ninguna de esas palabras es un ingrediente.
+        _GENERIC_IGNORE_WORDS = {
+            "hoy", "comer", "ti", "mi", "algo", "uno", "plato", "poco",
+            "dia", "dias", "tarde", "mañana", "noche", "antes", "despues",
+            "durante", "luego", "meta", "caloria", "calorias", "kcal",
+            "entreno", "ejercicio", "rutina", "dieta", "alimento", "comida",
+            "ingrediente", "entrenar", "entrenando", "peso", "pesas",
+            "grasa", "grasas", "proteina", "carbohidrato", "fibra", "macro", "macros",
+            "desayuno", "almuerzo", "cena", "merienda"
+        }
         _palabras_ing = set(_ing_detectado.split())
-        _es_no_comida = bool(_palabras_ing & set(_TEMA_EJERCICIO_KW))
-        if _ing_detectado not in _PALABRAS_IGNORAR and not _es_no_comida and len(_ing_detectado) > 2:
+        _es_no_comida = False
+        for _w in _palabras_ing:
+            _w_norm = _normalizar_nombre(_w)
+            if _w_norm in _GENERIC_IGNORE_WORDS:
+                _es_no_comida = True
+                break
+            if any(_w_norm.startswith(k) or k in _w_norm for k in _TEMA_EJERCICIO_KW):
+                _es_no_comida = True
+                break
+            if any(_w_norm.startswith(k) or k in _w_norm for k in _TEMA_NUTRICION_KW):
+                _es_no_comida = True
+                break
+
+        if not _es_no_comida and len(_ing_detectado) > 2:
             pref_ingrediente_reco = (
                 f"⚠️ El usuario pidió ESPECÍFICAMENTE algo con: **{_ing_detectado}**. "
                 f"Esto tiene prioridad sobre la variedad: los 3 platos DEBEN incluir "
@@ -1652,6 +2123,7 @@ async def respuesta_recomendacion_llm(
                 f"visible en la preparación) — no lo menciones en uno solo y dejes "
                 f"los otros 2 libres."
             )
+
 
     # 3.2. Detectar NEGACIÓN/exclusión puntual en el mensaje ("no quiero comer
     # carne hoy") — encontrado en pruebas reales: el motor KNN seguía
@@ -1710,12 +2182,11 @@ async def respuesta_recomendacion_llm(
         "(ej: ensalada de solo lechuga/tomate/papa, pachamanca solo de verduras)."
     ) if _objetivo_proteina_match else ""
 
-    # 3.6. Detectar objetivo de masa muscular/volumen → override calórico
-    _masa_muscular_match = _re_reco.search(
-        r'masa muscular|ganar m[uú]sculo|aumentar m[uú]sculo|volumen muscular|'
-        r'bulking|ganar peso|subir de peso|aumentar peso',
-        _msg_low_reco,
-    )
+    # 3.6. Objetivo de masa muscular/volumen → override calórico. Usa el mismo
+    # criterio centralizado de _calcular_balance_meta (objetivo del perfil +
+    # mensaje), no solo el mensaje — así "Ganar masa" guardado en el perfil
+    # también activa la excepción aunque el mensaje actual no lo repita.
+    _masa_muscular_match = _balance_reco["es_masa_muscular"]
     # Si el restante es muy bajo pero el objetivo es ganar músculo, mostrar mínimo 500 kcal
     # para que el LLM no recomiende snacks ridículos (el LLM usa el valor como referencia, no límite duro)
     _restante_display = max(restante, 500.0) if _masa_muscular_match else restante
@@ -1728,6 +2199,17 @@ async def respuesta_recomendacion_llm(
         "menestras con quinua. Incluye carbohidratos de calidad (arroz, papa, quinua) como "
         "fuente de energía para el entrenamiento."
     ) if _masa_muscular_match else ""
+
+    # Balance vs meta — bloque ya armado por _calcular_balance_meta (vacío si
+    # no hay exceso, o si el objetivo es masa muscular). Aquí solo se agrega
+    # la guía de acción específica de esta ruta (sí recomendar, pero liviano).
+    _balance_meta_txt = _balance_reco["bloque_balance"]
+    advertencia_meta_natural = _balance_reco["advertencia_natural"]
+    if _excedido_kcal_reco > 0 and not _masa_muscular_match:
+        _balance_meta_txt += (
+            "Aun así, si tiene hambre real, propón opciones livianas (no platos de fondo "
+            "pesados) — no te niegues a recomendar, solo seas consciente del exceso.\n\n"
+        )
 
     # 4. Restricción de dieta (es_vegano_reco ya se calculó en el paso 1.5)
     restriccion_dieta_reco = (
@@ -1751,8 +2233,8 @@ async def respuesta_recomendacion_llm(
                 f"• [condición]: evitar [lista exacta], permitido solo [versiones seguras]\n"
                 f"Responde SOLO las líneas con •. Nada más."
             )
-            _restricciones_raw = await ia_engine._llamar_groq(
-                _prompt_med, max_tokens=200, temp=0.0
+            _restricciones_raw = await _llamar_groq_con_excepciones(
+                ia_engine, _prompt_med, max_tokens=200, temp=0.0
             )
             if _restricciones_raw and _restricciones_raw.strip():
                 _condiciones_medicas_txt = (
@@ -1768,6 +2250,7 @@ async def respuesta_recomendacion_llm(
                 )
         except Exception as _e_med:
             logger.warning("[Reco] No se pudo generar restricciones médicas: %s", _e_med)
+            _condiciones_medicas_txt = obtener_fallback_restricciones_medicas(ctx.condiciones_medicas)
 
     # 5. Combinar platos ya recomendados: historial de la conversación actual
     #    (corto plazo) + HistorialRecomendacion de las últimas 48h (persistente,
@@ -1840,6 +2323,7 @@ async def respuesta_recomendacion_llm(
         f"- Objetivo: {objetivo}\n"
         f"- Momento: {momento_reco}\n"
         f"- Calorías disponibles hoy: {round(_restante_display)} kcal\n\n"
+        + (f"{_balance_meta_txt}" if _balance_meta_txt else "")
         + (f"{restriccion_dieta_reco}\n\n" if restriccion_dieta_reco else "")
         + f"PARA EL {momento_reco}:\n{restricciones_momento_reco}\n\n"
         + f"PLATOS — escoge entre recetas conocidas del día a día peruano, como: {_ref_platos}. "
@@ -1867,268 +2351,246 @@ async def respuesta_recomendacion_llm(
         "⛔ SOLO las 3 líneas. Sin recetas, sin texto extra."
     )
 
-    respuesta_llm_reco = await ia_engine._llamar_groq(
-        _prompt_reco_comida, max_tokens=180, temp=0.5
-    )
-
-    # Guard: si el LLM ignoró el formato y devolvió receta, reintentar con prompt mínimo
-    _RECIPE_MARKERS = ("ingredientes:", "preparación:", "preparacion:", "pasos:", "instrucciones:")
-    if any(m in (respuesta_llm_reco or "").lower() for m in _RECIPE_MARKERS):
-        logger.warning("[Reco] LLM devolvió receta en vez de bullets — reintentando")
-        _prompt_retry = (
-            f"Lista 3 opciones de {momento_reco.lower()} peruanas "
-            f"({round(restante)} kcal disponibles). SOLO este formato exacto:\n"
-            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
-            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
-            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
-            f"Sin frases extra, sin ingredientes, sin pasos."
+    try:
+        respuesta_llm_reco = await _llamar_groq_con_excepciones(
+            ia_engine, _prompt_reco_comida, max_tokens=180, temp=0.5
         )
-        respuesta_llm_reco = await ia_engine._llamar_groq(_prompt_retry, max_tokens=120, temp=0.2)
 
-    # Guard: si el LLM ignoró una restricción médica/dietética (Vegano, Vegetariano,
-    # Lactosa, Celíaco, Diabetes...), reintentar UNA vez. Dos chequeos complementarios:
-    #   1. Palabra clave literal (rápido, sin costo de API) — detecta "pollo", "leche", etc.
-    #   2. Juicio de Groq (sin hardcoding) — detecta platos que violan la condición aunque
-    #      el nombre no contenga la palabra prohibida (ej. "Picarones" para un diabético:
-    #      Groq sabe que llevan miel sin que tengamos que mantener una lista de postres).
-    from app.services.recomendador_platos import _tokens_prohibidos, _detectar_dieta_en_mensaje
-    _condiciones_dieta_check = list(getattr(perfil, "medical_conditions", None) or [])
-    # Sumar restricciones dichas en el mensaje actual aunque no estén en el
-    # perfil — ej. "Soy vegano y me duele la rodilla..." nunca se detectaba
-    # porque "Vegano" no vivía en medical_conditions de este usuario.
-    for _cond_msg in _detectar_dieta_en_mensaje(mensaje):
-        if _cond_msg not in _condiciones_dieta_check:
-            _condiciones_dieta_check.append(_cond_msg)
-    _tokens_dieta_check = _tokens_prohibidos(_condiciones_dieta_check) | _tokens_exclusion_msg
-
-    # Calificadores que vuelven SEGURO un alimento normalmente prohibido
-    # (ej. "queso deslactosado" no debe disparar el filtro de Lactosa).
-    # Se evalúa por línea/plato — si la misma línea trae el calificador, no cuenta.
-    _CALIFICADORES_SEGUROS_DIETA = (
-        "deslactosado", "deslactosada", "sin lactosa", "sin azúcar", "sin azucar",
-        "sin gluten", "light", "diet",
-    )
-
-    def _linea_viola_dieta(linea: str) -> bool:
-        _linea_low = linea.lower()
-        if any(c in _linea_low for c in _CALIFICADORES_SEGUROS_DIETA):
-            return False
-        return any(t in _linea_low for t in _tokens_dieta_check)
-
-    _viola_token = bool(_tokens_dieta_check) and any(
-        _linea_viola_dieta(linea) for linea in (respuesta_llm_reco or "").split("\n")
-    )
-
-    _viola_juicio_groq = False
-    if not _viola_token and condiciones and condiciones.lower() != "ninguna":
-        try:
-            _prompt_validacion_dieta = (
-                f"Eres nutricionista clínico ESTRICTO. Condiciones del paciente: {condiciones}.\n"
-                f"Platos propuestos:\n{respuesta_llm_reco}\n"
-                f"Revisa cada plato UNO POR UNO, pensando en la receta tradicional completa, "
-                f"no solo en las palabras del nombre. Postres y dulces tradicionales peruanos "
-                f"(picarones, mazamorra, alfajor, suspiro, cocada, tres leches, turrón, etc.) "
-                f"SIEMPRE llevan azúcar o miel aunque el nombre no lo diga — son inadecuados "
-                f"para Diabetes. Quesos/lácteos sin la palabra 'deslactosado' son inadecuados "
-                f"para Intolerancia a la Lactosa.\n"
-                f"¿Hay AL MENOS UN plato inadecuado para alguna de las condiciones del paciente? "
-                f"Responde SOLO 'SI' o 'NO'."
+        # Guard: si el LLM ignoró el formato y devolvió receta, reintentar con prompt mínimo
+        _RECIPE_MARKERS = ("ingredientes:", "preparación:", "preparacion:", "pasos:", "instrucciones:")
+        if any(m in (respuesta_llm_reco or "").lower() for m in _RECIPE_MARKERS):
+            logger.warning("[Reco] LLM devolvió receta en vez de bullets — reintentando")
+            _prompt_retry = (
+                f"Lista 3 opciones de {momento_reco.lower()} peruanas "
+                f"({round(restante)} kcal disponibles). SOLO este formato exacto:\n"
+                f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                f"Sin frases extra, sin ingredientes, sin pasos."
             )
-            _resp_validacion = await ia_engine._llamar_groq(
-                _prompt_validacion_dieta, max_tokens=5, temp=0.0
-            )
-            _viola_juicio_groq = bool(_resp_validacion) and _resp_validacion.strip().lower().startswith("si")
-        except Exception as _e_val:
-            logger.warning("[Reco] Validación dietética con Groq falló: %s", _e_val)
+            respuesta_llm_reco = await _llamar_groq_con_excepciones(ia_engine, _prompt_retry, max_tokens=120, temp=0.2)
 
-    if _viola_token or _viola_juicio_groq:
-        # Capturar EXACTAMENTE qué palabras dispararon el chequeo, para que el
-        # reintento las excluya por nombre — un aviso genérico ("evita lo que
-        # corresponda") no es suficiente, el LLM tiende a repetir el mismo plato.
-        _tokens_detectados = sorted({
-            t for linea in (respuesta_llm_reco or "").split("\n")
-            for t in _tokens_dieta_check
-            if t in linea.lower() and not any(
-                c in linea.lower() for c in _CALIFICADORES_SEGUROS_DIETA
-            )
-        })
-        logger.warning(
-            "[Reco] Plato inadecuado por condición médica (token=%s detectados=%s, groq=%s) — reintentando",
-            _viola_token, _tokens_detectados, _viola_juicio_groq,
-        )
-        _restriccion_explicita = (
-            f"NO uses NINGUNO de estos ingredientes/platos, ni variantes: "
-            f"{', '.join(_tokens_detectados)}.\n"
-            if _tokens_detectados else ""
-        )
-        _prompt_retry_dieta = (
-            f"Lista EXACTAMENTE 3 platos de {momento_reco.lower()} peruanos "
-            f"({round(restante)} kcal disponibles) apropiados para un paciente con: {condiciones}.\n"
-            f"{_restriccion_explicita}"
-            f"Piensa como nutricionista clínico: evita además cualquier otro ingrediente o "
-            f"receta tradicional incompatible con esas condiciones, incluso si el nombre del "
-            f"plato no lo menciona explícitamente. Verifica cada plato dos veces.\n"
-            f"SOLO este formato:\n"
-            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
-            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
-            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
-            f"Sin frases extra, sin ingredientes, sin pasos."
-        )
-        respuesta_llm_reco = await ia_engine._llamar_groq(_prompt_retry_dieta, max_tokens=150, temp=0.1)
+        # Guard: si el LLM ignoró una restricción médica/dietética (Vegano, Vegetariano,
+        # Lactosa, Celíaco, Diabetes...), reintentar UNA vez. Dos chequeos complementarios:
+        #   1. Palabra clave literal (rápido, sin costo de API) — detecta "pollo", "leche", etc.
+        #   2. Juicio de Groq (sin hardcoding) — detecta platos que violan la condición aunque
+        #      el nombre no contenga la palabra prohibida (ej. "Picarones" para un diabético:
+        #      Groq sabe que llevan miel sin que tengamos que mantener una lista de postres).
+        from app.services.recomendador_platos import _tokens_prohibidos, _detectar_dieta_en_mensaje
+        _condiciones_dieta_check = list(getattr(perfil, "medical_conditions", None) or [])
+        # Sumar restricciones dichas en el mensaje actual aunque no estén en el
+        # perfil — ej. "Soy vegano y me duele la rodilla..." nunca se detectaba
+        # porque "Vegano" no vivía en medical_conditions de este usuario.
+        for _cond_msg in _detectar_dieta_en_mensaje(mensaje):
+            if _cond_msg not in _condiciones_dieta_check:
+                _condiciones_dieta_check.append(_cond_msg)
+        _tokens_dieta_check = _tokens_prohibidos(_condiciones_dieta_check) | _tokens_exclusion_msg
 
-        # Garantía final: si el reintento TAMBIÉN viola (el LLM puede introducir
-        # una violación nueva al regenerar), no se intenta una 3ra vez sin certeza
-        # — se usa un fallback determinista 100% seguro (sin carne/pescado/lácteos/
-        # gluten/azúcar, válido para cualquiera de las 5 condiciones principales).
-        _aun_viola = bool(_tokens_dieta_check) and any(
+        # Calificadores que vuelven SEGURO un alimento normalmente prohibido
+        # (ej. "queso deslactosado" no debe disparar el filtro de Lactosa).
+        # Se evalúa por línea/plato — si la misma línea trae el calificador, no cuenta.
+        _CALIFICADORES_SEGUROS_DIETA = (
+            "deslactosado", "deslactosada", "sin lactosa", "sin azúcar", "sin azucar",
+            "sin gluten", "light", "diet",
+        )
+
+        def _linea_viola_dieta(linea: str) -> bool:
+            _linea_low = linea.lower()
+            if any(c in _linea_low for c in _CALIFICADORES_SEGUROS_DIETA):
+                return False
+            return any(t in _linea_low for t in _tokens_dieta_check)
+
+        _viola_token = bool(_tokens_dieta_check) and any(
             _linea_viola_dieta(linea) for linea in (respuesta_llm_reco or "").split("\n")
         )
-        if _aun_viola:
-            logger.warning(
-                "[Reco] Reintento también violó la condición médica — usando fallback seguro garantizado"
-            )
-            _FALLBACK_SEGURO_MOMENTO = {
-                "DESAYUNO": (
-                    "- Fruta sola (~80 kcal, P:1g C:20g G:0g)\n"
-                    "- Avena con agua (~150 kcal, P:5g C:27g G:3g)\n"
-                    "- Tostada con palta (~120 kcal, P:3g C:15g G:7g)"
-                ),
-                "ALMUERZO": (
-                    "- Menestra sencilla con verduras (~350 kcal, P:18g C:55g G:5g)\n"
-                    "- Sopa de verduras con quinua (~300 kcal, P:10g C:50g G:5g)\n"
-                    "- Ensalada de verduras con palta (~280 kcal, P:5g C:30g G:15g)"
-                ),
-                "CENA": (
-                    "- Sopa de verduras (~180 kcal, P:6g C:25g G:4g)\n"
-                    "- Ensalada de verduras con palta (~220 kcal, P:4g C:20g G:14g)\n"
-                    "- Menestra ligera (~250 kcal, P:14g C:35g G:4g)"
-                ),
-                "MERIENDA": (
-                    "- Fruta sola (~80 kcal, P:1g C:20g G:0g)\n"
-                    "- Puñado de frutos secos (~150 kcal, P:5g C:8g G:12g)\n"
-                    "- Tostada con palta (~120 kcal, P:3g C:15g G:7g)"
-                ),
-            }
-            respuesta_llm_reco = _FALLBACK_SEGURO_MOMENTO.get(
-                momento_reco, _FALLBACK_SEGURO_MOMENTO["ALMUERZO"]
-            )
 
-    # Guard de ingrediente pedido explícitamente ("qué puedo comer con palta",
-    # "algo con quinua") — encontrado en pruebas reales: la instrucción del
-    # prompt ("al menos 1 de 3") no siempre se respetaba (0/3 platos con
-    # quinua en una prueba). Verificación de código + reintento dirigido,
-    # mismo patrón que el guard dietético de arriba.
-    if pref_ingrediente_reco:
-        _ing_norm = _normalizar_nombre(_ing_detectado)
-        _lineas_reco = [l for l in (respuesta_llm_reco or "").split("\n") if l.strip()]
-        # Por LÍNEA (plato), no "en algún lugar del texto" — si solo 1 de 3
-        # platos lo menciona, sigue sin cumplir lo que el usuario pidió.
-        _n_con_ingrediente = sum(1 for l in _lineas_reco if _ing_norm in _normalizar_nombre(l))
-        _tiene_ingrediente = bool(_lineas_reco) and _n_con_ingrediente == len(_lineas_reco)
-        if not _tiene_ingrediente:
+        _viola_juicio_groq = False
+        if not _viola_token and condiciones and condiciones.lower() != "ninguna":
+            try:
+                _prompt_validacion_dieta = (
+                    f"Eres nutritionist clínico ESTRICTO. Condiciones del paciente: {condiciones}.\n"
+                    f"Platos propuestos:\n{respuesta_llm_reco}\n"
+                    f"Revisa cada plato UNO POR UNO, pensando en la receta tradicional completa, "
+                    f"no solo en las palabras del nombre. Postres y dulces tradicionales peruanos "
+                    f"(picarones, mazamorra, alfajor, suspiro, cocada, tres leches, turrón, etc.) "
+                    f"SIEMPRE llevan azúcar o miel aunque el nombre no lo diga — son inadecuados "
+                    f"para Diabetes. Quesos/lácteos sin la palabra 'deslactosado' son inadecuados "
+                    f"para Intolerancia a la Lactosa.\n"
+                    f"¿Hay AL MENOS UN plato inadecuado para alguna de las condiciones del paciente? "
+                    f"Responde SOLO 'SI' o 'NO'."
+                )
+                _resp_validacion = await _llamar_groq_con_excepciones(
+                    ia_engine, _prompt_validacion_dieta, max_tokens=5, temp=0.0
+                )
+                _viola_juicio_groq = bool(_resp_validacion) and _resp_validacion.strip().lower().startswith("si")
+            except Exception as _e_val:
+                logger.warning("[Reco] Validación dietética con Groq falló: %s", _e_val)
+
+        if _viola_token or _viola_juicio_groq:
+            # Capturar EXACTAMENTE qué palabras dispararon el chequeo, para que el
+            # reintento las excluya por nombre — un aviso genérico ("evita lo que
+            # corresponda") no es suficiente, el LLM tiende a repetir el mismo plato.
+            _tokens_detectados = sorted({
+                t for linea in (respuesta_llm_reco or "").split("\n")
+                for t in _tokens_dieta_check
+                if t in linea.lower() and not any(
+                    c in linea.lower() for c in _CALIFICADORES_SEGUROS_DIETA
+                )
+            })
             logger.warning(
-                "[Reco] Ingrediente pedido '%s' ausente de los 3 platos — reintentando",
-                _ing_detectado,
+                "[Reco] Plato inadecuado por condición médica (token=%s detectados=%s, groq=%s) — reintentando",
+                _viola_token, _tokens_detectados, _viola_juicio_groq,
             )
-            _prompt_retry_ing = (
+            _restriccion_explicita = (
+                f"NO uses NINGUNO de estos ingredientes/platos, ni variantes: "
+                f"{', '.join(_tokens_detectados)}.\n"
+                if _tokens_detectados else ""
+            )
+            _prompt_retry_dieta = (
                 f"Lista EXACTAMENTE 3 platos de {momento_reco.lower()} peruanos "
-                f"({round(restante)} kcal disponibles) que incluyan '{_ing_detectado}' "
-                f"como ingrediente — LOS 3, no solo uno. Si '{_ing_detectado}' no calza "
-                f"de forma natural en un plato de fondo, inclúyelo como acompañamiento "
-                f"o guarnición de ese plato.\n"
+                f"({round(restante)} kcal disponibles) apropiados para un paciente con: {condiciones}.\n"
+                f"{_restriccion_explicita}"
+                f"Piensa como nutricionista clínico: evita además cualquier otro ingrediente o "
+                f"receta tradicional incompatible con esas condiciones, incluso si el nombre del "
+                f"plato no lo menciona explícitamente. Verifica cada plato dos veces.\n"
                 f"SOLO este formato:\n"
                 f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
                 f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
                 f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
                 f"Sin frases extra, sin ingredientes, sin pasos."
             )
-            respuesta_llm_reco = await ia_engine._llamar_groq(
-                _prompt_retry_ing, max_tokens=150, temp=0.2
+            respuesta_llm_reco = await _llamar_groq_con_excepciones(ia_engine, _prompt_retry_dieta, max_tokens=150, temp=0.1)
+
+            # Garantía final: si el reintento TAMBIÉN viola (el LLM puede introducir
+            # una violación nueva al regenerar), no se intenta una 3ra vez sin certeza
+            # — se usa un fallback determinista 100% seguro (sin carne/pescado/lácteos/
+            # gluten/azúcar, válido para cualquiera de las 5 condiciones principales).
+            _aun_viola = bool(_tokens_dieta_check) and any(
+                _linea_viola_dieta(linea) for linea in (respuesta_llm_reco or "").split("\n")
             )
-            # Segundo intento si el primero tampoco lo logró (ingredientes
-            # "difíciles" como palta/quinua en platos de fondo tradicionales):
-            # instrucción más explícita, indicando CÓMO encajarlo si no calza
-            # como ingrediente principal.
-            _lineas_retry1 = [l for l in (respuesta_llm_reco or "").split("\n") if l.strip()]
-            _n_retry1 = sum(1 for l in _lineas_retry1 if _ing_norm in _normalizar_nombre(l))
-            if not (_lineas_retry1 and _n_retry1 == len(_lineas_retry1)):
+            if _aun_viola:
                 logger.warning(
-                    "[Reco] Reintento 1 tampoco logró '%s' en los 3 platos — 2do reintento",
+                    "[Reco] Reintento también violó la condición médica — usando fallback seguro garantizado"
+                )
+                respuesta_llm_reco = obtener_fallback_aleatorio(momento_reco)
+
+        # Guard de ingrediente pedido explícitamente ("qué puedo comer con palta",
+        # "algo con quinua") — encontrado en pruebas reales: la instrucción del
+        # prompt ("al menos 1 de 3") no siempre se respetaba (0/3 platos con
+        # quinua en una prueba). Verificación de código + reintento dirigido,
+        # mismo patrón que el guard dietético de arriba.
+        if pref_ingrediente_reco:
+            _ing_norm = _normalizar_nombre(_ing_detectado)
+            _lineas_reco = [l for l in (respuesta_llm_reco or "").split("\n") if l.strip()]
+            # Por LÍNEA (plato), no "en algún lugar del texto" — si solo 1 de 3
+            # platos lo menciona, sigue sin cumplir lo que el usuario pidió.
+            _n_con_ingrediente = sum(1 for l in _lineas_reco if _ing_norm in _normalizar_nombre(l))
+            _tiene_ingrediente = bool(_lineas_reco) and _n_con_ingrediente == len(_lineas_reco)
+            if not _tiene_ingrediente:
+                logger.warning(
+                    "[Reco] Ingrediente pedido '%s' ausente de los 3 platos — reintentando",
                     _ing_detectado,
                 )
-                _prompt_retry_ing2 = (
+                _prompt_retry_ing = (
                     f"Lista EXACTAMENTE 3 platos de {momento_reco.lower()} peruanos "
-                    f"({round(restante)} kcal disponibles). REGLA OBLIGATORIA: cada uno "
-                    f"de los 3 nombres de plato debe mencionar literalmente la palabra "
-                    f"'{_ing_detectado}' — agrégala como guarnición/acompañamiento si no "
-                    f"es el ingrediente principal (ej. 'Lomo Saltado con {_ing_detectado}', "
-                    f"'Ensalada de {_ing_detectado}', 'Sopa con {_ing_detectado}').\n"
+                    f"({round(restante)} kcal disponibles) que incluyan '{_ing_detectado}' "
+                    f"como ingrediente — LOS 3, no solo uno. Si '{_ing_detectado}' no calza "
+                    f"de forma natural en un plato de fondo, inclúyelo como acompañamiento "
+                    f"o guarnición de ese plato.\n"
                     f"SOLO este formato:\n"
                     f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
                     f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
                     f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
-                    f"Sin frases extra."
+                    f"Sin frases extra, sin ingredientes, sin pasos."
                 )
-                respuesta_llm_reco = await ia_engine._llamar_groq(
-                    _prompt_retry_ing2, max_tokens=150, temp=0.2
+                respuesta_llm_reco = await _llamar_groq_con_excepciones(
+                    ia_engine, _prompt_retry_ing, max_tokens=150, temp=0.2
                 )
-            # No hay fallback determinista aquí (no se puede inventar un plato
-            # con un ingrediente arbitrario sin hardcodear) — si ningún
-            # reintento lo logra, se acepta el resultado igual, mejor que
-            # cortar la recomendación por completo.
+                # Segundo intento si el primero tampoco lo logró (ingredientes
+                # "difíciles" como palta/quinua en platos de fondo tradicionales):
+                # instrucción más explícita, indicando CÓMO encajarlo si no calza
+                # como ingrediente principal.
+                _lineas_retry1 = [l for l in (respuesta_llm_reco or "").split("\n") if l.strip()]
+                _n_retry1 = sum(1 for l in _lineas_retry1 if _ing_norm in _normalizar_nombre(l))
+                if not (_lineas_retry1 and _n_retry1 == len(_lineas_retry1)):
+                    logger.warning(
+                        "[Reco] Reintento 1 tampoco logró '%s' en los 3 platos — 2do reintento",
+                        _ing_detectado,
+                    )
+                    _prompt_retry_ing2 = (
+                        f"Lista EXACTAMENTE 3 platos de {momento_reco.lower()} peruanos "
+                        f"({round(restante)} kcal disponibles). REGLA OBLIGATORIA: cada uno "
+                        f"de los 3 nombres de plato debe mencionar literalmente la palabra "
+                        f"'{_ing_detectado}' — agrégala como guarnición/acompañamiento si no "
+                        f"es el ingrediente principal (ej. 'Lomo Saltado con {_ing_detectado}', "
+                        f"'Ensalada de {_ing_detectado}', 'Sopa con {_ing_detectado}').\n"
+                        f"SOLO este formato:\n"
+                        f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                        f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                        f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                        f"Sin frases extra."
+                    )
+                    respuesta_llm_reco = await _llamar_groq_con_excepciones(
+                        ia_engine, _prompt_retry_ing2, max_tokens=150, temp=0.2
+                    )
 
-    # Guard de coherencia culinaria: el LLM a veces combina palabras reales
-    # de forma inventada (ej. "Pachamanca de quinoa" — la pachamanca es con
-    # carnes, nunca de quinoa; "Lomo saltado de pescado" — el lomo saltado es
-    # de carne/pollo). Sin hardcodear nombres de platos, le pedimos a Groq que
-    # juzgue con su propio conocimiento culinario si algo suena inventado.
-    try:
-        _prompt_coherencia = (
-            f"Eres experto en gastronomía peruana. Te paso 3 platos:\n"
-            f"{respuesta_llm_reco}\n"
-            f"Analiza CADA plato uno por uno, en voz alta, antes de concluir:\n"
-            f"Plato 1: ¿es una receta real que existe tal cual en la cocina "
-            f"peruana? ¿Sí o no, y por qué?\n"
-            f"Plato 2: lo mismo.\n"
-            f"Plato 3: lo mismo.\n"
-            f"Sé ESTRICTO: muchos platos peruanos tienen un ingrediente "
-            f"principal FIJO por tradición (ej. la pachamanca SIEMPRE es con "
-            f"carnes — pollo, cerdo, cordero — JAMÁS con quinua o verduras "
-            f"solas; el lomo saltado SIEMPRE es con carne de res o pollo, "
-            f"JAMÁS con pescado). Si un plato cambia ese ingrediente fijo por "
-            f"otro, NO es una receta real, es una combinación inventada.\n"
-            f"Termina tu respuesta exactamente con la palabra SI (si al menos "
-            f"un plato es inventado) o NO (si los 3 son reales), en la última línea."
-        )
-        _resp_coherencia = await ia_engine._llamar_groq(
-            _prompt_coherencia, max_tokens=220, temp=0.0
-        )
-        _ultima_linea_coherencia = (
-            (_resp_coherencia or "").strip().splitlines()[-1].strip().lower().rstrip(".")
-            if _resp_coherencia else ""
-        )
-        _incoherente = _ultima_linea_coherencia in ("si", "sí")
-    except Exception as _e_coh:
-        _incoherente = False
-        logger.warning("[Reco] Validación de coherencia culinaria falló: %s", _e_coh)
+        # Guard de coherencia culinaria
+        try:
+            _prompt_coherencia = (
+                f"Eres experto en gastronomía peruana. Te paso 3 platos:\n"
+                f"{respuesta_llm_reco}\n"
+                f"Analiza CADA plato uno por uno, en voz alta, antes de concluir:\n"
+                f"Plato 1: ¿es una receta real que existe tal cual en la cocina "
+                f"peruana? ¿Sí o no, y por qué?\n"
+                f"Plato 2: lo mismo.\n"
+                f"Plato 3: lo mismo.\n"
+                f"Sé ESTRICTO: muchos platos peruanos tienen un ingrediente "
+                f"principal FIJO por tradición (ej. la pachamanca SIEMPRE es con "
+                f"carnes — pollo, cerdo, cordero — JAMÁS con quinua o verduras "
+                f"solas; el lomo saltado SIEMPRE es con carne de res o pollo, "
+                f"JAMÁS con pescado). Si un plato cambia ese ingrediente fijo por "
+                f"otro, NO es una receta real, es una combinación inventada.\n"
+                f"Termina tu respuesta exactamente con la palabra SI (si al menos "
+                f"un plato es inventado) o NO (si los 3 son reales), en la última línea."
+            )
+            _resp_coherencia = await _llamar_groq_con_excepciones(
+                ia_engine, _prompt_coherencia, max_tokens=220, temp=0.0
+            )
+            _ultima_linea_coherencia = (
+                (_resp_coherencia or "").strip().splitlines()[-1].strip().lower().rstrip(".")
+                if _resp_coherencia else ""
+            )
+            _incoherente = _ultima_linea_coherencia in ("si", "sí")
+        except Exception as _e_coh:
+            _incoherente = False
+            logger.warning("[Reco] Validación de coherencia culinaria falló: %s", _e_coh)
 
-    if _incoherente:
-        logger.warning("[Reco] Plato con combinación inventada detectado — reintentando")
-        _prompt_retry_coherencia = (
-            f"Lista EXACTAMENTE 3 platos de {momento_reco.lower()} peruanos "
-            f"({round(restante)} kcal disponibles) que sean REALES y "
-            f"conocidos en la gastronomía peruana — NO inventes combinaciones "
-            f"nuevas de ingredientes que no se preparan juntos tradicionalmente. "
-            f"Usa solo platos que cualquier peruano reconocería de inmediato.\n"
-            f"SOLO este formato:\n"
-            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
-            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
-            f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
-            f"Sin frases extra, sin ingredientes, sin pasos."
-        )
-        respuesta_llm_reco = await ia_engine._llamar_groq(
-            _prompt_retry_coherencia, max_tokens=150, temp=0.2
-        )
+        if _incoherente:
+            logger.warning("[Reco] Plato con combinación inventada detectado — reintentando")
+            _prompt_retry_coherencia = (
+                f"Lista EXACTAMENTE 3 platos de {momento_reco.lower()} peruanos "
+                f"({round(restante)} kcal disponibles) que sean REALES y "
+                f"conocidos en la gastronomía peruana — NO inventes combinaciones "
+                f"nuevas de ingredientes que no se preparan juntos tradicionalmente. "
+                f"Usa solo platos que cualquier peruano reconocería de inmediato.\n"
+                f"SOLO este formato:\n"
+                f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                f"- Nombre del plato (~XXX kcal, P:Xg C:Yg G:Zg)\n"
+                f"Sin frases extra, sin ingredientes, sin pasos."
+            )
+            respuesta_llm_reco = await _llamar_groq_con_excepciones(
+                ia_engine, _prompt_retry_coherencia, max_tokens=150, temp=0.2
+            )
+    except asyncio.TimeoutError as e:
+        logger.error("[LLM Timeout in recomendacion comida]: %s", e)
+        respuesta_llm_reco = obtener_fallback_aleatorio(momento_reco)
+    except ConnectionError as e:
+        logger.error("[LLM ConnectionError in recomendacion comida]: %s", e)
+        respuesta_llm_reco = obtener_fallback_aleatorio(momento_reco)
+    except Exception as e:
+        logger.exception("[General Error in recomendacion comida LLM flow]: %s", e)
+        respuesta_llm_reco = obtener_fallback_aleatorio(momento_reco)
 
     # 6. Parsear bullets del LLM y cachear macros reales (no hardcodeados)
     # Filtro de colas temporales: "Huevos con Espinacas y Mañana" → "Huevos con Espinacas"
@@ -2217,7 +2679,8 @@ async def respuesta_recomendacion_llm(
             _platos_limpios.append((_nombre_p, k_f, p_f, c_f, g_f))
         _persistir_historial_recomendaciones(db, perfil, momento_reco, _platos_limpios)
         return _construir_mensaje_natural_reco(
-            _platos_limpios, _palabra_evitada_msg, _condicion_relevante_msg, _estilo_evitado_momento
+            _platos_limpios, _palabra_evitada_msg, _condicion_relevante_msg, _estilo_evitado_momento,
+            advertencia_meta_natural,
         )
 
     # Intento 2 (fallback): el LLM no incluyó P/C/G — extraer solo nombre+kcal
@@ -2235,8 +2698,8 @@ async def respuesta_recomendacion_llm(
             _kcal_f = float(_kcal_p)
             p_f = c_f = g_f = 0.0
             try:
-                _raw_macro = await ia_engine._llamar_groq(
-                    _PROMPT_COMIDA.format(mensaje=_nombre_p), max_tokens=300, temp=0.0
+                _raw_macro = await _llamar_groq_con_excepciones(
+                    ia_engine, _PROMPT_COMIDA.format(mensaje=_nombre_p), max_tokens=300, temp=0.0
                 )
                 _d_macro = _parse_json(_raw_macro)
                 _items = (_d_macro or {}).get("alimentos") or []
@@ -2257,11 +2720,22 @@ async def respuesta_recomendacion_llm(
             _platos_limpios.append((_nombre_p, _kcal_f, p_f, c_f, g_f))
         _persistir_historial_recomendaciones(db, perfil, momento_reco, _platos_limpios)
         return _construir_mensaje_natural_reco(
-            _platos_limpios, _palabra_evitada_msg, _condicion_relevante_msg, _estilo_evitado_momento
+            _platos_limpios, _palabra_evitada_msg, _condicion_relevante_msg, _estilo_evitado_momento,
+            advertencia_meta_natural,
         )
 
-    # 7. Fallback: retornar respuesta del LLM tal como vino
-    return respuesta_llm_reco or "No pude generar recomendaciones en este momento."
+    # 7. Fallback: si la respuesta del LLM no tiene formato de plato reconocible
+    # (ni bullets con macros, ni bullets simples), no es segura para mostrar tal
+    # cual — podría ser texto roto, vacío o un formato inesperado. En vez de
+    # devolverla literal, usar el mismo fallback determinista que ya cubre los
+    # errores de conexión/timeout, para que el usuario siempre vea una
+    # respuesta natural y nunca texto basura.
+    if respuesta_llm_reco and respuesta_llm_reco.strip():
+        logger.warning(
+            "[Reco] Respuesta del LLM sin formato de plato reconocible — usando fallback: %r",
+            respuesta_llm_reco[:120],
+        )
+    return obtener_fallback_aleatorio(momento_reco)
 
 
 # Gestor de contexto liviano para la conversación libre: decide qué parte del
@@ -2368,8 +2842,8 @@ async def validate_and_retry(
         return respuesta
 
     _prompt_retry = construir_prompt_retry()
-    _respuesta_retry = await ia_engine._llamar_groq(
-        _prompt_retry, max_tokens=max_tokens_retry, temp=temp_retry
+    _respuesta_retry = await _llamar_groq_con_excepciones(
+        ia_engine, _prompt_retry, max_tokens=max_tokens_retry, temp=temp_retry
     )
     if es_invalida(_respuesta_retry or ""):
         return fallback
@@ -2446,17 +2920,26 @@ async def respuesta_chat_llm(
     historial: list,
     ia_engine,
     plan_macros: dict = None,
+    ctx: Optional[UserContext] = None,
 ) -> str:
     """Respuesta conversacional corta vía LLM."""
-    pct = round(consumido / meta * 100) if meta > 0 else 0
+    ctx = _asegurar_contexto(perfil, consumido, quemado, plan_macros, ctx)
+    objetivo = ctx.objetivo_normalizado
+    _es_vegano = any("vegano" in c.lower() for c in ctx.condiciones_medicas)
+    _es_vegetariano = any("vegetariano" in c.lower() for c in ctx.condiciones_medicas)
+    dieta = "Vegano" if _es_vegano else ("Vegetariano" if _es_vegetariano else "Normal")
+    condiciones = ", ".join(ctx.condiciones_medicas) or "ninguna"
+    # Balance vs meta — mismo cálculo y mismo bloque informativo que usa
+    # respuesta_recomendacion_llm (_calcular_balance_meta): antes este path
+    # comparaba consumido contra "meta" sola (sin sumar lo quemado) y nunca
+    # tenía la excepción de masa muscular, así que el mismo estado calórico
+    # podía leerse como "exceso" aquí y como normal en la recomendación.
+    _balance_chat = _calcular_balance_meta(consumido, meta, quemado, objetivo, mensaje)
+    pct = _balance_chat["pct"]
     hist_txt = "\n".join(
         f"{'Usuario' if m['role'] == 'user' else 'Asistente'}: {m['content'][:120]}"
         for m in historial[-4:]
     ) or "(inicio de conversación)"
-
-    objetivo = getattr(perfil, "goal", "mantener peso") or "mantener peso"
-    dieta = getattr(perfil, "diet_type", "Normal") or "Normal"
-    condiciones = ", ".join(getattr(perfil, "medical_conditions", None) or []) or "ninguna"
 
     # Detector de información insuficiente: si se menciona una lesión/dolor
     # de forma genérica (sin decir rodilla/espalda/hombro/codo), no hay datos
@@ -2491,7 +2974,12 @@ async def respuesta_chat_llm(
         # bastaba para que el LLM se desviara a hablar de dieta sin que se
         # preguntara — en temas de lesión/ejercicio, el nombre alcanza.
         bloque_perfil = f"- Nombre: {perfil.first_name}"
+        # Sin balance calórico tampoco: la regla de arriba ("puedo trotar")
+        # ya prohíbe mencionar kcal en preguntas de ejercicio — no mostrarlo
+        # evita que el LLM lo use de todos modos.
+        _bloque_balance_meta_txt = ""
     else:
+        _bloque_balance_meta_txt = _balance_chat["bloque_balance"]
         _peso = getattr(perfil, "weight", None)
         _meta_prot = (plan_macros or {}).get("proteinas_g")
         bloque_perfil = (
@@ -2508,6 +2996,7 @@ async def respuesta_chat_llm(
 
     prompt = _PROMPT_CHAT.format(
         bloque_perfil=bloque_perfil,
+        bloque_balance_meta=_bloque_balance_meta_txt,
         historial=hist_txt,
         mensaje=mensaje,
     )
@@ -2605,8 +3094,12 @@ async def respuesta_chat_llm(
             f"PROHIBIDO: comillas dobles o simples alrededor de las frases.\n"
             f"PROHIBIDO: mencionar el nombre del usuario."
         )
-        _raw_perm = await ia_engine._llamar_groq(_prompt_perm, max_tokens=100, temp=0.5)
-        _resultado_perm = _limpiar_markdown(_raw_perm)
+        try:
+            _raw_perm = await _llamar_groq_con_excepciones(ia_engine, _prompt_perm, max_tokens=100, temp=0.5)
+            _resultado_perm = _limpiar_markdown(_raw_perm)
+        except Exception as e:
+            logger.error("[LLM Error in chat permission check]: %s", e)
+            return _obtener_fallback_chat_seguro(perfil, "nutricion")
         # El LLM a veces ignora "PROHIBIDO mencionar el nombre" — quitar
         # "{Nombre}, " si quedó al inicio de la respuesta.
         _nombre_escaped = _re_puedo.escape(perfil.first_name or "")
@@ -2653,11 +3146,14 @@ async def respuesta_chat_llm(
     if _es_consulta_kcal:
         # Extraer el alimento de la pregunta y calcular con _PROMPT_COMIDA
         alimento_query = mensaje  # el LLM interpretará la pregunta como alimento
-        raw_macros = await ia_engine._llamar_groq(
-            _PROMPT_COMIDA.format(mensaje=alimento_query),
-            max_tokens=400, temp=0.0
-        )
-        d_macros = _parse_json(raw_macros)
+        try:
+            raw_macros = await _llamar_groq_con_excepciones(
+                ia_engine, _PROMPT_COMIDA.format(mensaje=alimento_query), max_tokens=400, temp=0.0
+            )
+            d_macros = _parse_json(raw_macros)
+        except Exception as e:
+            logger.error("[LLM Error in chat kcal query]: %s", e)
+            return _obtener_fallback_chat_seguro(perfil, "nutricion")
         if d_macros and d_macros.get("alimentos"):
             # Cachear para consistencia futura
             for item in d_macros["alimentos"]:
@@ -2693,123 +3189,120 @@ async def respuesta_chat_llm(
                 f"con {_partes_r[0]}, {_partes_r[1]} y {_partes_r[2]}."
             )
 
-    _max_tok = 500 if (_es_receta or _es_tecnica) else 200
-    raw = await ia_engine._llamar_groq(prompt, max_tokens=_max_tok, temp=0.7)
-    resultado = _limpiar_markdown(raw)
+    try:
+        _max_tok = 500 if (_es_receta or _es_tecnica) else 200
+        raw = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=_max_tok, temp=0.7)
+        resultado = _limpiar_markdown(raw)
 
-    # Para recetas: añadir saltos de línea antes de secciones clave
-    if _es_receta:
-        import re as _re_fmt
-        # El LLM a veces ignora "NO intro" y antepone un resumen del historial.
-        # Si "Ingredientes:" no está al inicio, descartar todo lo anterior.
-        _idx_ing = resultado.lower().find("ingredientes:")
-        if _idx_ing > 0:
-            resultado = resultado[_idx_ing:]
-        # Separar "Ingredientes:" y "Preparación:" en líneas propias
-        resultado = _re_fmt.sub(r'\s*(Ingredientes:)', r'\n\nIngredientes:', resultado)
-        resultado = _re_fmt.sub(r'\s*(Preparaci[oó]n:)', r'\n\nPreparación:', resultado)
-        # Cada paso numerado en su propia línea
-        resultado = _re_fmt.sub(r'\.?\s*(\d+\.)\s+', r'\n\1 ', resultado)
-        resultado = resultado.strip()
+        # Para recetas: añadir saltos de línea antes de secciones clave
+        if _es_receta:
+            import re as _re_fmt
+            # El LLM a veces ignora "NO intro" y antepone un resumen del historial.
+            # Si "Ingredientes:" no está al inicio, descartar todo lo anterior.
+            _idx_ing = resultado.lower().find("ingredientes:")
+            if _idx_ing > 0:
+                resultado = resultado[_idx_ing:]
+            # Separar "Ingredientes:" and "Preparación:" en líneas propias
+            resultado = _re_fmt.sub(r'\s*(Ingredientes:)', r'\n\nIngredientes:', resultado)
+            resultado = _re_fmt.sub(r'\s*(Preparaci[oó]n:)', r'\n\nPreparación:', resultado)
+            # Cada paso numerado en su propia línea
+            resultado = _re_fmt.sub(r'\.?\s*(\d+\.)\s+', r'\n\1 ', resultado)
+            resultado = resultado.strip()
 
-    # Validador genérico: no repetir el mensaje del usuario + no mezclar el
-    # tema contrario (dieta en pregunta de ejercicio, o viceversa). Antes esto
-    # solo era una regla de prompt sin garantía — ahora usa el mismo ciclo
-    # detectar→reintentar→respaldo que ya funciona al 100% en nutrición/ejercicio.
-    if not _es_receta and not _es_tecnica:
-        resultado = await validate_and_retry(
-            respuesta=resultado,
-            ia_engine=ia_engine,
-            es_invalida=lambda t: (
-                _repite_mensaje_usuario(t, mensaje)
-                or _menciona_tema_no_relacionado(t, _tema_chat)
-                or _tiene_contradiccion_impacto(t)
-            ),
-            construir_prompt_retry=lambda: (
-                "Tu respuesta anterior tuvo un problema: "
-                + (
-                    "repitió/citó el mensaje del usuario al inicio. "
-                    if _repite_mensaje_usuario(resultado, mensaje) else ""
-                )
-                + (
-                    f"mencionó un tema no relacionado (la conversación es sobre "
-                    f"{'ejercicio/lesión' if _tema_chat == 'ejercicio' else 'nutrición'}, "
-                    f"no menciones {'dieta/kcal/nutrición' if _tema_chat == 'ejercicio' else 'ejercicio/entrenamiento'} "
-                    f"a menos que el usuario lo pida explícitamente). "
-                    if _menciona_tema_no_relacionado(resultado, _tema_chat) else ""
-                )
-                + (
-                    "se contradijo a sí misma: dijo que evitaras impacto y luego "
-                    "recomendó correr/trotar/saltar de todas formas. "
-                    if _tiene_contradiccion_impacto(resultado) else ""
-                )
-                + f"\nMensaje del usuario: \"{mensaje}\"\n"
-                + f"Conversación reciente:\n{hist_txt}\n"
-                + "Responde de nuevo corrigiendo eso, máximo 3 oraciones, sin preguntas, sin citar el mensaje. "
-                + "Si mencionas evitar impacto, NO sugieras correr/trotar/saltar en la misma respuesta."
-            ),
-            fallback=_filtrar_resultado_chat(resultado, _tema_chat),
+        # Validador genérico
+        if not _es_receta and not _es_tecnica:
+            resultado = await validate_and_retry(
+                respuesta=resultado,
+                ia_engine=ia_engine,
+                es_invalida=lambda t: (
+                    _repite_mensaje_usuario(t, mensaje)
+                    or _menciona_tema_no_relacionado(t, _tema_chat)
+                    or _tiene_contradiccion_impacto(t)
+                ),
+                construir_prompt_retry=lambda: (
+                    "Tu respuesta anterior tuvo un problema: "
+                    + (
+                        "repitió/citó el mensaje del usuario al inicio. "
+                        if _repite_mensaje_usuario(resultado, mensaje) else ""
+                    )
+                    + (
+                        f"mencionó un tema no relacionado (la conversación es sobre "
+                        f"{'ejercicio/lesión' if _tema_chat == 'ejercicio' else 'nutrición'}, "
+                        f"no menciones {'dieta/kcal/nutrición' if _tema_chat == 'ejercicio' else 'ejercicio/entrenamiento'} "
+                        f"a menos que el usuario lo pida explícitamente). "
+                        if _menciona_tema_no_relacionado(resultado, _tema_chat) else ""
+                    )
+                    + (
+                        "se contradijo a sí misma: dijo que evitaras impacto y luego "
+                        "recomendó correr/trotar/saltar de todas formas. "
+                        if _tiene_contradiccion_impacto(resultado) else ""
+                    )
+                    + f"\nMensaje del usuario: \"{mensaje}\"\n"
+                    + f"Conversación reciente:\n{hist_txt}\n"
+                    + "Responde de nuevo corrigiendo eso, máximo 3 oraciones, sin preguntas, sin citar el mensaje. "
+                    + "Si mencionas evitar impacto, NO sugieras correr/trotar/saltar en la misma respuesta."
+                ),
+                fallback=_filtrar_resultado_chat(resultado, _tema_chat),
+            )
+
+        # Guard de seguridad por lesión
+        from app.services.rutina_service import (
+            _LESIONES_SUSTITUCION, _detectar_lesiones, filtrar_lesiones_activas,
         )
-
-    # Guard de seguridad por lesión — la conversación libre también puede acabar
-    # sugiriendo ejercicios (ej. "¿puedo correr con esta lesión?" → "mejor haz
-    # sentadillas..."), y antes este guard solo protegía RECOMENDAR_EJERCICIO.
-    # Misma lógica reutilizada: detecta lesión en perfil o mensaje/historial,
-    # reintenta si sugiere algo riesgoso, fallback seguro en prosa si persiste.
-    from app.services.rutina_service import (
-        _LESIONES_SUSTITUCION, _detectar_lesiones, filtrar_lesiones_activas,
-    )
-    _condiciones_lista_chat = list(getattr(perfil, "medical_conditions", None) or [])
-    # Historial completo, no solo los últimos 2 turnos — mismo motivo que en
-    # respuesta_recomendacion_llm: si la zona se mencionó hace varios turnos,
-    # debe seguir siendo candidata para que filtrar_lesiones_activas decida
-    # si sigue activa o ya se recuperó (antes "desaparecía" de candidatas).
-    _texto_hist_chat = " ".join(str(h.get("content", "")) for h in (historial or []))
-    _lesiones_candidatas_chat = _detectar_lesiones(
-        _condiciones_lista_chat + [mensaje or "", _texto_hist_chat]
-    )
-    # Descartar lesiones que el usuario ya indicó como recuperadas más
-    # reciente que la última mención de dolor (ver filtrar_lesiones_activas).
-    _lesiones_activas_chat = filtrar_lesiones_activas(
-        _lesiones_candidatas_chat, historial, mensaje
-    )
-    if _lesiones_activas_chat:
-        _riesgosos_chat: set[str] = set()
-        _alternativas_chat: list[str] = []
-        for _lesion in _lesiones_activas_chat:
-            _cfg = _LESIONES_SUSTITUCION[_lesion]
-            for _riesgoso, (_id_seguro, _nombre_seguro) in _cfg["sustituir"].items():
-                if _riesgoso != "default":
-                    _riesgosos_chat.add(_riesgoso)
-                _alternativas_chat.append(_nombre_seguro)
-
-        if any(r in _normalizar_nombre(resultado) for r in _riesgosos_chat):
-            logger.warning(
-                "[Chat] Ejercicio riesgoso para lesión detectada en conversación libre — reintentando"
-            )
-            _justif_chat = "; ".join(
-                _LESIONES_SUSTITUCION[l]["justificacion"] for l in _lesiones_activas_chat
-            )
-            _prompt_retry_chat = (
-                f"Eres entrenador y nutricionista. El usuario tiene: {_justif_chat}.\n"
-                f"NO sugieras NINGUNO de estos ejercicios ni variantes: "
-                f"{', '.join(sorted(_riesgosos_chat))}.\n"
-                f"Si vas a sugerir actividad física, usa alternativas seguras como: "
-                f"{', '.join(_alternativas_chat)}.\n"
-                f"Mensaje del usuario: \"{mensaje}\"\n"
-                f"Responde en máximo 3 oraciones naturales, sin listas ni preguntas."
-            )
-            resultado = await ia_engine._llamar_groq(_prompt_retry_chat, max_tokens=200, temp=0.3)
-            resultado = _limpiar_markdown(resultado)
+        _condiciones_lista_chat = list(getattr(perfil, "medical_conditions", None) or [])
+        _texto_hist_chat = " ".join(str(h.get("content", "")) for h in (historial or []))
+        _lesiones_candidatas_chat = _detectar_lesiones(
+            _condiciones_lista_chat + [mensaje or "", _texto_hist_chat]
+        )
+        _lesiones_activas_chat = filtrar_lesiones_activas(
+            _lesiones_candidatas_chat, historial, mensaje
+        )
+        if _lesiones_activas_chat:
+            _riesgosos_chat: set[str] = set()
+            _alternativas_chat: list[str] = []
+            for _lesion in _lesiones_activas_chat:
+                _cfg = _LESIONES_SUSTITUCION[_lesion]
+                for _riesgoso, (_id_seguro, _nombre_seguro) in _cfg["sustituir"].items():
+                    if _riesgoso != "default":
+                        _riesgosos_chat.add(_riesgoso)
+                    _alternativas_chat.append(_nombre_seguro)
 
             if any(r in _normalizar_nombre(resultado) for r in _riesgosos_chat):
-                logger.warning("[Chat] Reintento también riesgoso — usando fallback seguro")
-                _nombres_unicos_chat = list(dict.fromkeys(_alternativas_chat))[:2]
-                _alt_txt = " o ".join(_nombres_unicos_chat) if _nombres_unicos_chat else "estiramientos suaves"
-                resultado = (
-                    f"Por tu lesión, mejor evita esfuerzos que la sobrecarguen. "
-                    f"Prueba con {_alt_txt} mientras te recuperas, y consulta con un profesional de salud."
+                logger.warning(
+                    "[Chat] Ejercicio riesgoso para lesión detectada en conversación libre — reintentando"
                 )
+                _justif_chat = "; ".join(
+                    _LESIONES_SUSTITUCION[l]["justificacion"] for l in _lesiones_activas_chat
+                )
+                _prompt_retry_chat = (
+                    f"Eres entrenador y nutricionista. El usuario tiene: {_justif_chat}.\n"
+                    f"NO sugieras NINGUNO de estos ejercicios ni variantes: "
+                    f"{', '.join(sorted(_riesgosos_chat))}.\n"
+                    f"Si vas a sugerir actividad física, usa alternativas seguras como: "
+                    f"{', '.join(_alternativas_chat)}.\n"
+                    f"Mensaje del usuario: \"{mensaje}\"\n"
+                    f"Responde en máximo 3 oraciones naturales, sin listas ni preguntas."
+                )
+                resultado = await _llamar_groq_con_excepciones(ia_engine, _prompt_retry_chat, max_tokens=200, temp=0.3)
+                resultado = _limpiar_markdown(resultado)
+
+                if any(r in _normalizar_nombre(resultado) for r in _riesgosos_chat):
+                    logger.warning("[Chat] Reintento también riesgoso — usando fallback seguro")
+                    _nombres_unicos_chat = list(dict.fromkeys(_alternativas_chat))[:2]
+                    _alt_txt = " o ".join(_nombres_unicos_chat) if _nombres_unicos_chat else "estiramientos suaves"
+                    resultado = (
+                        f"Por tu lesión, mejor evita esfuerzos que la sobrecarguen. "
+                        f"Prueba con {_alt_txt} mientras te recuperas, y consulta con un profesional de salud."
+                    )
+    except asyncio.TimeoutError as e:
+        logger.error("[LLM Timeout in respuesta_chat_llm]: %s", e)
+        resultado = _obtener_fallback_chat_seguro(perfil, _tema_chat)
+    except ConnectionError as e:
+        logger.error("[LLM ConnectionError in respuesta_chat_llm]: %s", e)
+        resultado = _obtener_fallback_chat_seguro(perfil, _tema_chat)
+    except Exception as e:
+        logger.exception("[General Error in respuesta_chat_llm]: %s", e)
+        resultado = _obtener_fallback_chat_seguro(perfil, _tema_chat)
 
     # Garantía determinista de formato: el LLM no siempre respeta "máx 3 oraciones"
     # ni "sin pregunta al final" pese a tenerlo en el prompt — esto recorta el
@@ -2949,6 +3442,199 @@ _PALABRAS_NO_ALIMENTO_GENERICAS = frozenset({
     "informacion", "información", "valor", "valores", "dice", "indica",
     "segun", "según", "cada", "tiene", "trae", "contiene",
 })
+
+
+_CONECTORES_PLATO_COMPUESTO = frozenset({"con", "y", "de", "a", "la", "el", "los", "las"})
+
+
+def _filtrar_componentes_de_plato_compuesto(alimentos: list[dict]) -> list[dict]:
+    """Si el LLM extrae tanto un plato compuesto ("Arroz con lentejas") como
+    sus propios ingredientes por separado ("arroz", "lentejas"), descarta los
+    ingredientes — ya están contados dentro del plato completo. Sin esto, un
+    plato reconocido como "X con Y" puede registrarse 3 veces (X, Y, y X con Y)
+    e inflar las kcal del día. Determinista (sin costo de tokens): un ítem se
+    descarta si TODAS sus palabras clave están contenidas en otro ítem que
+    tiene más palabras clave que él."""
+    if len(alimentos) < 2:
+        return alimentos
+
+    def _palabras_clave(nombre: str) -> set[str]:
+        return {
+            w for w in _normalizar_nombre(nombre or "").split()
+            if w not in _CONECTORES_PLATO_COMPUESTO
+        }
+
+    claves = [_palabras_clave(a.get("nombre", "")) for a in alimentos]
+    descartar_idx: set[int] = set()
+    for i, palabras_i in enumerate(claves):
+        if not palabras_i:
+            continue
+        for j, palabras_j in enumerate(claves):
+            if i == j or j in descartar_idx:
+                continue
+            # i es un componente de j si todas sus palabras están en j y j
+            # tiene estrictamente más palabras clave (es el plato completo,
+            # no solo otro nombre igual de corto).
+            if palabras_i.issubset(palabras_j) and len(palabras_j) > len(palabras_i):
+                descartar_idx.add(i)
+                break
+
+    if not descartar_idx:
+        return alimentos
+    return [a for idx, a in enumerate(alimentos) if idx not in descartar_idx]
+
+
+# Contenedores genéricos de preparación: a diferencia de "Arroz con lentejas"
+# (que SÍ lleva sus ingredientes en el propio nombre), "Batido"/"Jugo"/"Sopa"
+# no los lleva — _filtrar_componentes_de_plato_compuesto() no los detecta
+# porque no comparten palabras con sus ingredientes. Encontrado en auditoría
+# real: "batido de avena, leche, dos plátanos, miel" registraba el contenedor
+# Y sus 4 ingredientes a la vez, triplicando el conteo de kcal.
+_CONTENEDORES_GENERICOS = frozenset({
+    "batido", "licuado", "jugo", "sopa", "ensalada", "smoothie",
+    "preparado", "mezcla",
+})
+
+
+def _filtrar_contenedor_generico_con_ingredientes(alimentos: list[dict]) -> list[dict]:
+    """Si el LLM extrae un contenedor genérico ("Batido de avena") Y además
+    ≥2 ingredientes independientes en la misma extracción ("Leche",
+    "Plátano", "Miel"), el contenedor es redundante — sus propias kcal se
+    solapan con las de los ingredientes ya contados por separado. Se
+    descarta el contenedor, se conservan los ingredientes reales.
+
+    Solo aplica con ≥2 ingredientes además del contenedor: con 0 o 1 no hay
+    suficiente señal de que el contenedor sea redundante (podría ser el
+    único alimento real, ej. "Comí una ensalada" sola).
+
+    Nota: si el contenedor menciona un ingrediente que NO aparece en ningún
+    otro ítem (ej. "Batido DE AVENA" sin un ítem "Avena" aparte), esas kcal
+    se pierden al descartarlo — preferible a la sobreestimación que corrige
+    esta función, pero es un trade-off conocido, no un caso perfecto."""
+    def _primera_palabra(nombre: str) -> str:
+        palabras = _normalizar_nombre(nombre or "").split()
+        return palabras[0] if palabras else ""
+
+    contenedor_idx = {
+        i for i, a in enumerate(alimentos)
+        if _primera_palabra(a.get("nombre", "")) in _CONTENEDORES_GENERICOS
+    }
+    if not contenedor_idx:
+        return alimentos
+    if (len(alimentos) - len(contenedor_idx)) < 2:
+        return alimentos
+    return [a for i, a in enumerate(alimentos) if i not in contenedor_idx]
+
+
+# Palabras que indican EL MOMENTO en que se comió algo, nunca el alimento en
+# sí. El LLM las alucina como ítem cuando el mensaje no menciona ningún
+# alimento real (ej. "Registré mi almuerzo" → inventaba "Almuerzo" con
+# macros genéricos de una comida típica).
+_PALABRAS_MOMENTO_DIA = frozenset({
+    "desayuno", "almuerzo", "cena", "merienda", "snack", "comida",
+    "entreno", "postentreno", "post",
+})
+
+
+def _es_solo_palabra_momento_dia(nombre: str) -> bool:
+    """True si TODAS las palabras clave del nombre son de momento del día
+    (ej. "Almuerzo", "Post entreno") — no si el momento aparece junto a un
+    alimento real (ej. "Pollo al almuerzo" se queda, porque "pollo" no es
+    palabra de momento)."""
+    palabras = {
+        w for w in _normalizar_nombre(nombre or "").split()
+        if w not in _CONECTORES_PLATO_COMPUESTO
+    }
+    return bool(palabras) and palabras.issubset(_PALABRAS_MOMENTO_DIA)
+
+
+# Bebidas/ítems reales conocidos por tener calorías cercanas a 0 — sin esta
+# excepción, el filtro de "macros sospechosamente nulos" de abajo rechazaría
+# también al café/agua reales, no solo a alucinaciones como "umas".
+_ITEMS_BAJOS_EN_CALORIAS_CONOCIDOS = frozenset({
+    "agua", "cafe", "te", "infusion", "gaseosa light", "gaseosa zero",
+    "agua con gas", "agua mineral", "agua de mesa", "soda",
+})
+
+
+def _macros_sospechosamente_nulos(item: dict) -> bool:
+    """True si el ítem no tiene NINGÚN macro positivo (kcal/prot/carb/grasa
+    todos en 0) Y no es una bebida real conocida por ser ~0 kcal. Es la señal
+    más barata de que el propio LLM no tuvo datos reales para estimar este
+    "alimento" — un alimento real casi nunca da exactamente 0 en los 4
+    valores a la vez."""
+    try:
+        kcal  = float(item.get("kcal", 0) or 0)
+        prot  = float(item.get("prot_g", 0) or 0)
+        carb  = float(item.get("carb_g", 0) or 0)
+        grasa = float(item.get("grasa_g", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    if kcal > 0 or prot > 0 or carb > 0 or grasa > 0:
+        return False
+    nombre_norm = _normalizar_nombre(item.get("nombre", ""))
+    return not any(b in nombre_norm for b in _ITEMS_BAJOS_EN_CALORIAS_CONOCIDOS)
+
+
+def _existe_en_bd_alimentos(db, nombre: str) -> bool:
+    """Confirma (no descarta) que el nombre corresponde a un alimento real
+    consultando la tabla `alimentos` (~700+ registros INS/CENAN/OpenFoodFacts)
+    y sus alias — la misma fuente que ya usa FoodSourceResolver._buscar_bd_local()
+    para el flujo de platos dinámicos, reutilizada aquí en vez de un catálogo
+    manual nuevo. Solo se usa como señal de APOYO (ver _alimento_es_alucinacion):
+    muchos alimentos reales e internacionales ("sushi", marcas) no están en
+    esta tabla acotada a Perú, así que su ausencia NUNCA basta sola para
+    rechazar — solo refuerza el rechazo cuando los macros YA son sospechosos."""
+    if db is None:
+        return True  # sin BD disponible (ej. unit tests) -> no usar esta señal
+    nombre_norm = _normalizar_nombre(nombre or "")
+    palabras = [
+        p for p in nombre_norm.split()
+        if len(p) >= 3 and p not in _CONECTORES_PLATO_COMPUESTO
+    ]
+    if not palabras:
+        return True
+    try:
+        condiciones = " OR ".join(
+            f"unaccent(lower(nombre_normalizado)) ~* "
+            f"('(^| )' || unaccent(lower(:p{i})) || '( |$)')"
+            for i in range(len(palabras))
+        )
+        params = {f"p{i}": p for i, p in enumerate(palabras)}
+        fila = db.execute(
+            text(f"SELECT 1 FROM alimentos WHERE {condiciones} LIMIT 1"),
+            params,
+        ).fetchone()
+        if fila:
+            return True
+        from app.models.alimento_alias import AlimentoAlias
+        alias = db.query(AlimentoAlias).filter(AlimentoAlias.alias.in_(palabras)).first()
+        return alias is not None
+    except Exception as exc:
+        logger.warning("[Registro] Chequeo BD de alimento falló (no bloqueante): %s", exc)
+        # Sin esto, la transacción queda "abortada" en Postgres y CUALQUIER
+        # query posterior en la misma sesión (ej. el guardado del registro
+        # que sigue después de esta validación) fallaría en cascada con
+        # InFailedSqlTransaction, aunque el error real ya quedó manejado aquí.
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return True  # fail-open: un error de validación nunca debe bloquear un registro legítimo
+
+
+def _alimento_es_alucinacion(item: dict, db) -> bool:
+    """Rechazo conservador en 3 capas — las 3 deben coincidir para rechazar,
+    así el riesgo de falso positivo (bloquear un alimento real) es mínimo:
+    1. Sus propios macros son todos 0 (el LLM no tuvo datos reales).
+    2. No es una bebida real conocida por ser ~0 kcal.
+    3. Ninguna de sus palabras existe en la BD local de alimentos/alias.
+    "umas" falla las 3. "café" (aunque salga con 0 kcal) se salva en la 2.
+    "sushi" (aunque no esté en la BD local) se salva en la 1, porque el LLM
+    sí le asigna macros reales."""
+    if not _macros_sospechosamente_nulos(item):
+        return False
+    return not _existe_en_bd_alimentos(db, item.get("nombre", ""))
 
 
 def _extraccion_tiene_base_textual(nombre_extraido: str, mensaje_original: str) -> bool:

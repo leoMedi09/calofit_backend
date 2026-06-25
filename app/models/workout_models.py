@@ -79,3 +79,31 @@ class WorkoutSessionEjercicio(Base):
             f"<WorkoutSessionEjercicio(session_id={self.session_id}, "
             f"ejercicio_id={self.ejercicio_id!r}, kcal={self.calorias_quemadas})>"
         )
+
+
+class WorkoutLog(Base):
+    """
+    Registro histórico simple de un ejercicio realizado (NLP sync / manual sync).
+    """
+    __tablename__ = "workout_logs"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    client_id            = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True)
+    ejercicio            = Column(String(255), nullable=False)
+    series               = Column(Integer, nullable=False)
+    reps                 = Column(Integer, nullable=False)
+    peso_kg              = Column(Float, nullable=True)
+    created_at           = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    calorias_quemadas    = Column(Float, nullable=True)
+    session_duration_min = Column(Float, nullable=True)
+    intensity            = Column(String(50), nullable=True)
+
+    # Relationships
+    client = relationship("Client", foreign_keys=[client_id])
+
+    def __repr__(self):
+        return (
+            f"<WorkoutLog(client_id={self.client_id}, "
+            f"ejercicio={self.ejercicio!r}, series={self.series}, reps={self.reps})>"
+        )
+

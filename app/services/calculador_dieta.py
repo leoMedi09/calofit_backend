@@ -13,6 +13,7 @@ from typing import Dict, Optional
 from dataclasses import dataclass
 
 from app.core.macros_diarios import macros_desde_calorias_pct_clasico
+from app.core.objetivo_utils import normalizar_objetivo, DEFICIT, SUPERAVIT
 
 @dataclass
 class RecomendacionDieta:
@@ -144,13 +145,12 @@ class CalculadorDietaAutomatica:
         factor_actividad = CalculadorDietaAutomatica.get_factor_actividad(nivel_actividad)
         gasto_calorico_diario = gmb * factor_actividad
         
-        # 4. Ajustar según objetivo (comparación case-insensitive para tolerar
-        #    valores como "perder peso" / "Perder peso" / "PERDER PESO")
-        _obj = (objetivo or "").lower().strip()
-        if "perder" in _obj:
+        # 4. Ajustar según objetivo usando normalización canónica
+        _concepto = normalizar_objetivo(objetivo)
+        if _concepto == DEFICIT:
             calorias = gasto_calorico_diario * 0.85
             ajuste_objetivo = "Déficit calórico (perder ~0.5kg/semana)"
-        elif "ganar" in _obj or "masa" in _obj:
+        elif _concepto == SUPERAVIT:
             calorias = gasto_calorico_diario * 1.1
             ajuste_objetivo = "Superávit calórico (ganar ~0.5kg/semana)"
         else:
@@ -212,7 +212,8 @@ class CalculadorDietaAutomatica:
             "Frutos secos (almendras, nueces)"
         ]
         
-        if objetivo == "Ganar masa":
+        _concepto_ali = normalizar_objetivo(objetivo)
+        if _concepto_ali == SUPERAVIT:
             return alimentos_base + [
                 "Carnes rojas magras",
                 "Productos lácteos enteros",
@@ -220,7 +221,7 @@ class CalculadorDietaAutomatica:
                 "Pasta integral",
                 "Aceite de oliva"
             ]
-        elif objetivo == "Perder peso":
+        elif _concepto_ali == DEFICIT:
             return alimentos_base + [
                 "Verduras sin almidón",
                 "Yogur griego bajo en grasa",
@@ -228,7 +229,7 @@ class CalculadorDietaAutomatica:
                 "Agua",
                 "Especias (canela, jengibre)"
             ]
-        else:  # Mantener peso
+        else:  # MANTENIMIENTO
             return alimentos_base + [
                 "Carbohidratos complejos",
                 "Grasas insaturadas",
@@ -248,7 +249,8 @@ class CalculadorDietaAutomatica:
             "Alcohol en exceso"
         ]
         
-        if objetivo == "Perder peso" or categoria_imc in ["Sobrepeso", "Obesidad grado I", "Obesidad grado II", "Obesidad grado III"]:
+        _concepto_evit = normalizar_objetivo(objetivo)
+        if _concepto_evit == DEFICIT or categoria_imc in ["Sobrepeso", "Obesidad grado I", "Obesidad grado II", "Obesidad grado III"]:
             return alimentos_evitar + [
                 "Productos lácteos enteros",
                 "Carnes grasas",
@@ -262,9 +264,10 @@ class CalculadorDietaAutomatica:
     @staticmethod
     def get_frecuencia_comidas(objetivo: str) -> str:
         """Recomienda frecuencia de comidas según objetivo"""
-        if objetivo == "Ganar masa":
+        _concepto_frec = normalizar_objetivo(objetivo)
+        if _concepto_frec == SUPERAVIT:
             return "5-6 comidas al día (3 principales + 2-3 meriendas)"
-        elif objetivo == "Perder peso":
+        elif _concepto_frec == DEFICIT:
             return "3 comidas principales + 2 meriendas (controlar tamaño de porciones)"
         else:
             return "3 comidas principales + 1-2 meriendas (flexible)"
@@ -286,9 +289,10 @@ class CalculadorDietaAutomatica:
             notas.append("🚨 Tu IMC indica obesidad. Busca ayuda profesional para un plan personalizado.")
         
         # Notas por objetivo
-        if objetivo == "Perder peso":
+        _concepto_nota = normalizar_objetivo(objetivo)
+        if _concepto_nota == DEFICIT:
             notas.append("💪 Para perder peso: Come despacio, bebe agua, aumenta actividad física.")
-        elif objetivo == "Ganar masa":
+        elif _concepto_nota == SUPERAVIT:
             notas.append("🏋️ Para ganar masa: Come en superávit, entrena con pesas, aumenta proteína.")
         
         # Notas por edad

@@ -1,16 +1,6 @@
 [run]
 source = app
 omit =
-    # Código legacy - reemplazado por nueva arquitectura
-    app/services/plato_constructor.py
-    app/services/nlp_food_extractor.py
-    app/services/response_parser.py
-    app/services/qty_utils.py
-    app/services/nutricional_result.py
-    app/services/parsing/*
-    app/services/ins_import_calidad.py
-    # Utilidades de importación/scripts
-    app/utils/ins_import_calidad.py
     # Configuración
     app/core/firebase.py
     # Tests mismos

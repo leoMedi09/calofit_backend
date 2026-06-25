@@ -394,6 +394,9 @@ class AsistenteService:
         calorias_meta = plan_hoy_data["calorias_dia"]
         progreso_pct  = min(100, (consumo_real / calorias_meta) * 100) if calorias_meta > 0 else 0
         adherencia_pct = round(progreso_pct * 0.7 + 20, 1)
+        
+        from app.core.user_context import UserContext
+        ctx = UserContext.build(perfil, consumo_real, quemadas_real, plan_hoy_data)
 
         alerta_fuzzy  = self.ia.generar_alerta_fuzzy(adherencia_pct, progreso_pct)
         mensaje_fuzzy = alerta_fuzzy.get("mensaje", "")
@@ -444,10 +447,11 @@ class AsistenteService:
                     _saludo_hora = "Buenas tardes"
                 else:
                     _saludo_hora = "Buenas noches"
+                _nombre_saludo = f", {perfil.first_name}" if perfil.first_name else ""
                 return _build_response(
                     perfil, "CHAT", "OTRO",
                     calorias_meta, consumo_real, quemadas_real, plan_hoy_data,
-                    f"{_saludo_hora}, {perfil.first_name}. ¿En qué te ayudo hoy?"
+                    f"{_saludo_hora}{_nombre_saludo}. ¿En qué te ayudo hoy?"
                 )
 
         # ── Guardia anti-no-alimento (2 capas) ───────────────────────────────
@@ -523,7 +527,7 @@ class AsistenteService:
             from app.services.llm_registro import registrar_comida_llm
             # No pasar historial — las recomendaciones previas confunden los macros.
             # La consistencia viene de la tabla de referencia en el prompt.
-            _com = await registrar_comida_llm(mensaje, perfil, plan_hoy_data, db, self.ia)
+            _com = await registrar_comida_llm(mensaje, perfil, plan_hoy_data, db, self.ia, ctx=ctx)
             # "Agrégalo en el registro" / "olvidé la palta" no nombra el alimento
             # en SU PROPIO mensaje (vive en el turno anterior, ej. "Te faltó la
             # palta") — pero "Agrega que comí un huevo frito" SÍ se basta solo.
@@ -543,7 +547,7 @@ class AsistenteService:
                 ]
                 if _turnos_usuario_prev:
                     _mensaje_combinado = f"{_turnos_usuario_prev[-1]} {mensaje}"
-                    _com = await registrar_comida_llm(_mensaje_combinado, perfil, plan_hoy_data, db, self.ia)
+                    _com = await registrar_comida_llm(_mensaje_combinado, perfil, plan_hoy_data, db, self.ia, ctx=ctx)
             _bal = _com.get("balance_actualizado", {})
             return {
                 "asistente":    "CaloFit IA",
@@ -661,6 +665,7 @@ class AsistenteService:
                     "carbohidratos": prog.carbohidratos_consumidos if prog else 0,
                     "grasas":        prog.grasas_consumidas if prog else 0,
                 },
+                ctx=ctx,
             )
             _intent_rec = "RECIPE" if modo_funcion == RECOMENDAR_NUTRICION else "POWER"
             return _build_response(
@@ -673,6 +678,7 @@ class AsistenteService:
             mensaje, perfil, consumo_real, calorias_meta,
             quemadas_real, _hist_limpio, self.ia,
             plan_macros=plan_hoy_data,
+            ctx=ctx,
         )
         # Guardia: si el LLM falló o devolvió vacío, usar fallback
         if not _texto_chat or len(_texto_chat.strip()) < 5 or _texto_chat.startswith("["):
@@ -708,9 +714,9 @@ class AsistenteService:
         # Filtro Python duro — independiente del LLM. Si el nombre del plato o
         # sus ingredientes contienen términos prohibidos por la dieta del usuario,
         # la sección se elimina antes de mostrarse al usuario.
-        _conds_guard = list(getattr(perfil, "medical_conditions", None) or [])
+        _conds_guard = ctx.condiciones_medicas
         _tokens_guard: set[str] = set()
-        if "Vegano" in _conds_guard:
+        if any(c.lower() == "vegano" for c in _conds_guard):
             _tokens_guard = {
                 "carne", "pollo", "pechuga", "gallina", "pato", "pavo", "cabrito",
                 "cerdo", "chancho", "res", "bistec", "lomo", "chicharron",
@@ -718,7 +724,7 @@ class AsistenteService:
                 "camaron", "camarón", "mariscos", "pulpo", "calamar",
                 "huevo", "leche", "queso", "yogur", "mantequilla",
             }
-        elif "Vegetariano" in _conds_guard:
+        elif any(c.lower() == "vegetariano" for c in _conds_guard):
             _tokens_guard = {
                 "carne", "pollo", "pechuga", "gallina", "pato", "pavo", "cabrito",
                 "cerdo", "chancho", "res", "bistec", "lomo",

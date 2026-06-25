@@ -88,10 +88,10 @@ _RE_NUMERO_COMPUESTO = re.compile(
     + r")(?:\s+(" + "|".join(sorted(_DECENAS_MAP, key=len, reverse=True))
     + r"))?(?:\s+y\s+(" + "|".join(sorted(_UNIDADES_MAP, key=len, reverse=True))
     + r"))?(?:\s+(y\s+medi[ao]|y\s+cuarto|y\s+tres\s+cuartos))?\b"
-    + r"|(?i)\b(" + "|".join(sorted(_DECENAS_MAP, key=len, reverse=True))
+    + r"|\b(" + "|".join(sorted(_DECENAS_MAP, key=len, reverse=True))
     + r")(?:\s+y\s+(" + "|".join(sorted(_UNIDADES_MAP, key=len, reverse=True))
     + r"))?(?:\s+(y\s+medi[ao]|y\s+cuarto|y\s+tres\s+cuartos))?\b"
-    + r"|(?i)\b(" + "|".join(sorted(_UNIDADES_STANDALONE, key=len, reverse=True))
+    + r"|\b(" + "|".join(sorted(_UNIDADES_STANDALONE, key=len, reverse=True))
     + r")(?:\s+(y\s+medi[ao]|y\s+cuarto|y\s+tres\s+cuartos))?\b"
 )
 

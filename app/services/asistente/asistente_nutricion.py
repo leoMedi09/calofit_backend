@@ -1778,11 +1778,14 @@ def _score_plato(
     elif prot >= 20:
         score += 0.5
 
-    # 2) Objetivo
-    _goal = _norm(getattr(perfil, "goal", "") or "")
-    if any(w in _goal for w in ("perder", "deficit", "definicion", "adelgazar")):
+    # 2) Objetivo — usa normalización canónica para cubrir los 5 valores del frontend.
+    # ganar_leve no contenía "masa"/"ganar"/"volumen" en el antiguo código,
+    # por lo que no activaba el bonus de calorías altas. Ahora sí lo hace.
+    from app.core.objetivo_utils import normalizar_objetivo as _norm_obj_score, DEFICIT, SUPERAVIT
+    _concepto_obj = _norm_obj_score(getattr(perfil, "goal", None))
+    if _concepto_obj == DEFICIT:
         score += (1.0 if kcal < 450 else (-1.0 if kcal > 700 else 0.0))
-    elif any(w in _goal for w in ("volumen", "masa", "ganar", "hipertrofia")):
+    elif _concepto_obj == SUPERAVIT:
         score += (1.0 if kcal > 600 else 0.0)
 
     # 3) Momento

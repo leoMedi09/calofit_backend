@@ -37,8 +37,10 @@ class TestCacheManager:
 
         resultado = cache.obtener_del_cache("arroz blanco", sample_client.id)
         assert resultado is not None
-        assert resultado["calorias_100g"] == 130.0
-        assert resultado["proteina_100g"] == 2.7
+        # obtener_del_cache() devuelve {"macros": {...}, "alimento_id": ...}
+        # (contrato actual de cache_manager.py) — no los macros planos.
+        assert resultado["macros"]["calorias_100g"] == 130.0
+        assert resultado["macros"]["proteina_100g"] == 2.7
 
     def test_cache_inexistente_retorna_none(self, cache, sample_client):
         """Alimento no cacheado retorna None."""
@@ -59,7 +61,7 @@ class TestCacheManager:
         cache.guardar_en_cache("pollo", sample_client.id, macros_actualizados, "USDA")
 
         resultado = cache.obtener_del_cache("pollo", sample_client.id)
-        assert resultado["calorias_100g"] == 165.0
+        assert resultado["macros"]["calorias_100g"] == 165.0
 
     def test_invalidar_cache(self, cache, sample_client, macros_arroz):
         """Invalidar entrada elimina del caché."""
