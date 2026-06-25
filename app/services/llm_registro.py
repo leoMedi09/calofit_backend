@@ -3653,14 +3653,23 @@ def _filtrar_contenedor_generico_con_ingredientes(alimentos: list[dict], mensaje
     Nota: si el contenedor menciona un ingrediente que NO aparece en ningún
     otro ítem (ej. "Batido DE AVENA" sin un ítem "Avena" aparte), esas kcal
     se pierden al descartarlo — preferible a la sobreestimación que corrige
-    esta función, pero es un trade-off conocido, no un caso perfecto."""
-    def _primera_palabra(nombre: str) -> str:
-        palabras = _normalizar_nombre(nombre or "").split()
-        return palabras[0] if palabras else ""
+    esta función, pero es un trade-off conocido, no un caso perfecto.
+
+    Requiere que el contenedor tenga CALIFICADOR (2+ palabras, ej. "Batido
+    DE AVENA") — un contenedor BARE de una sola palabra (ej. "Ensalada"
+    sola, sin "de algo") nunca se descarta, sin importar cuántos otros
+    ítems haya. Encontrado en uso real: "almorcé garbanzos con pollo y
+    ensalada" — "Ensalada" (sola, la guarnición) se borraba pensando que
+    "Garbanzos"/"Pollo" eran su contenido, cuando en realidad son un plato
+    aparte servido junto a la ensalada, no sus ingredientes."""
+    def _palabras_nombre(nombre: str) -> list[str]:
+        return _normalizar_nombre(nombre or "").split()
 
     contenedor_idx = {
         i for i, a in enumerate(alimentos)
-        if _primera_palabra(a.get("nombre", "")) in _CONTENEDORES_GENERICOS
+        if (lambda p: p and p[0] in _CONTENEDORES_GENERICOS and len(p) > 1)(
+            _palabras_nombre(a.get("nombre", ""))
+        )
     }
     if not contenedor_idx:
         return alimentos
