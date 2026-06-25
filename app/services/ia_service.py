@@ -95,7 +95,7 @@ class IAService:
                 timeout=httpx.Timeout(180.0, connect=30.0),
                 max_retries=2,
             )
-            print("✅ Groq Llama-3.3-70B: Motor principal de IA inicializado.")
+            print("✅ Groq compound-mini: Motor principal de IA inicializado.")
         else:
             print("⚠️  Groq no configurado.")
 
@@ -371,13 +371,12 @@ class IAService:
             f"Mensaje a clasificar: \"{m[:500]}\"\n"
             "Respuesta (una sola palabra exacta):"
         )
-        # Clasificación con 70B — salida ~1 token, ~400 tokens totales por llamada
-        # Consume ~400/6000 TPM del límite 70B → ~15 clasificaciones/min (suficiente para demo)
-        raw = await self._llamar_groq(prompt, max_tokens=10, temp=0.0,
-                                      model="llama-3.3-70b-versatile")
+        # Clasificación con groq/compound-mini — salida ~1 token, muy rápida y robusta (70,000 TPM limit)
+        raw = await self._llamar_groq(prompt, max_tokens=150, temp=0.0,
+                                      model="groq/compound-mini")
         if self.es_fallo_respuesta_llm(raw):
-            # Fallback al 8B si el 70B falla (rate limit, timeout)
-            raw = await self._llamar_groq(prompt, max_tokens=10, temp=0.0)
+            # Fallback
+            raw = await self._llamar_groq(prompt, max_tokens=150, temp=0.0)
         if self.es_fallo_respuesta_llm(raw):
             return None
         return IAService.normalizar_etiqueta_modo_llm(raw)
@@ -409,23 +408,80 @@ class IAService:
                            model: str | None = None) -> str:
         """
         Motor de IA con selección de modelo:
-        - llama-3.1-8b-instant (default): 200,000 TPM — respuestas principales, NLP, macros
-        - llama-3.3-70b-versatile (model param): clasificación de intención solamente
-          (~10 tokens output → ~400 tokens por llamada → ~15 clasificaciones/min)
+        - groq/compound-mini (default): respuestas principales, NLP, macros (70k TPM limit)
+        - openai/gpt-oss-20b: alternativo (8k TPM limit)
+        - openai/gpt-oss-120b: alternativo de alta capacidad (8k TPM limit)
         """
         if not self.groq_client:
             return "[Modo Offline]"
-        modelo = model or "llama-3.1-8b-instant"
-        try:
+        modelo = model or "groq/compound-mini"
+        
+        # Para los modelos de razonamiento (gpt-oss), ajustamos dinámicamente max_tokens
+        # para dar espacio al razonamiento (~1000 tokens) sin exceder el límite de 8000 TPM de Groq.
+        if "gpt-oss" in modelo:
+            palabras_estimadas = len(prompt.split())
+            tokens_prompt_est = int(palabras_estimadas * 1.3)
+            # max_tokens seguro = Límite TPM (8000) - tokens del prompt - margen de seguridad (200)
+            max_tokens_seguro = max(200, 8000 - tokens_prompt_est - 200)
+            # Asegurar al menos 1800 para razonamiento + respuesta, sin pasarnos del límite seguro
+            max_tokens = min(max_tokens_seguro, max(max_tokens, 1800))
+
+        async def _ejecutar_llamada(m, mt):
             r = await self.groq_client.chat.completions.create(
-                model=modelo,
+                model=m,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
+                max_tokens=mt,
                 temperature=temp,
             )
             return r.choices[0].message.content.strip()
+
+        try:
+            return await _ejecutar_llamada(modelo, max_tokens)
         except Exception as e:
             err = str(e).lower()
+            is_large = len(prompt) > 4000  # 4000 caracteres es ~800-1000 tokens
+            
+            # 1. Si el prompt es demasiado grande para el modelo (413)
+            if "413" in err or "too_large" in err or "too large" in err:
+                if modelo != "llama-3.3-70b-versatile":
+                    print(f"⚠️ Groq: prompt demasiado grande para {modelo} (413). Reintentando con llama-3.3-70b-versatile...")
+                    try:
+                        return await _ejecutar_llamada("llama-3.3-70b-versatile", max_tokens)
+                    except Exception as fallback_err:
+                        print(f"🚨 Groq: falló también reintento con llama-3.3-70b-versatile: {fallback_err}")
+                        err = str(fallback_err).lower()
+                
+                # Si falló o ya era llama-3.3-70b-versatile, intentar con llama-3.1-8b-instant como último recurso (alto límite)
+                if "llama-3.1-8b-instant" not in modelo:
+                    print("⚠️ Groq: Reintentando con llama-3.1-8b-instant por límite de contexto/fallback...")
+                    try:
+                        return await _ejecutar_llamada("llama-3.1-8b-instant", max_tokens)
+                    except Exception as fallback_err2:
+                        print(f"🚨 Groq: falló también llama-3.1-8b-instant: {fallback_err2}")
+                        err = str(fallback_err2).lower()
+            
+            # 2. Si falla por límite de cuota (429) o timeout
+            if "429" in err or "rate_limit" in err or "rate limit" in err or "timed out" in err or "timeout" in err:
+                # Si el prompt es grande, no tiene sentido usar groq/compound-mini (dará 413)
+                if is_large:
+                    target_fallback = "llama-3.1-8b-instant" if "llama-3.1-8b-instant" not in modelo else "llama-3.3-70b-versatile"
+                    if target_fallback != modelo:
+                        print(f"⚠️ Groq: rate limit o timeout en {modelo} con prompt grande. Reintentando con {target_fallback}...")
+                        try:
+                            return await _ejecutar_llamada(target_fallback, max_tokens)
+                        except Exception as fallback_err:
+                            print(f"🚨 Groq: falló también fallback grande {target_fallback}: {fallback_err}")
+                            err = str(fallback_err).lower()
+                else:
+                    if modelo != "groq/compound-mini":
+                        print(f"⚠️ Groq: rate limit o timeout en {modelo} ({e}). Reintentando con groq/compound-mini...")
+                        try:
+                            # groq/compound-mini tiene un límite de 70,000 TPM y no requiere tantos tokens de razonamiento
+                            return await _ejecutar_llamada("groq/compound-mini", 800)
+                        except Exception as fallback_err:
+                            print(f"🚨 Groq: falló también reintento con groq/compound-mini: {fallback_err}")
+                            err = str(fallback_err).lower()
+            
             if "timed out" in err or "timeout" in err:
                 return FALLBACK_MSG_IA_TIMEOUT
             if "429" in err or "rate_limit" in err or "rate limit" in err:

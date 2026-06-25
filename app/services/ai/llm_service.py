@@ -18,7 +18,7 @@ except ImportError:
     AsyncGroq = None
     _groq_available = False
 
-_DEFAULT_MODEL = "llama-3.1-8b-instant"
+_DEFAULT_MODEL = "groq/compound-mini"
 _DEFAULT_TEMP   = 0.3
 _DEFAULT_TOKENS = 512
 
@@ -56,15 +56,38 @@ class LLMService:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        try:
+        async def _call(m: str, mt: int) -> str:
             resp = await self._client.chat.completions.create(
-                model=model,
+                model=m,
                 messages=messages,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=mt,
             )
             return resp.choices[0].message.content or ""
+
+        try:
+            return await _call(model, max_tokens)
         except Exception as exc:
+            err = str(exc).lower()
+            # Si el prompt es demasiado grande para el modelo, reintentar con llama-3.3-70b-versatile
+            if "413" in err or "too_large" in err or "too large" in err:
+                if model != "llama-3.3-70b-versatile":
+                    logger.warning("LLMService: prompt too large for %s. Retrying with llama-3.3-70b-versatile", model)
+                    try:
+                        return await _call("llama-3.3-70b-versatile", max_tokens)
+                    except Exception as fallback_exc:
+                        logger.error("LLMService fallback to llama-3.3-70b-versatile failed: %s", fallback_exc)
+                        err = str(fallback_exc).lower()
+            
+            # Si falla por rate limit o timeout, reintentar con el modelo de alta capacidad de requests groq/compound-mini
+            if "429" in err or "rate_limit" in err or "rate limit" in err or "timed out" in err or "timeout" in err:
+                if model != "groq/compound-mini":
+                    logger.warning("LLMService: rate limit or timeout on %s. Retrying with groq/compound-mini", model)
+                    try:
+                        return await _call("groq/compound-mini", 512)
+                    except Exception as fallback_exc:
+                        logger.error("LLMService fallback to groq/compound-mini failed: %s", fallback_exc)
+            
             logger.error("LLMService.completar error: %s", exc)
             return ""
 

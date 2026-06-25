@@ -382,7 +382,7 @@ class RegistroEjercicioHandler:
             "Sin texto adicional. Usa valores de compendio de actividades físicas."
         )
         try:
-            raw = await ia_engine._llamar_groq(prompt, max_tokens=10, temp=0.0)
+            raw = await ia_engine._llamar_groq(prompt, max_tokens=150, temp=0.0)
             raw = raw.strip().replace(",", ".")
             val = float(re.search(r"\d+(?:\.\d+)?", raw).group(0))
             # Clamp a rango fisiológico razonable

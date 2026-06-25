@@ -603,3 +603,28 @@ class TestRobustezAsistente:
         # 3. Controla glucosa (Diabetes -> evita azúcar refinado, dulces, picarones)
         assert "azúcar" not in resp_text and "picarones" not in resp_text and "miel" not in resp_text and "suspiro" not in resp_text
 
+    def test_caso10_filtrado_contenedores_no_redundantes(self):
+        from app.services.llm_registro import _filtrar_contenedor_generico_con_ingredientes
+        
+        # Caso A: Jugo de piña + Arroz + Chuleta (No redundante, no debe filtrarse el jugo)
+        alimentos_a = [
+            {"nombre": "Chuleta de chancho", "porcion_g": 150},
+            {"nombre": "Arroz", "porcion_g": 100},
+            {"nombre": "Jugo de piña", "porcion_g": 200}
+        ]
+        res_a = _filtrar_contenedor_generico_con_ingredientes(alimentos_a, "comí chuleta con arroz y jugo de piña")
+        assert len(res_a) == 3
+        assert any(x["nombre"] == "Jugo de piña" for x in res_a)
+
+        # Caso B: Batido de avena con plátano + Avena + Plátano + Leche (Redundante, debe filtrarse el batido)
+        alimentos_b = [
+            {"nombre": "Batido de avena con platano", "porcion_g": 300},
+            {"nombre": "Avena", "porcion_g": 40},
+            {"nombre": "Platano", "porcion_g": 100},
+            {"nombre": "Leche", "porcion_g": 200}
+        ]
+        res_b = _filtrar_contenedor_generico_con_ingredientes(alimentos_b, "tomé un batido de avena con platano, leche, avena y platano")
+        assert len(res_b) == 3
+        assert not any("Batido" in x["nombre"] for x in res_b)
+
+

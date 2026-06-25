@@ -747,7 +747,7 @@ async def registrar_comida_llm(
             # 700 sigue cubriendo el JSON de la mayoría de registros
             # (~700-800 tokens reales para 5-9 ítems) dejando margen para
             # mensajes de usuario más largos sin pasar el límite.
-            raw = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=700, temp=0.0)
+            raw = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=700, temp=0.0, model="llama-3.3-70b-versatile")
             datos = _parse_json(raw)
         except asyncio.TimeoutError as e:
             logger.error("[LLM Timeout in registrar_comida_llm]: %s", e)
@@ -926,7 +926,7 @@ async def registrar_comida_llm(
                 f'"carb_g": numero, "grasa_g": numero}}]}}'
             )
             try:
-                _raw_faltante = await _llamar_groq_con_excepciones(ia_engine, _prompt_faltante, max_tokens=250, temp=0.0)
+                _raw_faltante = await _llamar_groq_con_excepciones(ia_engine, _prompt_faltante, max_tokens=250, temp=0.0, model="llama-3.3-70b-versatile")
                 _datos_faltante = _parse_json(_raw_faltante)
             except Exception as _e_falt:
                 logger.warning("[Registro] Error en llamada secundaria de faltante: %s", _e_falt)
@@ -2114,7 +2114,7 @@ async def respuesta_recomendacion_llm(
             f"Si ninguno encaja responde exactamente: ninguno"
         )
         try:
-            _resp_eval = await _llamar_groq_con_excepciones(ia_engine, _prompt_eval, max_tokens=60, temp=0.0)
+            _resp_eval = await _llamar_groq_con_excepciones(ia_engine, _prompt_eval, max_tokens=150, temp=0.0)
             if _resp_eval and "ninguno" not in _resp_eval.lower():
                 _resp_low = _resp_eval.lower()
                 for c in _candidatos_knn:
@@ -2529,7 +2529,7 @@ async def respuesta_recomendacion_llm(
                     f"Responde SOLO 'SI' o 'NO'."
                 )
                 _resp_validacion = await _llamar_groq_con_excepciones(
-                    ia_engine, _prompt_validacion_dieta, max_tokens=5, temp=0.0
+                    ia_engine, _prompt_validacion_dieta, max_tokens=150, temp=0.0
                 )
                 _viola_juicio_groq = bool(_resp_validacion) and _resp_validacion.strip().lower().startswith("si")
             except Exception as _e_val:
@@ -2808,7 +2808,7 @@ async def respuesta_recomendacion_llm(
             p_f = c_f = g_f = 0.0
             try:
                 _raw_macro = await _llamar_groq_con_excepciones(
-                    ia_engine, _PROMPT_COMIDA.format(mensaje=_nombre_p), max_tokens=300, temp=0.0
+                    ia_engine, _PROMPT_COMIDA.format(mensaje=_nombre_p), max_tokens=300, temp=0.0, model="llama-3.3-70b-versatile"
                 )
                 _d_macro = _parse_json(_raw_macro)
                 _items = (_d_macro or {}).get("alimentos") or []
@@ -3204,7 +3204,7 @@ async def respuesta_chat_llm(
             f"PROHIBIDO: mencionar el nombre del usuario."
         )
         try:
-            _raw_perm = await _llamar_groq_con_excepciones(ia_engine, _prompt_perm, max_tokens=100, temp=0.5)
+            _raw_perm = await _llamar_groq_con_excepciones(ia_engine, _prompt_perm, max_tokens=150, temp=0.5)
             _resultado_perm = _limpiar_markdown(_raw_perm)
         except Exception as e:
             logger.error("[LLM Error in chat permission check]: %s", e)
@@ -3257,7 +3257,7 @@ async def respuesta_chat_llm(
         alimento_query = mensaje  # el LLM interpretará la pregunta como alimento
         try:
             raw_macros = await _llamar_groq_con_excepciones(
-                ia_engine, _PROMPT_COMIDA.format(mensaje=alimento_query), max_tokens=400, temp=0.0
+                ia_engine, _PROMPT_COMIDA.format(mensaje=alimento_query), max_tokens=400, temp=0.0, model="llama-3.3-70b-versatile"
             )
             d_macros = _parse_json(raw_macros)
         except Exception as e:
@@ -3637,47 +3637,58 @@ def _filtrar_contenedor_generico_con_ingredientes(alimentos: list[dict], mensaje
     solapan con las de los ingredientes ya contados por separado. Se
     descarta el contenedor, se conservan los ingredientes reales.
 
-    Solo aplica con ≥2 ingredientes además del contenedor: con 0 o 1 no hay
-    suficiente señal de que el contenedor sea redundante (podría ser el
-    único alimento real, ej. "Comí una ensalada" sola).
-
-    NO aplica en mensajes multi-comida (desayuno+almuerzo+cena en un solo
-    registro) — encontrado en pruebas reales: con 8 alimentos de 3 comidas
-    distintas en la misma lista, "Jugo de naranja" y "Ensalada de atún" se
-    descartaban por completo solo porque había ≥2 alimentos "sobrantes" en
-    la lista — de OTRAS comidas, sin relación real con el jugo o la
-    ensalada. El conteo global de ítems "sobrantes" solo es una señal
-    confiable cuando todos vienen de la MISMA comida/mensaje de un solo
-    plato (ej. "batido de avena, leche, plátanos, miel" en una sola frase).
-
-    Nota: si el contenedor menciona un ingrediente que NO aparece en ningún
-    otro ítem (ej. "Batido DE AVENA" sin un ítem "Avena" aparte), esas kcal
-    se pierden al descartarlo — preferible a la sobreestimación que corrige
-    esta función, pero es un trade-off conocido, no un caso perfecto.
-
-    Requiere que el contenedor tenga CALIFICADOR (2+ palabras, ej. "Batido
-    DE AVENA") — un contenedor BARE de una sola palabra (ej. "Ensalada"
-    sola, sin "de algo") nunca se descarta, sin importar cuántos otros
-    ítems haya. Encontrado en uso real: "almorcé garbanzos con pollo y
-    ensalada" — "Ensalada" (sola, la guarnición) se borraba pensando que
-    "Garbanzos"/"Pollo" eran su contenido, cuando en realidad son un plato
-    aparte servido junto a la ensalada, no sus ingredientes."""
+    Solo se descarta si hay un solapamiento real de ingredientes (es decir,
+    si alguno de los otros alimentos extraídos coincide con las palabras
+    descriptivas del contenedor). Esto evita descartar bebidas independientes
+    (ej: "jugo de piña") o acompañamientos (ej: "ensalada mixta") cuando se
+    consumen junto a un plato de fondo (ej: "chuleta con arroz").
+    """
     def _palabras_nombre(nombre: str) -> list[str]:
         return _normalizar_nombre(nombre or "").split()
 
-    contenedor_idx = {
-        i for i, a in enumerate(alimentos)
-        if (lambda p: p and p[0] in _CONTENEDORES_GENERICOS and len(p) > 1)(
-            _palabras_nombre(a.get("nombre", ""))
-        )
-    }
-    if not contenedor_idx:
+    # Identificar potenciales contenedores
+    potenciales_contenedores = []
+    for i, a in enumerate(alimentos):
+        p = _palabras_nombre(a.get("nombre", ""))
+        if p and p[0] in _CONTENEDORES_GENERICOS and len(p) > 1:
+            potenciales_contenedores.append((i, a, p))
+
+    if not potenciales_contenedores:
         return alimentos
-    if (len(alimentos) - len(contenedor_idx)) < 2:
+
+    # Determinar cuáles de estos contenedores son realmente redundantes
+    descartar_idx = set()
+    for idx_c, a_c, palabras_c in potenciales_contenedores:
+        # Palabras clave del contenedor excluyendo el tipo (batido, jugo, etc.) y stopwords
+        keywords_c = {
+            w for w in palabras_c[1:]
+            if w not in _STOPWORDS_BASE_TEXTUAL and len(w) > 2
+        }
+        if not keywords_c:
+            continue
+
+        # Verificar si hay al menos un ingrediente extraído por separado
+        tiene_ingrediente_separado = False
+        for i, a in enumerate(alimentos):
+            if i == idx_c or i in descartar_idx:
+                continue
+            palabras_other = set(_palabras_nombre(a.get("nombre", "")))
+            # Si hay palabras comunes significativas
+            if keywords_c.intersection(palabras_other):
+                tiene_ingrediente_separado = True
+                break
+
+        if tiene_ingrediente_separado:
+            descartar_idx.add(idx_c)
+
+    if not descartar_idx:
         return alimentos
-    if _es_mensaje_multi_comida(mensaje):
+
+    # Si al descartar nos quedaríamos sin alimentos, no descartar nada
+    if len(descartar_idx) == len(alimentos):
         return alimentos
-    return [a for i, a in enumerate(alimentos) if i not in contenedor_idx]
+
+    return [a for i, a in enumerate(alimentos) if i not in descartar_idx]
 
 
 def _fusionar_alimentos_redundantes(alimentos: list[dict]) -> list[dict]:

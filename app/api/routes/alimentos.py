@@ -72,8 +72,8 @@ async def obtener_detalle_alimento(
     """
     
     try:
-        response = ia_engine.groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+        response = await ia_engine.groq_client.chat.completions.create(
+            model="groq/compound-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=600,
             temperature=0.3
