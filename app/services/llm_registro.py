@@ -386,6 +386,19 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
     estándar (USDA/INS-CENAN) de ese alimento — NO improvises valores nuevos cada vez. Si tienes
     duda entre varias preparaciones, usa la versión más común/estándar en Perú.
 15. AMBIGÜEDAD DE CANTIDADES: Si el usuario expresa incertidumbre o duda sobre la cantidad (ej. "no estoy seguro de si era media o una taza", "creo que eran dos huevos"), estima la cantidad de forma razonable y conservadora basada en el contexto y usa el valor medio o el más probable.
+16. ⚠️ VERIFICACIÓN DE DENSIDAD POR CATEGORÍA (antes de responder, para cada
+    ítem): ubica el alimento en su categoría amplia y revisa que tu kcal/100g
+    (o /100ml) sea coherente con ella — no son alimentos específicos, son
+    rangos físicos típicos de CUALQUIER alimento de ese tipo:
+    - Agua/infusión sin azúcar: 0-5. Bebida azucarada/gaseosa: 35-50.
+      Leche o lácteo líquido: 55-70. Jugo natural: 40-60.
+    - Vegetal o fruta fresca: 15-90.
+    - Proteína magra cocida (carnes, pescado, huevo): 100-250.
+    - Carbohidrato/almidón cocido (arroz, papa, pan, menestras): 100-200.
+    - Grasa, aceite o fruto seco: 500-900 (el máximo físico real es 900).
+    Si tu primer cálculo se sale mucho del rango esperado para la categoría
+    de ese alimento (por arriba O por abajo), está mal — vuelve a calcularlo
+    antes de responder, no lo dejes así.
 """
 
 _PROMPT_EJERCICIO = _IDENTIDAD + """
@@ -728,9 +741,13 @@ async def registrar_comida_llm(
     if not goto_save:
         try:
             prompt = _PROMPT_COMIDA.format(mensaje=mensaje)
-            # Siempre usar 900 tokens — mensajes con 3 comidas y cantidades específicas
-            # necesitan espacio para el JSON completo (5-9 items = ~700-800 tokens)
-            raw = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=900, temp=0.0)
+            # 700 tokens (antes 900, luego 800) — el prompt base + el mensaje
+            # del usuario pueden acercarse al límite de 6000 TPM de esta
+            # cuenta (error 413 "Request too large") con mensajes largos.
+            # 700 sigue cubriendo el JSON de la mayoría de registros
+            # (~700-800 tokens reales para 5-9 ítems) dejando margen para
+            # mensajes de usuario más largos sin pasar el límite.
+            raw = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=700, temp=0.0)
             datos = _parse_json(raw)
         except asyncio.TimeoutError as e:
             logger.error("[LLM Timeout in registrar_comida_llm]: %s", e)
@@ -764,6 +781,7 @@ async def registrar_comida_llm(
 
     # Filtrar alimentos no reales (es_real: false) antes de validar
     if datos.get("alimentos"):
+        _aplicar_corte_pollo_brasa(datos["alimentos"], mensaje)
         datos["alimentos"] = [
             a for a in datos["alimentos"]
             if a.get("es_real", True) is not False
@@ -798,7 +816,11 @@ async def registrar_comida_llm(
             # Contenedor genérico ("Batido", "Jugo", "Sopa"...) + ≥2
             # ingredientes sueltos en la misma extracción → el contenedor es
             # redundante, se conservan los ingredientes reales.
-            datos["alimentos"] = _filtrar_contenedor_generico_con_ingredientes(datos["alimentos"])
+            datos["alimentos"] = _filtrar_contenedor_generico_con_ingredientes(datos["alimentos"], mensaje)
+            # Mismo alimento repetido con un nombre más específico añadido
+            # (ej. "Papitas" + "Papitas fritas") — duplicación residual que
+            # la Regla 16 del prompt no siempre evita.
+            datos["alimentos"] = _fusionar_alimentos_redundantes(datos["alimentos"])
 
     # Validar que hay alimentos con macros
     _items = datos.get("alimentos", [])
@@ -943,7 +965,8 @@ async def registrar_comida_llm(
                     # ya es parte de un plato compuesto existente (ej. "lentejas"
                     # cuando ya está "Arroz con lentejas"), no agregarlo aparte.
                     datos["alimentos"] = _filtrar_componentes_de_plato_compuesto(datos["alimentos"])
-                    datos["alimentos"] = _filtrar_contenedor_generico_con_ingredientes(datos["alimentos"])
+                    datos["alimentos"] = _filtrar_contenedor_generico_con_ingredientes(datos["alimentos"], mensaje)
+                    datos["alimentos"] = _fusionar_alimentos_redundantes(datos["alimentos"])
                     _items = datos["alimentos"]
 
     # ── Modificadores de tamaño ("medio", "porción pequeña/grande") ──────────
@@ -977,6 +1000,11 @@ async def registrar_comida_llm(
     # LLM separa en dos partes (ej: "un cuarto de pan francés con palta" → pan+palta).
     if _factor_porcion and len(_items) <= 2:
         for _it in _items:
+            # Ya corregido por _aplicar_corte_pollo_brasa (peso fijo de menú,
+            # ej. "medio pollo"=500g) — no volver a aplicar el mismo "medio"
+            # como descuento genérico encima, o queda en la mitad de lo real.
+            if _it.get("_corte_pollo_aplicado"):
+                continue
             for _campo in ("porcion_g", "kcal", "prot_g", "carb_g", "grasa_g"):
                 if _it.get(_campo) is not None:
                     _it[_campo] = round(float(_it[_campo]) * _factor_porcion, 1)
@@ -1061,12 +1089,17 @@ async def registrar_comida_llm(
     # las kcal de UN huevo al progreso del día mientras comida_registros
     # guarda las 3 filas reales, dejando el total diario desincronizado del
     # detalle auditado (encontrado al validar el flujo de corrección).
-    def _cantidad_clamp_agg(a: dict) -> int:
+    def _cantidad_clamp_agg(a: dict) -> float:
         try:
-            q = int(float(a.get("cantidad", 1) or 1))
+            q = float(a.get("cantidad", 1) or 1)
         except (TypeError, ValueError):
-            q = 1
-        return max(1, min(q, 10))
+            q = 1.0
+        # Fracción real (0 < cantidad < 1, ej. "media palta" mal puesta por
+        # el LLM en "cantidad" en vez de pre-escalar porcion_g/kcal) — ver
+        # el mismo fix en el loop de inserción más abajo (_factor_fraccion).
+        if 0 < q < 1:
+            return q
+        return max(1, min(int(q), 10))
 
     _prot_items  = sum(float(a.get("prot_g",  0) or 0) * _cantidad_clamp_agg(a) for a in _items)
     _carb_items  = sum(float(a.get("carb_g",  0) or 0) * _cantidad_clamp_agg(a) for a in _items)
@@ -1128,13 +1161,23 @@ async def registrar_comida_llm(
 
     # Cap por momento del día — evita que el LLM infle porciones de desayuno/cena/merienda
     _msg_low_momento = mensaje.lower() if mensaje else ""
-    _momento_registro = None
+    _momentos_detectados = set()
     if any(k in _msg_low_momento for k in ("desayuno", "desayuné", "desayune")):
-        _momento_registro = "DESAYUNO"
-    elif any(k in _msg_low_momento for k in ("merienda", "snack")):
-        _momento_registro = "MERIENDA"
-    elif any(k in _msg_low_momento for k in ("cena", "cené", "cene")):
-        _momento_registro = "CENA"
+        _momentos_detectados.add("DESAYUNO")
+    if any(k in _msg_low_momento for k in ("merienda", "snack")):
+        _momentos_detectados.add("MERIENDA")
+    if any(k in _msg_low_momento for k in ("cena", "cené", "cene")):
+        _momentos_detectados.add("CENA")
+    if any(k in _msg_low_momento for k in ("almuerzo", "almorcé", "almorce")):
+        _momentos_detectados.add("ALMUERZO")
+    # Mensaje multi-comida (ej. "en el desayuno... en el almuerzo... y en la
+    # cena...", un resumen del día completo en un solo mensaje) — encontrado
+    # en pruebas reales: el mensaje mencionaba las 3 comidas pero como
+    # "desayuno" se detectaba primero, el tope de UN desayuno (700 kcal) se
+    # aplicaba sobre el total de las 3 comidas juntas, recortando ~2 comidas
+    # completas. Con 2+ momentos distintos mencionados, no hay un solo tope
+    # de comida que tenga sentido aplicar — se omite el cap por momento.
+    _momento_registro = next(iter(_momentos_detectados)) if len(_momentos_detectados) == 1 else None
     _KCAL_CAP_MOMENTO_REG = {"DESAYUNO": 700, "MERIENDA": 400, "CENA": 750}
     _cap_momento = _KCAL_CAP_MOMENTO_REG.get(_momento_registro)
     if _cap_momento and kcal > _cap_momento and not advertencia_cantidad:
@@ -1216,7 +1259,19 @@ async def registrar_comida_llm(
     for item in alimentos_raw:
         nombre_item = item.get("nombre", nombres[0] if nombres else "Alimento")
         try:
-            cantidad_item = int(float(item.get("cantidad", 1) or 1))
+            _cantidad_cruda = float(item.get("cantidad", 1) or 1)
+        except (TypeError, ValueError):
+            _cantidad_cruda = 1.0
+        # Fracción real (0 < cantidad < 1) — la Regla 13 del prompt le pide al
+        # LLM pre-escalar porcion_g/kcal y dejar cantidad=1 para "media palta"
+        # (cantidad=0.5, porcion_g/kcal ya reducidos), pero en pruebas reales
+        # el LLM a veces igual pone cantidad=0.5 SIN reducir porcion_g/kcal
+        # (deja los valores de UNA unidad completa). Sin este factor,
+        # int(float(0.5))=0 → clamp a 1 → "media palta" se registraba con las
+        # kcal de una palta ENTERA (el doble de lo real).
+        _factor_fraccion = _cantidad_cruda if 0 < _cantidad_cruda < 1 else 1.0
+        try:
+            cantidad_item = int(_cantidad_cruda)
         except (TypeError, ValueError):
             cantidad_item = 1
         # Tope de seguridad: "cantidad" es el número de porciones discretas
@@ -1232,7 +1287,7 @@ async def registrar_comida_llm(
         # grasa_g/kcal YA son por unidad; dividir entre cantidad_item (como
         # se hacía antes) los reducía a la mitad/tercio sin razón — "dos
         # paltas" terminaba registrando el equivalente calórico de una sola.
-        _factor_total = _factor_cap * _factor_momento * _factor_sopa
+        _factor_total = _factor_cap * _factor_momento * _factor_sopa * _factor_fraccion
         p_item = round(float(item.get("prot_g", prot / n_items)) * _factor_total, 1)
         c_item = round(float(item.get("carb_g", carb / n_items)) * _factor_total, 1)
         g_item = round(float(item.get("grasa_g", grasa / n_items)) * _factor_total, 1)
@@ -1425,6 +1480,37 @@ async def registrar_ejercicio_llm(
     from app.models.historial import ProgresoCalorias
     hoy = get_peru_date()
 
+    # Duración TOTAL para varios ejercicios mal repartida — encontrado en
+    # pruebas reales: "rutina de pierna: sentadilla, peso muerto, hip thrust
+    # y zancadas, como 50 minutos en total" asignaba 50min A CADA UNO de los
+    # 4 ejercicios (200min combinados) en vez de repartir los 50min reales
+    # entre ellos — cuadruplicando kcal_quemadas. Señal determinista: 2+
+    # ejercicios con la MISMA duración igual al total declarado en el
+    # mensaje ("...minutos en total") indica que el LLM copió el total en
+    # cada uno en vez de dividirlo — se reparte equitativo entre todos.
+    _m_dur_total = re.search(
+        r'(\d+(?:[.,]\d+)?)\s*minutos?\s*(?:en\s+total)\b'
+        r'|\ben\s+total\b[^.]*?(\d+(?:[.,]\d+)?)\s*minutos?',
+        mensaje or "", re.IGNORECASE,
+    )
+    if _m_dur_total and len(ejercicios_raw) > 1:
+        _total_declarado = float((_m_dur_total.group(1) or _m_dur_total.group(2)).replace(',', '.'))
+        _duraciones_actuales = [float(e.get("duracion_min", 0) or 0) for e in ejercicios_raw]
+        _n_con_total_completo = sum(1 for d in _duraciones_actuales if abs(d - _total_declarado) < 1)
+        if _n_con_total_completo >= 2:
+            _duracion_repartida = round(_total_declarado / len(ejercicios_raw), 1)
+            for _e_dur in ejercicios_raw:
+                _e_dur["duracion_min"] = _duracion_repartida
+                # Limpiar el kcal_quemadas crudo del LLM (calculado con la
+                # duración VIEJA, antes de repartir) — si no, puede colarse
+                # por el margen de tolerancia de la fórmula más abajo y
+                # quedar inflado igual pese a la duración ya corregida.
+                _e_dur["kcal_quemadas"] = 0
+            logger.info(
+                "[Registro] Duracion total (%smin) repartida entre %d ejercicios -> %smin cada uno",
+                _total_declarado, len(ejercicios_raw), _duracion_repartida,
+            )
+
     kcal_total = 0.0
     ejercicios_guardados = []
 
@@ -1435,7 +1521,15 @@ async def registrar_ejercicio_llm(
         reps     = datos.get("reps")
         peso_ej  = datos.get("peso_kg")
         met      = float(datos.get("met", 5.0) or 5.0)
-        intensidad = datos.get("intensidad") or ("Alta" if met >= 8 else ("Media" if met >= 5 else "Baja"))
+        # "intensidad" SIEMPRE se deriva de "met" con la misma regla del prompt
+        # (Alta MET>=8, Media 5-7.9, Baja <5) — nunca la etiqueta cruda del LLM.
+        # Encontrado en pruebas reales: "jugué fútbol una hora" devolvía
+        # met=7.0 (Media según su propia regla) pero intensidad="Alta"; mismo
+        # caso con sentadillas (met=6.0 → debía ser "Media", llegó "Alta").
+        # El LLM no siempre aplica su propia tabla de forma consistente — igual
+        # que con kcal/macros de comida (Atwater), la regla determinista en
+        # código es la fuente de verdad, no el campo derivado que el LLM repite.
+        intensidad = "Alta" if met >= 8 else ("Media" if met >= 5 else "Baja")
         # El LLM a veces devuelve duracion_min=0 pese a haber series/reps reales
         # (encontrado en pruebas: "press banca inclinado 3 por 5 repeticiones"
         # → duracion_min=0). Estimación determinista de respaldo: ~5 min por
@@ -3511,7 +3605,32 @@ _CONTENEDORES_GENERICOS = frozenset({
 })
 
 
-def _filtrar_contenedor_generico_con_ingredientes(alimentos: list[dict]) -> list[dict]:
+_RX_MULTI_MOMENTO = re.compile(
+    r"\bdesayun|\balmuerz|\balmorc|\bcen[ée]|\bcena\b|\bmerienda|\bsnack",
+    re.IGNORECASE,
+)
+
+
+def _es_mensaje_multi_comida(mensaje: str) -> bool:
+    """True si el mensaje menciona 2+ momentos del día distintos (desayuno,
+    almuerzo, cena, merienda) — un resumen del día completo en un solo
+    mensaje, no una sola comida."""
+    momentos = set(_RX_MULTI_MOMENTO.findall((mensaje or "").lower()))
+    # normaliza variantes (almuerz/almorc -> mismo momento, cen/cena -> mismo)
+    grupos = set()
+    for m in momentos:
+        if m.startswith("almuerz") or m.startswith("almorc"):
+            grupos.add("almuerzo")
+        elif m.startswith("desayun"):
+            grupos.add("desayuno")
+        elif m.startswith("cen"):
+            grupos.add("cena")
+        else:
+            grupos.add("merienda")
+    return len(grupos) >= 2
+
+
+def _filtrar_contenedor_generico_con_ingredientes(alimentos: list[dict], mensaje: str = "") -> list[dict]:
     """Si el LLM extrae un contenedor genérico ("Batido de avena") Y además
     ≥2 ingredientes independientes en la misma extracción ("Leche",
     "Plátano", "Miel"), el contenedor es redundante — sus propias kcal se
@@ -3521,6 +3640,15 @@ def _filtrar_contenedor_generico_con_ingredientes(alimentos: list[dict]) -> list
     Solo aplica con ≥2 ingredientes además del contenedor: con 0 o 1 no hay
     suficiente señal de que el contenedor sea redundante (podría ser el
     único alimento real, ej. "Comí una ensalada" sola).
+
+    NO aplica en mensajes multi-comida (desayuno+almuerzo+cena en un solo
+    registro) — encontrado en pruebas reales: con 8 alimentos de 3 comidas
+    distintas en la misma lista, "Jugo de naranja" y "Ensalada de atún" se
+    descartaban por completo solo porque había ≥2 alimentos "sobrantes" en
+    la lista — de OTRAS comidas, sin relación real con el jugo o la
+    ensalada. El conteo global de ítems "sobrantes" solo es una señal
+    confiable cuando todos vienen de la MISMA comida/mensaje de un solo
+    plato (ej. "batido de avena, leche, plátanos, miel" en una sola frase).
 
     Nota: si el contenedor menciona un ingrediente que NO aparece en ningún
     otro ítem (ej. "Batido DE AVENA" sin un ítem "Avena" aparte), esas kcal
@@ -3538,7 +3666,43 @@ def _filtrar_contenedor_generico_con_ingredientes(alimentos: list[dict]) -> list
         return alimentos
     if (len(alimentos) - len(contenedor_idx)) < 2:
         return alimentos
+    if _es_mensaje_multi_comida(mensaje):
+        return alimentos
     return [a for i, a in enumerate(alimentos) if i not in contenedor_idx]
+
+
+def _fusionar_alimentos_redundantes(alimentos: list[dict]) -> list[dict]:
+    """Si dos ítems son el MISMO alimento mencionado dos veces — uno con
+    nombre genérico y otro con un calificador agregado (ej. "Papitas" y
+    "Papitas fritas") — el LLM lo duplicó pese a la Regla 16 del prompt
+    (encontrado en pruebas reales: ocurre incluso con la instrucción
+    explícita). Se conserva solo el nombre MÁS específico, evitando contar
+    las calorías dos veces.
+
+    No es una lista de palabras fija: la señal es ESTRUCTURAL — las palabras
+    del nombre corto deben ser exactamente las palabras INICIALES del nombre
+    largo (mismo orden, desde el principio). Por eso "Papitas" → "Papitas
+    fritas" se fusiona, pero "Pollo" → "Caldo de pollo" NO — "pollo" no es la
+    primera palabra de ese nombre, es un ingrediente DENTRO de otro plato
+    distinto, no el mismo alimento repetido."""
+    if len(alimentos) < 2:
+        return alimentos
+
+    def _palabras(nombre: str) -> list[str]:
+        return _normalizar_nombre(nombre or "").split()
+
+    listas_palabras = [_palabras(a.get("nombre", "")) for a in alimentos]
+    descartar = set()
+    for i, pi in enumerate(listas_palabras):
+        if i in descartar or not pi:
+            continue
+        for j, pj in enumerate(listas_palabras):
+            if i == j or j in descartar or len(pi) >= len(pj):
+                continue
+            if pj[: len(pi)] == pi:
+                descartar.add(i)
+                break
+    return [a for idx, a in enumerate(alimentos) if idx not in descartar]
 
 
 # Palabras que indican EL MOMENTO en que se comió algo, nunca el alimento en
@@ -3636,6 +3800,71 @@ def _existe_en_bd_alimentos(db, nombre: str) -> bool:
         except Exception:
             pass
         return True  # fail-open: un error de validación nunca debe bloquear un registro legítimo
+
+
+# Cortes de pollo a la brasa peruano — PESO FIJO de menú, no fracción
+# matemática de una porción arbitraria (confirmado por el usuario: cuarto=250g,
+# octavo=125g; medio/entero son la misma convención extendida). El LLM a veces
+# interpreta "un cuarto de pollo" como cantidad=0.25 de una porción genérica
+# (~120g) → ~30g, perdiendo el peso real del corte. Requiere "pollo" INMEDIATO
+# tras la palabra de corte (el regex no separa "cuarto de pechuga de pollo",
+# que sí es una fracción genuina de una pechuga, no un corte de menú).
+_RX_CORTE_POLLO = re.compile(
+    r"\b(?:un\s+|una\s+)?(cuarto|octavo)\s+de\s+pollo\b"
+    r"|\bmedio\s+pollo\b"  # "medio" va PEGADO al sustantivo en español ("medio pollo"),
+    r"|\bpollo\s+entero\b",  # a diferencia de "un cuarto/octavo DE pollo" — sin esta
+    re.IGNORECASE,            # rama separada, "medio pollo a la brasa" no matcheaba.
+)
+_PESO_CORTE_POLLO_G = {"octavo": 125, "cuarto": 250, "medio": 500, "entero": 1000}
+
+
+def _aplicar_corte_pollo_brasa(alimentos: list, mensaje: str) -> None:
+    """Mutación in-place: corrige porcion_g/cantidad/macros del ítem 'pollo'
+    cuando el mensaje usa "cuarto/octavo/medio/entero de pollo" — fuerza el
+    peso real del corte de menú (250g/125g/500g/1000g) en vez de la fracción
+    matemática que el LLM a veces le asigna a una porción arbitraria."""
+    m = _RX_CORTE_POLLO.search(mensaje or "")
+    if not m:
+        return
+    texto_match = m.group(0).lower()
+    palabra_corte = next((p for p in _PESO_CORTE_POLLO_G if p in texto_match), None)
+    if not palabra_corte:
+        return
+    peso_objetivo = _PESO_CORTE_POLLO_G[palabra_corte]
+    for item in alimentos:
+        if "pollo" not in (item.get("nombre") or "").lower():
+            continue
+        try:
+            porcion_actual = float(item.get("porcion_g", 100) or 100)
+        except (TypeError, ValueError):
+            continue
+        if porcion_actual <= 0:
+            continue
+        # Tasa por gramo = valor / porcion_g (kcal/macros del LLM son "por
+        # unidad", es decir por porcion_g — "cantidad" multiplica aparte en
+        # el agregado/loop de inserción, NO debe entrar en esta tasa o el
+        # resultado se infla/desinfla según qué fracción haya puesto el LLM
+        # en "cantidad" vs "porcion_g" para representar el mismo "cuarto").
+        factor = peso_objetivo / porcion_actual
+        item["porcion_g"] = peso_objetivo
+        item["cantidad"] = 1
+        for campo in ("kcal", "prot_g", "carb_g", "grasa_g"):
+            if item.get(campo) is not None:
+                try:
+                    item[campo] = round(float(item[campo]) * factor, 1)
+                except (TypeError, ValueError):
+                    pass
+        # Evita que el mecanismo GENÉRICO de fracciones ("medio/un cuarto" ->
+        # _factor_porcion, más abajo en registrar_comida_llm) vuelva a aplicar
+        # el mismo descuento sobre este ítem ya corregido — encontrado en
+        # pruebas reales: "medio pollo a la brasa" quedaba en 250g (la mitad
+        # de 500g) porque ambos mecanismos detectan "medio" y se acumulaban.
+        item["_corte_pollo_aplicado"] = True
+        item["_porcion_explicita_usuario"] = True
+        logger.info(
+            "[Registro] Corte de pollo a la brasa ('%s') -> porcion_g=%sg fijo",
+            texto_match, peso_objetivo,
+        )
 
 
 def _alimento_es_alucinacion(item: dict, db) -> bool:
@@ -3998,11 +4227,28 @@ def _parse_json(raw: str) -> Optional[dict]:
         # 1. Eliminar comentarios JavaScript: // texto  y  /* texto */
         cleaned = re.sub(r'//[^\n\r"]*', '', cleaned)
         cleaned = re.sub(r'/\*.*?\*/', '', cleaned, flags=re.DOTALL)
-        # 2. Evaluar expresiones aritméticas simples: 2 * 50 → 100, 3 * 55 → 165
+        # 2. Evaluar expresiones aritméticas con CADENAS de *,/ — no solo un par
+        # ("2 * 50" → "100"). Encontrado en pruebas reales: con la fórmula de
+        # kcal de ejercicio (MET × peso_kg × 3.5 / 200 × duracion_min), el LLM
+        # a veces deja la formula SIN resolver en "kcal_quemadas" en vez del
+        # número (ej. "83.7 * 8.3 * 3.5 / 200 * 30") — sobre todo con pesos
+        # decimales reales (83.7kg) en mensajes con varios ejercicios. El regex
+        # anterior solo colapsaba el PRIMER par de números separados por "*" y
+        # dejaba el resto de la cadena sin resolver → JSON inválido →
+        # _parse_json devolvía None → "No identifiqué ningún ejercicio" pese a
+        # que el LLM sí los identificó todos correctamente.
+        def _evaluar_cadena_numerica(m: "re.Match") -> str:
+            partes = re.split(r'\s*([*/])\s*', m.group(0))
+            resultado = float(partes[0])
+            for i in range(1, len(partes), 2):
+                op, num = partes[i], float(partes[i + 1])
+                resultado = resultado * num if op == '*' else resultado / num
+            return str(round(resultado, 2))
+
         cleaned = re.sub(
-            r'(\d+(?:\.\d+)?)\s*\*\s*(\d+(?:\.\d+)?)',
-            lambda m: str(round(float(m.group(1)) * float(m.group(2)), 1)),
-            cleaned
+            r'\d+(?:\.\d+)?(?:\s*[*/]\s*\d+(?:\.\d+)?)+',
+            _evaluar_cadena_numerica,
+            cleaned,
         )
         # 3. Eliminar unidades pegadas a números: 8g→8, 10ml→10, 420kcal→420
         cleaned = re.sub(r'(\d+(?:\.\d+)?)\s*(?:g|ml|kcal|kg|mg|cc)(?=\s*[,}\]])', r'\1', cleaned)
