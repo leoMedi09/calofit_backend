@@ -4108,29 +4108,46 @@ def get_cached_macros(nombre: str) -> dict | None:
 
 def _buscar_en_cache(mensaje: str) -> dict | None:
     """Busca en caché con:
-    1. Coincidencia exacta normalizada (quinoa → quinua → mismo key)
-    2. Fuzzy matching con difflib (umbral 0.75) para errores de voz como Kino, equino"""
+    1. Coincidencia exacta limpia (quitando verbos de acción y artículos)
+    2. Fuzzy matching limpio (umbral 0.82) sobre las formas limpias"""
     from difflib import SequenceMatcher
-    msg_norm = _normalizar_nombre(mensaje)
+    
+    _PREFIX_VERBS_STOPWORDS = {
+        "comi", "tome", "cene", "almorce", "almorze", "desayune", "para", "el", "la", "un", "una", "de",
+        "hoy", "ayer", "registra", "anota", "apunta", "con", "y", "mas"
+    }
+    
+    clean_msg = " ".join([w for w in _normalizar_nombre(mensaje).split() if w not in _PREFIX_VERBS_STOPWORDS])
+    if not clean_msg:
+        return None
+        
     ahora = _time.time()
     mejor_ratio = 0.0
     mejor_entry = None
+    mejor_key = None
 
     for key, entry in list(_macro_cache.items()):
         if (ahora - entry.get("_ts", 0)) >= _CACHE_TTL:
             continue
-        # 1. Coincidencia exacta: la key está contenida en el mensaje normalizado
-        if key in msg_norm:
-            logger.info("[MacroCache] Hit exacto: '%s'", key)
+        
+        clean_key = " ".join([w for w in _normalizar_nombre(key).split() if w not in _PREFIX_VERBS_STOPWORDS])
+        if not clean_key:
+            continue
+            
+        # 1. Coincidencia exacta limpia
+        if clean_msg == clean_key:
+            logger.info("[MacroCache] Hit exacto limpio: '%s'", key)
             return {k: v for k, v in entry.items() if k != "_ts"}
-        # 2. Fuzzy: comparar key con substrings del mensaje de longitud similar
-        ratio = SequenceMatcher(None, key, msg_norm).ratio()
+            
+        # 2. Fuzzy matching limpio
+        ratio = SequenceMatcher(None, clean_key, clean_msg).ratio()
         if ratio > mejor_ratio:
             mejor_ratio = ratio
             mejor_entry = entry
+            mejor_key = key
 
-    if mejor_ratio >= 0.72 and mejor_entry:
-        logger.info("[MacroCache] Hit fuzzy (ratio=%.2f)", mejor_ratio)
+    if mejor_ratio >= 0.82 and mejor_entry:
+        logger.info("[MacroCache] Hit fuzzy limpio (ratio=%.2f, key='%s')", mejor_ratio, mejor_key)
         return {k: v for k, v in mejor_entry.items() if k != "_ts"}
     return None
 
