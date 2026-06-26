@@ -451,20 +451,20 @@ class IAService:
                         print(f"🚨 Groq: falló también reintento con llama-3.3-70b-versatile: {fallback_err}")
                         err = str(fallback_err).lower()
                 
-                # Si falló o ya era llama-3.3-70b-versatile, intentar con openai/gpt-oss-20b (reemplazo recomendado)
-                if "openai/gpt-oss-20b" not in modelo:
-                    print("⚠️ Groq: Reintentando con openai/gpt-oss-20b por límite de contexto/fallback...")
+                # Si falló o ya era llama-3.3-70b-versatile, intentar con llama-3.1-8b-instant (reemplazo recomendado)
+                if "llama-3.1-8b-instant" not in modelo:
+                    print("⚠️ Groq: Reintentando con llama-3.1-8b-instant por límite de contexto/fallback...")
                     try:
-                        return await _ejecutar_llamada("openai/gpt-oss-20b", min(max_tokens, 1800))
+                        return await _ejecutar_llamada("llama-3.1-8b-instant", min(max_tokens, 1800))
                     except Exception as fallback_err2:
-                        print(f"🚨 Groq: falló también openai/gpt-oss-20b: {fallback_err2}")
+                        print(f"🚨 Groq: falló también llama-3.1-8b-instant: {fallback_err2}")
                         err = str(fallback_err2).lower()
             
             # 2. Si falla por límite de cuota (429) o timeout
             if "429" in err or "rate_limit" in err or "rate limit" in err or "timed out" in err or "timeout" in err:
                 # Si el prompt es grande, no tiene sentido usar groq/compound-mini (puede dar 413)
                 if is_large:
-                    target_fallback = "openai/gpt-oss-20b" if "openai/gpt-oss-20b" not in modelo else "llama-3.3-70b-versatile"
+                    target_fallback = "llama-3.1-8b-instant" if "llama-3.1-8b-instant" not in modelo else "llama-3.3-70b-versatile"
                     if target_fallback != modelo:
                         print(f"⚠️ Groq: rate limit o timeout en {modelo} con prompt grande. Reintentando con {target_fallback}...")
                         try:
