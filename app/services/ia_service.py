@@ -455,7 +455,10 @@ class IAService:
                 if "llama-3.1-8b-instant" not in modelo:
                     print("⚠️ Groq: Reintentando con llama-3.1-8b-instant por límite de contexto/fallback...")
                     try:
-                        return await _ejecutar_llamada("llama-3.1-8b-instant", min(max_tokens, 1800))
+                        tokens_prompt_est = int(len(prompt.split()) * 1.3)
+                        max_tok_seguro = max(100, 5950 - tokens_prompt_est)
+                        mt_fallback = min(max_tokens, max_tok_seguro)
+                        return await _ejecutar_llamada("llama-3.1-8b-instant", mt_fallback)
                     except Exception as fallback_err2:
                         print(f"🚨 Groq: falló también llama-3.1-8b-instant: {fallback_err2}")
                         err = str(fallback_err2).lower()
@@ -468,7 +471,10 @@ class IAService:
                     if target_fallback != modelo:
                         print(f"⚠️ Groq: rate limit o timeout en {modelo} con prompt grande. Reintentando con {target_fallback}...")
                         try:
-                            return await _ejecutar_llamada(target_fallback, min(max_tokens, 1800))
+                            tokens_prompt_est = int(len(prompt.split()) * 1.3)
+                            max_tok_seguro = max(100, 5950 - tokens_prompt_est)
+                            mt_fallback = min(max_tokens, max_tok_seguro)
+                            return await _ejecutar_llamada(target_fallback, mt_fallback)
                         except Exception as fallback_err:
                             print(f"🚨 Groq: falló también fallback grande {target_fallback}: {fallback_err}")
                             err = str(fallback_err).lower()
