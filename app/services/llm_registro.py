@@ -446,7 +446,8 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
     estándar (USDA/INS-CENAN) de ese alimento — NO improvises valores nuevos cada vez. Si tienes
     duda entre varias preparaciones, usa la versión más común/estándar en Perú.
 15. AMBIGÜEDAD DE CANTIDADES: Si el usuario expresa incertidumbre o duda sobre la cantidad (ej. "no estoy seguro de si era media o una taza", "creo que eran dos huevos"), estima la cantidad de forma razonable y conservadora basada en el contexto y usa el valor medio o el más probable.
-16. ⚠️ VERIFICACIÓN DE DENSIDAD POR CATEGORÍA (antes de responder, para cada
+16. ⚠️ NOMBRES LIMPIOS SIN MEDIDAS: Evita incluir palabras que indiquen contenedores, porciones o medidas (como "taza de", "vaso de", "plato de", "unidad de", "ración de", "poción de") en el campo "nombre". El nombre debe ser únicamente el del alimento o plato en sí (ej: "Café" en lugar de "Taza de café", "Leche" en lugar de "Vaso de leche", "Arroz con pollo" en lugar de "Plato de arroz con pollo", "Plátano" en lugar de "Unidad de plátano").
+17. ⚠️ VERIFICACIÓN DE DENSIDAD POR CATEGORÍA (antes de responder, para cada
     ítem): ubica el alimento en su categoría amplia y revisa que tu kcal/100g
     (o /100ml) sea coherente con ella — no son alimentos específicos, son
     rangos físicos típicos de CUALQUIER alimento de ese tipo:
