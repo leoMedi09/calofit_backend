@@ -398,7 +398,7 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
         en DOS comidas distintas, cada una con su propia porción.
 4. MÉTODO DE COCCIÓN cambia kcal: FRITO (absorbe aceite) ≠ COCIDO ≠ CRUDO.
 5. prot_total = Σ prot_g. carb_total = Σ carb_g. grasa_total = Σ grasa_g.
-6. CANTIDADES: "dos panes con pollo" → UN solo ítem {{nombre:"Pan con Pollo", cantidad:2, kcal: total×2}}. NUNCA separes en Pan ×2 + Pollo por separado — el "con" indica un combo, no ingredientes sueltos. kcal/macros son TOTALES ya multiplicados. nombre siempre en singular.
+6. CANTIDADES: "dos panes con pollo" → UN solo ítem {{nombre:"Pan con Pollo", cantidad:2, kcal: de una sola unidad}}. NUNCA separes en Pan ×2 + Pollo por separado — el "con" indica un combo, no ingredientes sueltos. Los macros, kcal y porcion_g en el JSON deben ser siempre POR UNIDAD (para cantidad=1), NO el total acumulado de todas las unidades. El sistema se encargará de multiplicarlo por la cantidad automáticamente. Nombre siempre en singular.
 7. kcal debe ser consistente con P/C/G: verifica que ≈ 4×P + 4×C + 9×G. ⚠️ prot_g, carb_g, grasa_g y kcal son SIEMPRE para el "porcion_g" TOTAL de ese ítem, NUNCA valores de referencia por 100g sin escalar. Si "porcion_g" es menor a 100, los macros DEBEN ser proporcionalmente menores que los valores típicos por 100g de ese alimento (ej: si 100g de maní tienen ~26g de proteína, 28g de maní deben tener ~7g de proteína, NO 26g).
 8. Si no se menciona cantidad explícita → cantidad:1.
 9. COMBOS "X con Y" — UN solo ítem SOLO si "X con Y" es el NOMBRE de un plato/preparación
