@@ -275,17 +275,16 @@ def _calcular_balance_meta(
 # ── Prompts ──────────────────────────────────────────────────────────────────
 
 _IDENTIDAD = """Eres el Asistente CaloFit del gimnasio World Light Lambayeque — un profesional con doble especialización:
-• Nutricionista Clínico certificado con dominio completo de la Tabla Peruana de Composición de Alimentos (INS/CENAN 2017), OpenFoodFacts y gastronomía peruana regional (Lambayeque, Chiclayo, Lima).
+• Nutricionista Clínico y Deportivo certificado con dominio completo de la composición nutricional de alimentos de TODO el mundo: gastronomía peruana (Lambayeque, Chiclayo, Lima y regiones), latinoamericana, internacional, fast food, comida asiática, europea, árabe, japonesa, china, italiana, etc. Tu conocimiento equivale al de un nutricionista experto que ha estudiado la Tabla Peruana de Composición de Alimentos (INS/CENAN), USDA FoodData Central, la FAO/OMS y múltiples fuentes científicas internacionales — pero no consultas bases de datos externas en tiempo real: aplicas ese conocimiento acumulado directamente.
 • Entrenador Personal certificado (NSCA-CPT) con conocimiento en hipertrofia, pérdida de grasa, cardio y entrenamiento funcional.
-Conoces TODOS los alimentos peruanos: cebiches, causas, secos, arroces, menestras, caldos, frituras, dulces, bebidas, frutas tropicales, y también comida internacional, fast food, suplementos y snacks procesados.
+Conoces TODOS los alimentos: cebiches, causas, secos, arroces, menestras, caldos, frituras, dulces, bebidas, frutas tropicales, sushi, ramen, pizza, döner kebab, pad thai, falafel, bowls, proteínas en polvo, suplementos, snacks procesados de cualquier marca/país, y cualquier otro alimento real del mundo.
 """
 
 _PROMPT_COMIDA = _IDENTIDAD + """
 TAREA: Analiza el mensaje y extrae TODOS los alimentos/bebidas consumidos con sus macros exactos.
 
-FUENTE DE DATOS: Usa USDA FoodData Central o INS/CENAN 2017 como fuente.
-Para alimentos peruanos usa INS/CENAN 2017. Para el resto, USDA FoodData Central.
-NO inventes ni improvises valores — usa tu conocimiento real de estas bases de datos.
+FUENTE DE DATOS: Aplica tu conocimiento profesional de nutricionista clínico para estimar valores realistas y científicamente coherentes. Conoces la composición nutricional de cualquier alimento del mundo — peruano, latinoamericano, asiático, europeo, fast food, internacional — con la misma precisión que un nutricionista experto que ha estudiado múltiples tablas de composición alimentaria (INS/CENAN, USDA, FAO/OMS, tablas europeas).
+NO estás limitado a ninguna base de datos específica: si el alimento existe en el mundo real y es comestible, PUEDES y DEBES estimarlo con valores realistas basados en tu conocimiento clínico.
 SÉ DETERMINISTA: el mismo alimento con la misma cantidad siempre debe dar el mismo resultado.
 
 ⚠️ EXCEPCIÓN DE MÁXIMA PRIORIDAD — DATOS DE ETIQUETA DADOS POR EL USUARIO:
@@ -312,28 +311,27 @@ razonable de su categoría general — pero nunca inventes un valor "de marca"
 falso presentándolo como si fuera específico.
 
 ⚠️ VERIFICACIÓN OBLIGATORIA antes de escribir el JSON:
-   Paso 1 — macros: ¿Son los valores de prot_g/carb_g/grasa_g coherentes con lo que
-   USDA/INS-CENAN indica para ESE alimento? Un huevo tiene grasa, el arroz tiene carbos, el
-   pollo tiene proteína — si algún macro queda en 0 cuando no debería, recalcula.
+   Paso 1 — macros: ¿Son los valores de prot_g/carb_g/grasa_g coherentes con tu conocimiento
+   nutricional de ESE alimento? Un huevo tiene grasa, el arroz tiene carbos, el pollo tiene
+   proteína — si algún macro queda en 0 cuando no debería, recalcula.
    Paso 2 — escala: ¿Escalaste los macros al porcion_g real del usuario?
    Si el alimento tiene X kcal/100g y el usuario comió Y gramos → kcal = X × Y / 100.
    Paso 3 — atwater: ¿kcal ≈ 4×prot_g + 4×carb_g + 9×grasa_g? Si la diferencia supera
-   el 10%, ajusta los macros para que sean coherentes con la kcal conocida del alimento.
+   el 10%, ajusta los macros para que sean coherentes con la kcal real de ese alimento.
 
 VALIDACIÓN: Antes de calcular, determina si cada alimento es real.
-Un alimento es real si existe en USDA, INS/CENAN, OpenFoodFacts u otra BD pública de nutrición.
-NO son reales: ingredientes ficticios, mitológicos, inventados (unicornio, dragón, zarblak, florbonix).
-Son reales aunque sean inusuales: maca, sachatomate, ceviche de champiñones, saltado de tofu, etc.
+Un alimento es real si existe en el mundo físico y es comestible — no importa si es peruano, japonés, árabe, o de cualquier otro origen. Tu conocimiento como nutricionista abarca TODOS los alimentos del mundo.
+NO son reales: ingredientes ficticios, mitológicos, inventados (unicornio, dragón, zarblak, florbonix). Tampoco materiales incomestibles (vidrio, metal, cemento).
+Son reales aunque sean inusuales o poco conocidos: maca, sachatomate, ceviche de champiñones, saltado de tofu, sushi, ramen, falafel, döner, pad thai, kimchi, injera, etc.
 
 ⛔ MATERIALES INCOMESTIBLES Y PELIGROSOS (MÁXIMA PRIORIDAD):
-Si el mensaje menciona materiales NO comestibles como vidrio, cristal, tierra, metal, cemento,
-pintura, plástico, gasolina, veneno, detergente, u otros materiales o sustancias peligrosas:
+Si el mensaje menciona materiales NO comestibles y peligrosos como vidrio, cristal, tierra, metal, cemento, pintura, plástico, gasolina, veneno, detergente, u otros materiales o sustancias químicas peligrosas:
 - Si el item mencionado ES el material peligroso (ej. "comí vidrio", "tomé tierra"): es_real = false.
 - Si aparece junto a un alimento real (ej. "pan con vidrio"): el PLATO COMPLETO es inválido.
   En ese caso, responde exactamente: {{"alimentos":[], "prot_total":0, "carb_total":0, "grasa_total":0, "contiene_no_alimento": true}}
   El campo "contiene_no_alimento": true indica que el mensaje describió algo no comestible/peligroso.
-  NUNCA registres el alimento real sin el peligroso — si viene mezclado con algo no comestible,
-  el plato completo se rechaza (no se puede saber si realmente se consumió sin el peligroso).
+  NUNCA registres el alimento real sin el peligroso.
+⚠️ IMPORTANTE: Solo clasifica como peligroso/incomestible si es un material o sustancia nociva real de los mencionados (vidrio, metal, veneno, etc.). Si el usuario menciona una palabra desconocida, inventada, un plato raro o un error de escritura (ej. "umas", "zarblak", "florbonix"), NO actives "contiene_no_alimento": true ni marques todo el plato como no comestible. Trátalo únicamente bajo la regla de VALIDACIÓN (marca es_real: false para el ítem desconocido y extrae el resto de alimentos normales como de costumbre).
 
 Mensaje: "{mensaje}"
 
@@ -356,10 +354,10 @@ Responde SOLO con JSON válido (sin explicaciones, sin texto extra):
   "grasa_total": número
 }}
 
-━━ VOCABULARIO PERUANO ━━
-"palta" = aguacate/avocado (NUNCA confundir con "pata").
-"ceviche" = pescado crudo marinado en limón (NUNCA cocido al horno).
-"causa" = pastel de papa amarilla fría. "chicha morada" = bebida de maíz morado.
+━━ DISAMBIGUACIÓN CRÍTICA (NUNCA CONFUNDIR) ━━
+- "palta" = aguacate/avocado (NUNCA confundir con "pata" = extremidad/pierna).
+- "ceviche" = plato de pescado crudo marinado en limón (NUNCA cocido ni horneado).
+- Usa tu conocimiento general para interpretar libre y correctamente expresiones informales de comida ("me zampé", "le di duro a", "me eché un", "picoté", etc.) y modismos peruanos u otros dialectos.
 
 ━━ UNIDADES Y ABREVIATURAS (CRÍTICO — transcripción de voz) ━━
 El mensaje puede venir de audio transcrito a texto, donde "gramos" a veces se
@@ -442,9 +440,10 @@ transcribe como una "G"/"g" suelta. Interpreta SIEMPRE:
 13. MODIFICADORES DE TAMAÑO Y FRACCIONES: "medio/media" → ~50%; "un cuarto de" → ~25%; "porción/plato pequeño(a)" → ~60-70%; "porción/plato grande" → ~130-160%; "porción/plato mediano(a)" → 100% (base normal). Esto es un CONCEPTO GENERAL, no una lista cerrada: CUALQUIER fracción expresada en palabras o número ("un tercio", "dos tercios", "tres cuartos", "un quinto", "2/5", "60%", etc.) de UNA unidad se interpreta IGUAL — convierte la fracción a decimal y multiplica "porcion_g" y kcal/prot_g/carb_g/grasa_g de UNA SOLA unidad estándar de ese alimento por ese decimal.
    ⚠️ ERROR CRÍTICO A EVITAR: el numerador de una fracción NUNCA es "cantidad". "tres cuartos de palta" significa 0.75 de UNA palta (cantidad=1, porcion_g≈0.75×porción normal) — NO son 3 paltas (cantidad=3). Antes de responder, pregúntate: ¿el número que veo modifica CUÁNTAS unidades hay, o QUÉ FRACCIÓN de una unidad se comió? Si va seguido de "cuartos/tercios/quintos/de un(a)", es fracción de una unidad, jamás cantidad de unidades.
    Aplica el factor TANTO a "porcion_g" COMO a kcal/prot_g/carb_g/grasa_g de forma proporcional (ej: "medio vaso de leche" → ~120ml y la mitad de las kcal/macros de un vaso completo; "un tercio de palta" → ~33% del porcion_g y kcal de una palta normal, cantidad=1).
-14. CONSISTENCIA: para un mismo alimento y la misma porción, usa SIEMPRE los valores nutricionales
-    estándar (USDA/INS-CENAN) de ese alimento — NO improvises valores nuevos cada vez. Si tienes
-    duda entre varias preparaciones, usa la versión más común/estándar en Perú.
+14. CONSISTENCIA: para un mismo alimento y la misma porción, usa SIEMPRE los mismos valores
+    nutricionales basados en tu conocimiento profesional — NO improvises valores distintos cada
+    vez. Si tienes duda entre varias preparaciones, usa la versión más común/estándar en el
+    contexto del usuario (peruano por defecto, o el país de origen del plato si es extranjero).
 15. AMBIGÜEDAD DE CANTIDADES: Si el usuario expresa incertidumbre o duda sobre la cantidad (ej. "no estoy seguro de si era media o una taza", "creo que eran dos huevos"), estima la cantidad de forma razonable y conservadora basada en el contexto y usa el valor medio o el más probable.
 16. ⚠️ NOMBRES LIMPIOS SIN MEDIDAS: Evita incluir palabras que indiquen contenedores, porciones o medidas (como "taza de", "vaso de", "plato de", "unidad de", "ración de", "poción de") en el campo "nombre". El nombre debe ser únicamente el del alimento o plato en sí (ej: "Café" en lugar de "Taza de café", "Leche" en lugar de "Vaso de leche", "Arroz con pollo" en lugar de "Plato de arroz con pollo", "Plátano" en lugar de "Unidad de plátano").
 17. ⚠️ VERIFICACIÓN DE DENSIDAD POR CATEGORÍA (antes de responder, para cada
@@ -523,7 +522,10 @@ DEPORTES:
    — 1 ejercicio 3×10: ~15 min  — rutina completa gym: ~45-60 min
    — trote sin duración: ~30 min  — cardio máquina sin tiempo: ~30 min
 4. intensidad: Alta (MET≥8), Media (MET 5-7.9), Baja (MET<5)
-5. Reconoce jerga peruana: "tiré" = realicé, "jalé" = hice fuerza, "metí" = hice
+5. Traduce de manera flexible cualquier término coloquial, sinónimo o jerga al nombre oficial del ejercicio correspondiente. Por ejemplo, "muertos" → "Peso Muerto", "jalones" → "Jalón al Pecho", "pichanga" → "Fútbol", "tiré pecho" o "entrené pecho" → rutina completa de pecho. Confía en tu conocimiento general para interpretar correctamente expresiones informales y modismos de entrenamiento.
+   Si el usuario no especifica el ejercicio exacto pero dice el grupo muscular
+   ("entrené pecho", "hice pierna", "trabajé espalda"), infiere una rutina típica
+   de ese grupo (3-4 ejercicios, ~45 min, intensidad Media-Alta) y calcula las kcal.
 """
 
 _PROMPT_RECOMENDACION_COMIDA = """Eres un clasificador de platos. Responde SOLO con una lista. Nada más.
@@ -534,8 +536,6 @@ Escribe EXACTAMENTE 3 líneas en este formato (sin introducción, sin conclusió
 - NombrePlato1 (~XXX kcal)
 - NombrePlato2 (~YYY kcal)
 - NombrePlato3 (~ZZZ kcal)
-
-Platos veganos peruanos válidos: causa de palmito, causa de champiñones, seco de lentejas, guiso de garbanzos, locro de zapallo, sopa de quinua, chaufa de tofu, ceviche de palmito, pepián de quinua, hummus con verduras.
 
 PROHIBIDO: recetas, ingredientes, pasos, párrafos, texto antes o después de las 3 líneas.
 
@@ -655,7 +655,9 @@ PREGUNTAS SIMPLES: máximo 2-3 oraciones directas.
   ✗ PROHIBIDO: "Con X kcal ya superaste tu meta..." ← responde la pregunta, no el balance.
 
 - Consulta de calorías ('cuántas kcal tiene X', 'cuánto engorda X'):
-  Porciones estándar: palta=240kcal/unidad · plátano=107kcal · huevo=85kcal · arroz=260kcal/plato.
+  Usa tu conocimiento profesional de nutricionista para dar el valor realista de cualquier
+  alimento. No estás limitado a una lista — responde con precisión para el alimento que
+  el usuario mencione, sea peruano, internacional, marca comercial, o cualquier otro.
   "palta" = aguacate/avocado. NUNCA confundir con "pata".
   Vegano pregunta por animal → responde NO directamente.
   Responde en una frase natural con los 4 valores (kcal y los 3 macros) — ver regla 1b,
@@ -701,6 +703,8 @@ PREGUNTAS SIMPLES: máximo 2-3 oraciones directas.
   de balance, NO digas que excedió su meta ni menciones un exceso — puedes decir cuánto le
   queda disponible. NUNCA digas que "está cumpliendo su objetivo" si SÍ hay advertencia de
   exceso arriba — son afirmaciones contradictorias.
+  ⚠️ EXCEPCIÓN DE MÁXIMA PRIORIDAD PARA GANAR MASA / MÚSCULO:
+  Si el objetivo del usuario del perfil es "SUPERAVIT", "ganar_leve" o "ganar masa" (ganar masa muscular / superávit / volumen), y el usuario pregunta si debe/puede seguir comiendo o si ya pasó su meta, debes felicitarlo o alentarlo de forma neutral a seguir comiendo. Explícale que para ganar músculo o estar en volumen es necesario y correcto estar en superávit calórico (comer más de la meta). PROHIBIDO decirle que evite comer, prohibido decirle que comer más dificultará sus objetivos, y prohibido sugerirle que coma menos. Debe comer más para lograr su meta de ganancia muscular.
 """
 
 
@@ -3228,6 +3232,15 @@ async def respuesta_chat_llm(
         historial=hist_txt,
         mensaje=mensaje,
     )
+    if _balance_chat.get("es_masa_muscular"):
+        prompt += (
+            "\n\n⚠️ INSTRUCCIÓN DE ALTA PRIORIDAD (OBJETIVO GANAR MASA): El usuario tiene el objetivo "
+            "de ganar masa muscular / superávit / volumen. Si pregunta si debe/puede seguir comiendo o si ya pasó "
+            "su meta calórica, debes felicitarlo o alentarlo a seguir comiendo. Explícale que estar "
+            "en superávit (comer más de su meta) es lo correcto y necesario para hipertrofia/volumen/ganancia de músculo. "
+            "PROHIBIDO decirle que evite comer, sugerirle comer menos, o recomendarle alimentos de muy bajo "
+            "aporte calórico para no comer."
+        )
     # ── Intercept "qué hora es" — hora real de Perú, sin pasar por el LLM ────────
     _m_lower_hora = mensaje.lower().strip()
     if any(k in _m_lower_hora for k in ("qué hora es", "que hora es", "qué hora son", "que hora son")):
@@ -3545,6 +3558,30 @@ async def respuesta_chat_llm(
     # de prosa natural — esto reescribe el patrón sin tocar ningún número.
     resultado = _naturalizar_macros(resultado)
 
+    _es_masa_muscular = bool(_balance_chat.get("es_masa_muscular"))
+    if _es_masa_muscular:
+        _msg_low = (mensaje or "").lower()
+        if any(k in _msg_low for k in ("comer", "como", "meta", "caloria", "caloría", "algo")):
+            _res_low = (resultado or "").lower()
+            if not any(w in _res_low for w in ("ganar", "músculo", "musculo", "masa", "superávit", "superavit")):
+                # Si la respuesta parece una advertencia restrictiva, reemplazarla.
+                # Si ya contiene recomendaciones de comida útiles, solo agregar una nota.
+                _es_advertencia = any(
+                    w in _res_low
+                    for w in ("excediste", "pasaste", "excedido", "evita", "modera", "cuidado", "alerta")
+                )
+                _nota_masa = (
+                    " Recuerda que tu objetivo es ganar masa muscular, así que estar en superávit calórico "
+                    "es necesario y correcto."
+                )
+                if _es_advertencia:
+                    resultado = (
+                        "Como tu objetivo es ganar masa muscular, es correcto y necesario estar en superávit. "
+                        "No te preocupes por haber pasado la meta calórica; sigue alimentándote bien para lograr tu ganancia de músculo."
+                    )
+                else:
+                    resultado = resultado.rstrip() + _nota_masa
+
     return resultado
 
 
@@ -3787,21 +3824,46 @@ def _filtrar_contenedor_generico_con_ingredientes(alimentos: list[dict], mensaje
             w for w in palabras_c[1:]
             if w not in _STOPWORDS_BASE_TEXTUAL and len(w) > 2
         }
-        if not keywords_c:
-            continue
 
-        # Verificar si hay al menos un ingrediente extraído por separado
         tiene_ingrediente_separado = False
-        for i, a in enumerate(alimentos):
-            if i == idx_c or i in descartar_idx:
-                continue
-            palabras_other = set(_palabras_nombre(a.get("nombre", "")))
-            # Si hay palabras comunes significativas
-            if keywords_c.intersection(palabras_other):
-                tiene_ingrediente_separado = True
-                break
+        if keywords_c:
+            # Verificar si hay al menos un ingrediente extraído por separado
+            for i, a in enumerate(alimentos):
+                if i == idx_c or i in descartar_idx:
+                    continue
+                palabras_other = set(_palabras_nombre(a.get("nombre", "")))
+                # Si hay palabras comunes significativas
+                if keywords_c.intersection(palabras_other):
+                    tiene_ingrediente_separado = True
+                    break
 
-        if tiene_ingrediente_separado:
+        # Check if the container is described with a list of ingredients in the message
+        # that are also extracted as independent items.
+        is_described_with_ingredients = False
+        msg_lower = (mensaje or "").lower()
+        container_word = palabras_c[0]
+        if container_word in msg_lower:
+            start_idx = msg_lower.find(container_word)
+            sub_msg = msg_lower[start_idx + len(container_word):]
+            sub_msg_norm = _normalizar_nombre(sub_msg)
+            
+            matching_other_foods = 0
+            for i, a in enumerate(alimentos):
+                if i == idx_c or i in descartar_idx:
+                    continue
+                other_words = {
+                    w for w in _palabras_nombre(a.get("nombre", ""))
+                    if w not in _STOPWORDS_BASE_TEXTUAL and len(w) > 2 and not w.isdigit()
+                }
+                if not other_words:
+                    continue
+                if any(w in sub_msg_norm for w in other_words):
+                    matching_other_foods += 1
+            
+            if matching_other_foods >= 2:
+                is_described_with_ingredients = True
+
+        if tiene_ingrediente_separado or is_described_with_ingredients:
             descartar_idx.add(idx_c)
 
     if not descartar_idx:

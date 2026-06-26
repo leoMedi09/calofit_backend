@@ -115,59 +115,10 @@ class FoodSourceResolver:
                 confianza=95,
             )
 
-        # 3. USDA API
-        if self.usda_client:
-            resultado_usda = self._buscar_usda(nombre_norm)
-            if resultado_usda:
-                logger.info(f"✅ USDA: {nombre_norm} — guardando en BD")
-                alimento_id = self._persistir_en_bd(
-                    nombre=nombre_ingrediente,
-                    nombre_norm=nombre_norm,
-                    macros=resultado_usda,
-                    source='USDA',
-                )
-                self.cache_manager.guardar_en_cache(
-                    food_normalized=nombre_norm,
-                    user_id=user_id,
-                    macros=resultado_usda,
-                    source='USDA',
-                    alimento_id=alimento_id,
-                )
-                return self._construir_resultado(
-                    nombre=nombre_ingrediente,
-                    alimento_id=alimento_id,
-                    macros_100g=resultado_usda,
-                    gramos=gramos,
-                    source='USDA',
-                    confianza=85,
-                )
+        # 3. USDA API (Bypassed - Relying on LLM Estimation)
+        # 4. FatSecret API (Bypassed - Relying on LLM Estimation)
+        # Bypassing external APIs as requested by the user to avoid missing items/American database mismatch.
 
-        # 4. FatSecret API
-        if self.fatsecret_client:
-            resultado_fs = self._buscar_fatsecret(nombre_norm)
-            if resultado_fs:
-                logger.info(f"✅ FatSecret: {nombre_norm} — guardando en BD")
-                alimento_id = self._persistir_en_bd(
-                    nombre=nombre_ingrediente,
-                    nombre_norm=nombre_norm,
-                    macros=resultado_fs,
-                    source='FatSecret',
-                )
-                self.cache_manager.guardar_en_cache(
-                    food_normalized=nombre_norm,
-                    user_id=user_id,
-                    macros=resultado_fs,
-                    source='FatSecret',
-                    alimento_id=alimento_id,
-                )
-                return self._construir_resultado(
-                    nombre=nombre_ingrediente,
-                    alimento_id=alimento_id,
-                    macros_100g=resultado_fs,
-                    gramos=gramos,
-                    source='FatSecret',
-                    confianza=80,
-                )
 
         # 5. ★ LLM Estimación (NUEVO FALLBACK) ★
         resultado_llm = self._estimar_con_llm(nombre_norm, nombre_ingrediente)
@@ -259,14 +210,24 @@ class FoodSourceResolver:
             import asyncio
 
             prompt = (
-                f"Proporciona los valores nutricionales por 100g de '{nombre_original}'. "
-                "Responde ÚNICAMENTE con un JSON válido con estas claves exactas "
-                "(valores numéricos, sin texto adicional):\n"
-                '{"calorias_100g": N, "proteina_100g": N, '
-                '"carbohidratos_100g": N, "grasas_100g": N, '
-                '"fibra_100g": N, "azucar_100g": N}\n'
-                "Si no sabes el alimento, usa null. "
-                "Basa los valores en tablas nutricionales estándar del CENAN/USDA."
+                "Eres un Nutricionista Clínico y Deportivo certificado con conocimiento enciclopédico "
+                "de la composición nutricional de alimentos de TODO el mundo. Tu conocimiento equivale "
+                "al de un experto que ha estudiado la Tabla Peruana de Composición de Alimentos "
+                "(INS/CENAN), USDA FoodData Central, tablas de la FAO/OMS y múltiples fuentes "
+                "científicas internacionales. No consultas bases de datos en tiempo real — aplicas "
+                "tu conocimiento acumulado directamente.\n"
+                f"Proporciona los valores nutricionales realistas y precisos por 100g del siguiente "
+                f"ingrediente o alimento: '{nombre_original}'.\n"
+                "Este alimento puede ser de CUALQUIER origen: peruano, latinoamericano, asiático, "
+                "europeo, fast food, internacional, marca comercial, etc. Si el alimento existe en "
+                "el mundo real y es comestible, DEBES poder estimarlo con valores realistas.\n"
+                "Responde ÚNICAMENTE con un objeto JSON válido (sin explicaciones ni texto adicional) "
+                "con este formato exacto:\n"
+                '{"calorias_100g": número, "proteina_100g": número, '
+                '"carbohidratos_100g": número, "grasas_100g": número, '
+                '"fibra_100g": número, "azucar_100g": número}\n'
+                "Usa la fórmula Atwater para coherencia: kcal ≈ 4×proteína + 4×carbohidratos + 9×grasas. "
+                "Los valores deben ser científicamente realistas para ese alimento específico."
             )
 
             # Llamar al LLM de forma síncrona
@@ -363,7 +324,7 @@ class FoodSourceResolver:
         gras = macros.get('grasas_100g', 0)
 
         # Valores imposibles
-        if kcal <= 0 or kcal > 900:
+        if kcal < 0 or kcal > 900:
             return False
         if prot < 0 or carb < 0 or gras < 0:
             return False

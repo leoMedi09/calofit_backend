@@ -759,91 +759,42 @@ Reglas:
                 break
 
         # ─────────────────────────────────────────────────────────────
-        # PASO 3: Buscar en CENAN/INS (fuente de verdad oficial Perú)
+        # PASO 3: Estimación directa vía LLM (Nutricionista Profesional)
         # ─────────────────────────────────────────────────────────────
-        _texto_busqueda = texto.split("(NOTA INTERNA", 1)[0].strip()
-        info_db = nutricion_service.obtener_info_alimento(_texto_busqueda or texto)
-        if info_db and float(info_db.get("calorias", 0) or 0) > 0:
-            factor = porcion_g / 100.0
-            print(f"[DB-First] '{texto}' -> {info_db['nombre']} ({porcion_g}g) = {round(info_db['calorias'] * factor, 1)} kcal [{info_db.get('origen','BD')}]")
-            return {
-                "es_comida": True,
-                "es_ejercicio": False,
-                "calorias": round(float(info_db["calorias"]) * factor, 1),
-                "proteinas_g": round(float(info_db.get("proteinas", 0) or 0) * factor, 1),
-                "carbohidratos_g": round(float(info_db.get("carbohidratos", 0) or 0) * factor, 1),
-                "grasas_g": round(float(info_db.get("grasas", 0) or 0) * factor, 1),
-                "fibra_g": round(float(info_db.get("fibra", 0) or 0) * factor, 1),
-                "azucar_g": round(float(info_db.get("azucares", 0) or 0) * factor, 1),
-                "sodio_mg": round(float(info_db.get("sodio", 0) or 0) * factor, 1),
-                "alimentos_detectados": [info_db["nombre"]],
-                "ejercicios_detectados": [],
-                "calidad_nutricional": "Alta",
-                "porcion_g": porcion_g,
-                "origen": info_db.get("origen", "BD Oficial"),
-            }
-
-        # ─────────────────────────────────────────────────────────────
-        # PASO 3b: FatSecret API (macros estándar) antes del LLM
-        # ─────────────────────────────────────────────────────────────
-        if not getattr(settings, "DISABLE_FATSECRET", False):
-            try:
-                from app.services.fatsecret_client import get_fatsecret_client, simplify_text_for_fatsecret_query
-
-                fs = get_fatsecret_client()
-                if fs:
-                    q = simplify_text_for_fatsecret_query(texto)
-                    if len(q) >= 2:
-                        hit = await asyncio.to_thread(fs.lookup_macros, q, porcion_g)
-                        if hit and float(hit.get("calorias", 0) or 0) > 0:
-                            print(
-                                f"[FatSecret] '{q}' -> {hit.get('nombre')} "
-                                f"= {hit['calorias']} kcal (porción ref. {porcion_g}g)"
-                            )
-                            return {
-                                "es_comida": True,
-                                "es_ejercicio": False,
-                                "calorias": float(hit["calorias"]),
-                                "proteinas_g": float(hit.get("proteinas", 0) or 0),
-                                "carbohidratos_g": float(hit.get("carbohidratos", 0) or 0),
-                                "grasas_g": float(hit.get("grasas", 0) or 0),
-                                "fibra_g": float(hit.get("fibra", 0) or 0),
-                                "azucar_g": float(hit.get("azucares", 0) or 0),
-                                "sodio_mg": float(hit.get("sodio", 0) or 0),
-                                "alimentos_detectados": [hit.get("nombre", q)],
-                                "ejercicios_detectados": [],
-                                "calidad_nutricional": "Alta",
-                                "porcion_g": porcion_g,
-                                "origen": hit.get("origen", "FatSecret API"),
-                            }
-            except Exception as e:
-                print(f"[FatSecret] {e}")
-
-        # ─────────────────────────────────────────────────────────────
-        # PASO 4: LLM como último recurso (platos compuestos no en BD)
-        # El resultado se devuelve; el AsistenteService lo guardará
-        # en PreferenciaAlimento para que la próxima vez sea consistente.
-        # ─────────────────────────────────────────────────────────────
-        print(f"[DB-First] '{texto}' no encontrado en BD -> usando LLM (se cacheara)")
+        print(f"[IA-Service] Estimando macros para '{texto}' vía LLM...")
         meal_context = "de desayuno" if 5 <= hora_peru < 10 else "tamaño de porción razonable"
         qtxt = (texto.split("(NOTA INTERNA", 1)[0] or texto).replace('"', "'").strip()
+        
         prompt = (
-            f"Eres nutricionista. Estima 1 porción típica ({meal_context}) del alimento: «{qtxt}». "
-            "Responde **solo** JSON: "
-            '{"alimento": "string", "calorias": 0, "proteinas_g": 0, "carbohidratos_g": 0, "grasas_g": 0, "es_comida": true}'
+            "Eres un Nutricionista Clínico y Deportivo experto.\n"
+            f"Estima los macros y calorías para 1 porción típica ({meal_context}) del siguiente alimento o plato: «{qtxt}».\n"
+            "Toma como base las tablas nutricionales oficiales (como INS/CENAN para platos peruanos y USDA para alimentos internacionales).\n"
+            "Evita incluir palabras que indiquen contenedores, porciones o medidas (como 'taza de', 'vaso de', 'plato de') en el nombre del alimento. El nombre debe ser simplemente el alimento (ej. 'Café' en lugar de 'Taza de café').\n\n"
+            "Responde únicamente con un objeto JSON válido en este formato (sin explicaciones ni texto extra):\n"
+            "{\n"
+            "  \"alimento\": \"Nombre del alimento o plato en singular y limpio\",\n"
+            "  \"calorias\": número,\n"
+            "  \"proteinas_g\": número,\n"
+            "  \"carbohidratos_g\": número,\n"
+            "  \"grasas_g\": número,\n"
+            "  \"fibra_g\": número,\n"
+            "  \"azucar_g\": número,\n"
+            "  \"sodio_mg\": número,\n"
+            "  \"es_comida\": true\n"
+            "}"
         )
-        raw = await self._llamar_groq(prompt, max_tokens=200, temp=0.1)
+        raw = await self._llamar_groq(prompt, max_tokens=300, temp=0.1)
         try:
             m = re.search(r'\{.*\}', raw, re.DOTALL)
             parsed = json.loads(m.group()) if m else {}
-            if parsed.get("calorias", 0):
+            if "calorias" in parsed:
                 parsed.setdefault("es_comida", True)
                 parsed.setdefault("es_ejercicio", False)
                 parsed.setdefault("alimentos_detectados", [parsed.get("alimento", texto)])
                 parsed.setdefault("ejercicios_detectados", [])
                 parsed.setdefault("calidad_nutricional", "Media")
                 parsed["porcion_g"] = float(porcion_g) if porcion_g else 250.0
-                parsed["origen"] = "LLM (Llama-3)"
+                parsed["origen"] = "LLM (Nutricionista)"
                 return parsed
         except Exception:
             pass
