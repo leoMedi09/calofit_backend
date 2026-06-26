@@ -34,9 +34,16 @@ class LLMService:
     """
 
     def __init__(self) -> None:
-        if not _groq_available:
-            raise RuntimeError("groq SDK no instalado. Ejecutar: pip install groq")
-        self._client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+        groq_api_key = getattr(settings, "GROQ_API_KEY", "")
+        if groq_api_key.startswith("sk-or-"):
+            from app.services.ai.openrouter_client import OpenRouterClient
+            self._client = OpenRouterClient(api_key=groq_api_key)
+            logger.info("LLMService: OpenRouter (sk-or-*) client initialized.")
+        else:
+            if not _groq_available:
+                raise RuntimeError("groq SDK no instalado. Ejecutar: pip install groq")
+            self._client = AsyncGroq(api_key=groq_api_key)
+            logger.info("LLMService: Groq client initialized.")
 
     # ──────────────────────────────────────────────────────────────────
     # API pública

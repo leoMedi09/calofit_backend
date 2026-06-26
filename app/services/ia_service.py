@@ -89,15 +89,26 @@ class IAService:
     def __init__(self):
         # Groq — motor principal (14,400 req/día gratis, 30 RPM)
         self.groq_client = None
-        if AsyncGroq and getattr(settings, "GROQ_API_KEY", None):
-            self.groq_client = AsyncGroq(
-                api_key=settings.GROQ_API_KEY,
-                timeout=httpx.Timeout(180.0, connect=30.0),
-                max_retries=2,
-            )
-            print("✅ Groq compound-mini: Motor principal de IA inicializado.")
+        groq_api_key = getattr(settings, "GROQ_API_KEY", None)
+        if groq_api_key:
+            if groq_api_key.startswith("sk-or-"):
+                from app.services.ai.openrouter_client import OpenRouterClient
+                self.groq_client = OpenRouterClient(
+                    api_key=groq_api_key,
+                    timeout=180.0,
+                )
+                print("✅ OpenRouter (API Key sk-or-*): Motor principal de IA inicializado.")
+            elif AsyncGroq:
+                self.groq_client = AsyncGroq(
+                    api_key=groq_api_key,
+                    timeout=httpx.Timeout(180.0, connect=30.0),
+                    max_retries=2,
+                )
+                print("✅ Groq compound-mini: Motor principal de IA inicializado.")
+            else:
+                print("⚠️  Groq SDK no disponible.")
         else:
-            print("⚠️  Groq no configurado.")
+            print("⚠️  Groq/OpenRouter no configurado.")
 
         self.gemini_model = None
         self.gemini_model_fast = None

@@ -3,7 +3,11 @@ import warnings
 from dotenv import load_dotenv
 
 # Cargar variables de entorno desde .env
-load_dotenv()
+# Preservamos DATABASE_URL original del contenedor si existe
+_orig_db_url = os.getenv("DATABASE_URL")
+load_dotenv(override=True)
+if _orig_db_url is not None:
+    os.environ["DATABASE_URL"] = _orig_db_url
 
 _WEAK_DEFAULTS = {"TU_CLAVE_PARA_LEY_29733", "changeme", "secret", ""}
 
