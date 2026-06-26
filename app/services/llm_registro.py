@@ -3620,6 +3620,10 @@ _SINONIMOS_ALIMENTOS = {
     "palta": "aguacate", "aguacate": "palta",
     "choclo": "maiz",  "maiz": "choclo",
     "camote": "batata", "batata": "camote",
+    # Sinónimos de deportes / ejercicios peruanos
+    "fulbito": "futbol", "pichanga": "futbol", "pichanguear": "futbol",
+    "fulbo": "futbol", "cletear": "bicicleta", "cleteada": "bicicleta",
+    "bici": "bicicleta", "fierros": "pesas",
 }
 
 
