@@ -1934,6 +1934,14 @@ async def respuesta_recomendacion_llm(
                 f"Prioriza alternativas como: {', '.join(dict.fromkeys(_alternativas_seguras))}.\n"
             )
 
+        prompt = _PROMPT_RECOMENDACION_EJERCICIO.format(
+            nombre=ctx.nombre,
+            objetivo=ctx.objetivo_normalizado,
+            condiciones=condiciones,
+            contexto_lesion=_contexto_lesion,
+            mensaje=mensaje,
+        )
+
         try:
             respuesta_ej = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=300, temp=0.7)
 

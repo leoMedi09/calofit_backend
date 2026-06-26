@@ -58,7 +58,8 @@ def test_engine(test_db_url):
         _conn_ext.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         _conn_ext.commit()
 
-    # Crear todas las tablas
+    # Crear todas las tablas (importando los modelos primero para que se registren en la metadata)
+    import app.models
     Base.metadata.create_all(bind=engine)
     logger.info("[TEST] Tablas creadas correctamente.")
 
