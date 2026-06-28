@@ -1501,6 +1501,10 @@ async def registrar_comida_llm(
 
     restante  = max(0.0, meta - consumido + quemado)  # igual que la UI: suma quemadas
 
+    from app.core.notification_scheduler import notificar_si_excede_meta
+    notificar_si_excede_meta(perfil, prog, meta, quemado=quemado)
+    db.commit()  # persiste alerta_exceso_enviada si notificar_si_excede_meta la marcó
+
     # Detectar conflicto dietético y generar alerta suave
     _es_vegano_ctx = any("vegano" in c.lower() for c in ctx.condiciones_medicas)
     _es_veg_ctx = any("vegetariano" in c.lower() for c in ctx.condiciones_medicas)

@@ -6,6 +6,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app.core.database import SessionLocal
 from app.core.firebase import send_push_notification
+from app.core.objetivo_utils import es_superavit
 from app.core.utils import get_peru_date
 from app.core.logging_config import get_logger
 from app.models.client import Client
@@ -14,6 +15,44 @@ from app.models.comida_registro import ComidaRegistro
 logger = get_logger("notification_scheduler")
 
 PERU_TZ = timezone(timedelta(hours=-5))
+
+
+def notificar_si_excede_meta(cliente: Client, progreso, meta: float, quemado: float | None = None) -> None:
+    """Push en tiempo real la primera vez que el consumo del día supera la
+    meta — se llama justo después de cada registro de comida (chat, Registro
+    Inteligente, manual o tarjeta), no en un job nocturno, para que el aviso
+    llegue cuando todavía es útil (antes de seguir comiendo).
+    `progreso.alerta_exceso_enviada` evita reenviar el push el resto del día.
+    """
+    if progreso is None or progreso.alerta_exceso_enviada:
+        return
+    if es_superavit(getattr(cliente, "goal", "")):
+        return  # ganar masa muscular: el superávit es esperado, no es una alerta
+    if not cliente.fcm_token or not cliente.notificaciones_activas:
+        return
+
+    consumidas = float(progreso.calorias_consumidas or 0)
+    quemadas   = float(quemado) if quemado is not None else float(progreso.calorias_quemadas or 0)
+    disponible = meta + quemadas
+    if consumidas <= disponible:
+        return
+
+    exceso = round(consumidas - disponible)
+    enviado = send_push_notification(
+        token=cliente.fcm_token,
+        title="Saliste de tu meta de hoy",
+        body=(
+            f"Llevas {round(consumidas)} kcal — {exceso} kcal por encima de tu meta. "
+            f"Si vas a comer algo más, que sea ligero."
+        ),
+        data={"tipo": "exceso_calorico"},
+    )
+    if enviado:
+        progreso.alerta_exceso_enviada = True
+        logger.info(
+            "Alerta de exceso calórico enviada a client_id=%s (+%s kcal)",
+            cliente.id, exceso,
+        )
 
 # Frases motivacionales — lista fija que rota al azar, sin depender del LLM
 # (cero costo de tokens, cero riesgo de fallo por cupo/conexión de Groq).

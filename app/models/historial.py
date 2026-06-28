@@ -53,6 +53,7 @@ class ProgresoCalorias(Base):
     grasas_consumidas = Column(Float, nullable=True, default=0.0)
     
     deficit_superavit = Column(Integer, nullable=True)  # Calculado: consumidas - (tmb + quemadas)
+    alerta_exceso_enviada = Column(Boolean, nullable=False, default=False)  # push "saliste de tu meta" ya enviado hoy
     created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
 
     # Relación con cliente

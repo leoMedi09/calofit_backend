@@ -297,6 +297,11 @@ async def registrar_macros_directos(
 
         db.commit()
 
+        from app.core.notification_scheduler import notificar_si_excede_meta
+        from app.services.asistente.asistente_plan import obtener_meta_calorica_hoy
+        notificar_si_excede_meta(perfil, prog, obtener_meta_calorica_hoy(perfil, db))
+        db.commit()  # persiste alerta_exceso_enviada si se marcó
+
         return {
             "success": True,
             "mensaje": f"✅ Registré {len(body.alimentos)} ingrediente(s) — {round(kcal_total)} kcal totales.",

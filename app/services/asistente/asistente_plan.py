@@ -138,3 +138,12 @@ def obtener_plan_hoy(perfil, edad: int, db: Session):
         )
 
     return (plan_maestro, plan_base, False)
+
+
+def obtener_meta_calorica_hoy(perfil, db: Session) -> float:
+    """Atajo para los call sites de registro que solo necesitan la meta
+    calórica del día (ej. para decidir si avisar que se excedió la meta) —
+    evita repetir el cálculo de edad + obtener_plan_hoy en cada uno."""
+    edad = (datetime.now().year - perfil.birth_date.year) if perfil.birth_date else 25
+    _, plan_hoy_data, _ = obtener_plan_hoy(perfil, edad, db)
+    return float(plan_hoy_data.get("calorias_dia", 2000))

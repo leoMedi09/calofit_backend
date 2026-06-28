@@ -978,6 +978,9 @@ class AsistenteService:
             meta = registrar_ejercicio_desde_payload_tarjeta(payload, perfil, progreso, db)
         else:
             meta = registrar_comida_desde_payload_tarjeta(payload, perfil, progreso, db)
+            from app.core.notification_scheduler import notificar_si_excede_meta
+            from app.services.asistente.asistente_plan import obtener_meta_calorica_hoy
+            notificar_si_excede_meta(perfil, progreso, obtener_meta_calorica_hoy(perfil, db))
         db.commit()
         return {
             "success": True,
