@@ -880,26 +880,33 @@ class AsistenteService:
 
     async def calcular_ejercicio_manual(
         self, nombre: str, series: int, reps: int, peso_kg: float,
-        db: Session, current_user
+        db: Session, current_user, duracion_min: float = 0.0,
     ):
         """
-        Calcula kcal para un ejercicio de fuerza definido por series×reps×peso.
-        Fórmula: MET × peso_corporal × 3.5 / 200 × duracion_min
-        Duración estimada: series × (reps × 4s + 90s descanso) / 60
+        Calcula kcal para un ejercicio. Dos modos:
+        - Cardio (duracion_min > 0): usa los minutos directos, sin series/reps.
+        - Fuerza (series/reps > 0): duración estimada = series × (reps×4s + 90s descanso) / 60.
+        Fórmula de kcal: MET × peso_corporal × 3.5 / 200 × duracion_min
         """
         perfil = db.query(Client).filter(Client.email == current_user.email).first()
         if not perfil:
             raise ValueError("Perfil no encontrado")
         peso_corporal = float(getattr(perfil, "weight", None) or 70.0)
 
-        # Buscar MET en el catálogo interno
+        # Buscar MET en el catálogo interno (fast-path local, sin tokens).
+        # Si no hay match, el LLM lo estima — cubre cualquier ejercicio sin
+        # mantener una segunda tabla hardcodeada para todo el catálogo posible.
         from app.services.asistente.asistente_ejercicio import resolver_met_mets_gym
         _, met = resolver_met_mets_gym(nombre.lower())
         if not met:
-            met = 5.0  # fuerza genérica
+            from app.services.llm_registro import estimar_met_desconocido
+            met = await estimar_met_desconocido(nombre, self.ia)
 
-        # Estimar duración: 4 seg/rep + 90 seg descanso por serie
-        dur_min = max(series * (reps * 4 + 90) / 60, 3.0)
+        if duracion_min > 0:
+            dur_min = duracion_min
+        else:
+            # Estimar duración: 4 seg/rep + 90 seg descanso por serie
+            dur_min = max(series * (reps * 4 + 90) / 60, 3.0)
 
         from app.services.ejercicios_service import ejercicios_service
         kcal = round(ejercicios_service.calcular_calorias(met, peso_corporal, dur_min), 1)

@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 # controlados por el frontend. No depende de regex ni texto libre.
 from app.core.objetivo_utils import es_superavit as _es_superavit_goal
 from app.core.user_context import UserContext
+from app.core.mets_gym import tabla_prompt_texto as _tabla_met_texto
 
 _RX_CANTIDAD_AMBIGUA = re.compile(
     r'\b(?:no\s+(?:estoy\s+seguro|se|sé)\s+si|creo\s+que|tal\s+vez|quiz[aá]s|mas\s+o\s+menos|más\s+o\s+menos|aprox|entre\s+\d+\s+y\s+\d+|o\s+(?:media|una|dos)|un\s+poco(?:\s+de)?|algo(?:\s+de)?|bastante)\b',
@@ -487,27 +488,7 @@ Responde SOLO con JSON array válido (aunque sea un solo ejercicio, siempre usa 
 Si NO hay ejercicio real: [{{"encontrado": false, "ejercicio": null, "kcal_quemadas": 0, "duracion_min": 0, "met": 0, "intensidad": "Baja"}}]
 
 ━━ TABLA MET PROFESIONAL ━━
-CARDIO:
-  Caminata lenta (4km/h)=3.0  Caminata rápida (6km/h)=4.5  Trote suave (8km/h)=8.3
-  Correr moderado (10km/h)=10  Correr rápido (12km/h)=11.5  Ciclismo moderado=8.0
-  Natación recreativa=6.0  Natación intensa=10.0  Bicicleta estática=7.0
-  Saltar cuerda=12.0  Elíptica moderada=5.0  Remo máquina=7.0
-
-FUERZA (gym):
-  Press banca=5.0  Press militar=5.0  Press inclinado=5.0
-  Sentadilla libre=6.0  Prensa de piernas=5.0  Peso muerto=6.0
-  Dominadas/Pull-ups=8.0  Jalón al pecho=5.0  Remo con barra=6.0
-  Curl de bíceps=3.5  Extensión tríceps=3.5  Elevaciones laterales=3.0
-  Hip thrust=5.0  Zancadas/Lunges=5.5  Extensión cuádriceps=3.5
-  Flexiones/Push-ups=8.0  Fondos en paralelas=8.0
-
-FUNCIONAL / HIIT:
-  Burpees=10.0  Box jumps=10.0  Kettlebell swings=12.0
-  Battle ropes=10.0  HIIT circuito=9.0  CrossFit WOD=12.0
-  TRX suspension=7.0  Plancha isométrica=4.0  Mountain climbers=8.0
-
-DEPORTES:
-  Fútbol=7.0  Básquet=8.0  Vóley=4.0  Tenis=7.5  Boxeo sparring=9.0
+""" + _tabla_met_texto() + """
 
 ━━ REGLAS PROFESIONALES ━━
 0. ⚠️ Si el mensaje NO nombra un ejercicio o actividad física ESPECÍFICA (ej. solo
@@ -527,6 +508,35 @@ DEPORTES:
    ("entrené pecho", "hice pierna", "trabajé espalda"), infiere una rutina típica
    de ese grupo (3-4 ejercicios, ~45 min, intensidad Media-Alta) y calcula las kcal.
 """
+
+# Fallback del registro manual (Constructor de Rutinas) cuando el nombre no
+# matchea ningún MET de METS_GYM — en vez de un MET genérico fijo, se le pide
+# al mismo LLM que estima el MET en el chat. Cubre cualquier ejercicio del
+# mundo (igual que el chat) sin mantener una segunda tabla hardcodeada.
+_PROMPT_MET_DESCONOCIDO = _IDENTIDAD + """
+TAREA: Como Entrenador Personal certificado, estima el valor MET (intensidad
+metabólica) del ejercicio "{nombre}" — no está en mi catálogo de referencia,
+así que usa tu conocimiento profesional, calibrado con esta tabla:
+
+""" + _tabla_met_texto() + """
+
+Responde SOLO con JSON, sin texto extra: {{"met": numero_decimal}}
+"""
+
+
+async def estimar_met_desconocido(nombre: str, ia_engine) -> float:
+    """MET por LLM para un ejercicio que no está en METS_GYM (fast-path local).
+    Cubre cualquier ejercicio sin necesidad de agregarlo a mano al catálogo."""
+    try:
+        prompt = _PROMPT_MET_DESCONOCIDO.format(nombre=nombre)
+        raw = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=40, temp=0.0)
+        datos = _parse_json(raw)
+        met = float(datos.get("met")) if datos and datos.get("met") else 0.0
+        return met if met > 0 else 5.0
+    except Exception as e:
+        logger.warning("[Ejercicio manual] Fallback MET por LLM falló para '%s': %s", nombre, e)
+        return 5.0
+
 
 _PROMPT_RECOMENDACION_COMIDA = """Eres un clasificador de platos. Responde SOLO con una lista. Nada más.
 

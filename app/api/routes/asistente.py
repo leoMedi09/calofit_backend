@@ -45,9 +45,10 @@ class RegistroManualAlimentoRequest(BaseModel):
 
 class CalcularEjercicioRequest(BaseModel):
     nombre: str
-    series: int = 3
-    reps:   int = 10
+    series: int = 0
+    reps:   int = 0
     peso_kg: float = 0.0
+    duracion_min: float = 0.0  # cardio: minutos directos, sin series/reps
 
 
 class RegistroRutinaManualRequest(BaseModel):
@@ -266,17 +267,18 @@ async def registrar_macros_directos(
     grasa_total = round(sum(a.grasas_g      for a in body.alimentos), 1)
 
     try:
-        # 1. Actualizar progreso_calorias
+        # 1. Actualizar progreso_calorias (crear la fila si es el primer registro del día)
         prog = db.query(ProgresoCalorias).filter(
             ProgresoCalorias.client_id == perfil.id,
             ProgresoCalorias.fecha == hoy,
         ).first()
-        if prog:
-            prog.calorias_consumidas      = int((prog.calorias_consumidas or 0)      + kcal_total)
-            prog.proteinas_consumidas     = round((prog.proteinas_consumidas or 0)   + prot_total, 1)
-            prog.carbohidratos_consumidos = round((prog.carbohidratos_consumidos or 0) + carb_total, 1)
-            prog.grasas_consumidas        = round((prog.grasas_consumidas or 0)      + grasa_total, 1)
-        # Si no hay progreso aún no pasa nada — el balance reflejará cuando haga consulta
+        if not prog:
+            prog = ProgresoCalorias(client_id=perfil.id, fecha=hoy)
+            db.add(prog)
+        prog.calorias_consumidas      = int((prog.calorias_consumidas or 0)      + kcal_total)
+        prog.proteinas_consumidas     = round((prog.proteinas_consumidas or 0)   + prot_total, 1)
+        prog.carbohidratos_consumidos = round((prog.carbohidratos_consumidos or 0) + carb_total, 1)
+        prog.grasas_consumidas        = round((prog.grasas_consumidas or 0)      + grasa_total, 1)
 
         # 2. Insertar cada ingrediente en comida_registros
         for item in body.alimentos:
@@ -329,6 +331,7 @@ async def calcular_ejercicio(
             series=body.series,
             reps=body.reps,
             peso_kg=body.peso_kg,
+            duracion_min=body.duracion_min,
             db=db,
             current_user=current_user,
         )
