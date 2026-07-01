@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from .routes import usuarios, ejercicios, nutricion, auth, clientes, asistente, dashboard, admin, alertas, balance, alimentos, nutricionista, copiloto, notifications
+from .routes import usuarios, ejercicios, nutricion, auth, clientes, asistente, dashboard, admin, alertas, balance, alimentos, nutricionista, copiloto, notifications, nueva_funcion
 
 api_router = APIRouter()
 
@@ -18,3 +18,4 @@ api_router.include_router(balance.router, prefix="/balance", tags=["Mi Balance"]
 api_router.include_router(alimentos.router, prefix="/alimentos", tags=["Detalle de Alimentos"])
 api_router.include_router(nutricionista.router, prefix="/nutricionista", tags=["Panel Nutricionista"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["Notificaciones Push"])
+api_router.include_router(nueva_funcion.router, prefix="/nueva-funcion", tags=["Nueva Funcionalidad (en desarrollo)"])
