@@ -593,6 +593,10 @@ Mensaje actual: "{mensaje}"
 
 REGLAS DE RESPUESTA:
 ⛔ REGLAS ABSOLUTAS (se aplican SIEMPRE, sin excepción):
+  0. PROHIBIDO hacer referencia explícita al historial de conversación. NUNCA uses frases como
+     "como mencionaste antes", "como dijiste", "como recordarás", "anteriormente dijiste",
+     "en tu mensaje anterior", "ya me contaste". Usa el contexto internamente para ser coherente,
+     pero NO lo anuncies ni lo cites. Responde como si fuera una conversación natural continua.
   1. PROHIBIDO cualquier markdown: **negrita**, *cursiva*, # títulos. Solo texto plano.
   1b. PROHIBIDO usar abreviaturas tipo etiqueta para macros: "P:Xg C:Yg G:Zg",
       "kcal:", "prot:". Esos números van en PROSA natural, como los diría una
@@ -843,6 +847,10 @@ async def registrar_comida_llm(
             # mensajes de usuario más largos sin pasar el límite.
             raw = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=700, temp=0.0, model="llama-3.3-70b-versatile")
             datos = _parse_json(raw)
+            if datos is None:
+                await asyncio.sleep(1)
+                raw = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=700, temp=0.0, model="llama-3.3-70b-versatile")
+                datos = _parse_json(raw)
         except asyncio.TimeoutError as e:
             logger.error("[LLM Timeout in registrar_comida_llm]: %s", e)
             return {
@@ -4509,6 +4517,7 @@ def _parse_json(raw: str) -> Optional[dict]:
                 pass
     except Exception:
         pass
+    logger.warning("[_parse_json] JSON no extraíble — raw: %r", raw[:300])
     return None
 
 

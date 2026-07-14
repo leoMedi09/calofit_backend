@@ -11,6 +11,7 @@ Toda la lógica de negocio está delegada a:
 """
 
 import traceback
+from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -135,10 +136,15 @@ async def consultar_asistente(
     try:
         cliente = db.query(Client).filter(Client.email == current_user.email).first()
 
-        # Solo historial de la sesión actual (últimos 6 mensajes enviados por Flutter).
-        # El historial BD está desactivado — causaba que el LLM dijera "como recordarás..." y similares.
+        # Si Flutter envía historial (chat activo): usarlo tal cual.
+        # Si Flutter no envía nada (chat borrado, primera apertura, nueva sesión):
+        # recuperar los últimos turnos de la BD (ventana de 2h) como fallback.
+        # Usar BD solo como fallback evita el problema anterior de duplicar contexto
+        # (que causaba que el LLM dijera "como recordarás...").
         historial_sesion = request.historial or []
-        historial_combinado = historial_sesion
+        historial_combinado = historial_sesion or (
+            _cargar_historial_bd(cliente.id, db) if cliente else []
+        )
 
         resultado = await asistente_service.consultar(
             mensaje=request.mensaje,
@@ -545,6 +551,81 @@ async def eliminar_sugerencia(
         db.delete(item)
         db.commit()
         return {"mensaje": f"🗑️ Sugerencia eliminada"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/mi-racha")
+async def mi_racha(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Racha de días consecutivos con al menos un registro de comida (estilo Duolingo).
+    Fuente: comida_registros.fecha — sin nueva tabla ni migración.
+    """
+    from app.models.client import Client
+    from app.models.comida_registro import ComidaRegistro
+
+    try:
+        perfil = db.query(Client).filter(Client.email == current_user.email).first()
+        if not perfil:
+            raise HTTPException(status_code=404, detail="Perfil no encontrado")
+
+        fechas_raw = (
+            db.query(ComidaRegistro.fecha)
+            .filter(ComidaRegistro.client_id == perfil.id)
+            .distinct()
+            .order_by(ComidaRegistro.fecha.desc())
+            .all()
+        )
+        fechas = sorted({r.fecha for r in fechas_raw}, reverse=True)
+
+        from app.core.utils import get_peru_date
+        hoy = get_peru_date()
+        registrado_hoy = bool(fechas and fechas[0] == hoy)
+
+        # Racha actual: cuenta días consecutivos hacia atrás desde hoy
+        racha_actual = 0
+        referencia = hoy
+        for f in fechas:
+            if f == referencia or f == referencia - timedelta(days=1):
+                racha_actual += 1
+                referencia = f
+            elif f < referencia - timedelta(days=1):
+                break
+
+        # Mejor racha histórica
+        mejor_racha, racha_tmp, prev = 0, 0, None
+        for f in sorted(fechas):
+            if prev is None or f == prev + timedelta(days=1):
+                racha_tmp += 1
+            else:
+                racha_tmp = 1
+            mejor_racha = max(mejor_racha, racha_tmp)
+            prev = f
+
+        # Mapa últimos 7 días para los puntos del widget Flutter
+        set_fechas = set(fechas)
+        ultimos_7 = [
+            {
+                "fecha": str(hoy - timedelta(days=i)),
+                "registrado": (hoy - timedelta(days=i)) in set_fechas,
+            }
+            for i in range(6, -1, -1)
+        ]
+
+        return {
+            "racha_actual": racha_actual,
+            "mejor_racha": mejor_racha,
+            "dias_totales": len(fechas),
+            "registrado_hoy": registrado_hoy,
+            "ultimos_7_dias": ultimos_7,
+        }
+
     except HTTPException:
         raise
     except Exception as e:

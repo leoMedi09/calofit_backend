@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
@@ -10,9 +10,7 @@ from app.api import api_router
 from app.api.routes.websockets import router as websocket_router
 
 
-# from app.api.routes.clientes import router as clientes_router
-
-Base.metadata.create_all(bind=engine) 
+Base.metadata.create_all(bind=engine)
 
 # MIGRACIONES MANUALES: Columnas añadidas post-creación inicial
 from sqlalchemy import text
@@ -69,8 +67,6 @@ if not os.path.exists(UPLOAD_DIR):
 # Servir archivos estáticos
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
-# ✅ REMOVER REGISTRO DIRECTO - YA ESTÁ EN api_router
-# app.include_router(clientes_router, prefix="/clientes", tags=["clientes"])
 
 @app.on_event("startup")
 def iniciar_notificaciones():
