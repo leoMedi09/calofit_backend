@@ -1,1 +1,1 @@
-from . import auth, usuarios, clientes, ejercicios, nutricion, asistente, websockets
+from . import auth, usuarios, clientes, ejercicios, nutricion, asistente

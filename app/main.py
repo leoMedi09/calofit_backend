@@ -5,9 +5,8 @@ import os
 from app.core.database import engine, Base
 from app.core import firebase
 
-from app.models import user, client, role, historial 
+from app.models import user, client, role, historial
 from app.api import api_router
-from app.api.routes.websockets import router as websocket_router
 
 
 Base.metadata.create_all(bind=engine)
@@ -53,7 +52,6 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
-app.include_router(websocket_router, tags=["WebSockets"])
 
 # Incluir router general de API v1 (PASO 6)
 from app.api.v1 import router as api_v1_router

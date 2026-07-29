@@ -1,42 +1,44 @@
-# CaloFit — Sistema de Asistencia Nutricional y Deportiva
+# CaloFit — Backend
 
-> Tesis 2026 · Gimnasio World Light · Lambayeque, Perú  
-> Stack: FastAPI · Flutter · PostgreSQL 15 · Docker · Groq (Llama-3) · Random Forest · KNN
+> Tesis 2026 · Gimnasio World Light · Lambayeque, Perú
+> FastAPI · SQLAlchemy · PostgreSQL 15 · Groq (Llama-3) · Random Forest · KNN
+
+Backend del sistema CaloFit. El frontend Flutter vive en [`../calofit_frontend`](../calofit_frontend) (ver su propio README).
 
 ---
 
 ## Tabla de contenidos
 
 1. [Stack tecnológico](#stack-tecnológico)
-2. [Arquitectura del sistema](#arquitectura-del-sistema)
+2. [Arquitectura](#arquitectura)
 3. [Estructura del proyecto](#estructura-del-proyecto)
 4. [Levantar el entorno](#levantar-el-entorno)
 5. [Cómo implementar un endpoint](#cómo-implementar-un-endpoint)
 6. [Autenticación JWT](#autenticación-jwt)
 7. [Endpoints disponibles](#endpoints-disponibles)
-8. [Integración Flutter → Backend](#integración-flutter--backend)
-9. [Base de datos](#base-de-datos)
-10. [Comandos útiles](#comandos-útiles)
-11. [Credenciales de prueba](#credenciales-de-prueba)
+8. [Base de datos](#base-de-datos)
+9. [Comandos útiles](#comandos-útiles)
+10. [Credenciales de prueba](#credenciales-de-prueba)
 
 ---
 
 ## Stack tecnológico
 
-| Capa | Tecnología | Versión |
-|------|-----------|---------|
-| Backend | FastAPI + SQLAlchemy | Python 3.11 |
-| Frontend | Flutter + Provider + Dio | 3.x |
-| Base de datos | PostgreSQL | 15 |
-| IA / LLM | Groq API (Llama-3) | — |
-| ML Perfil | Random Forest (`perfil_adherencia.pkl`) | scikit-learn |
-| ML Recomendador | KNN Coseno (`recomendador_knn.pkl`) | scikit-learn |
-| Auth | Firebase Auth + JWT (backend) | — |
-| Contenedores | Docker Compose | — |
+| Elemento | Detalle |
+|---|---|
+| Framework | FastAPI (Python 3.11) |
+| ORM | SQLAlchemy 2.x |
+| Migraciones | `Base.metadata.create_all()` + `ALTER TABLE IF NOT EXISTS` manual en `app/main.py` |
+| Base de datos | PostgreSQL 15 (Docker `calofit_db`, puerto externo 5433) |
+| IA / LLM | Llama-3 vía Groq API (`ia_service.py`) |
+| ML Perfil | Random Forest (`perfil_adherencia.pkl`) — 14 features → PERFIL A/B/C |
+| ML Recomendador | KNN Coseno (`recomendador_knn.pkl`) — vector `[kcal, prot, carb, grasa]` |
+| Auth | Firebase Admin SDK + JWT |
+| Contenedores | Docker Compose (`calofit_db`, `calofit_backend`, `calofit_frontend`) |
 
 ---
 
-## Arquitectura del sistema
+## Arquitectura
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -48,34 +50,34 @@
 ┌─────────────────────────────────────────────────────────┐
 │               FastAPI (Puerto 8000)                      │
 │                                                          │
-│  app/api/routes/         app/api/v1/                    │
-│  ├─ /auth                ├─ /api/v1/nutrition/          │
-│  ├─ /asistente           ├─ /api/v1/exercise/           │
-│  ├─ /clientes            └─ /api/v1/assistant/          │
-│  ├─ /ejercicios                                          │
-│  ├─ /nutricion           app/api/dependencies.py        │
-│  ├─ /balance             (inyección de servicios v1)    │
-│  ├─ /dashboard                                           │
-│  ├─ /nutricionista       app/core/                      │
-│  ├─ /copiloto            ├─ database.py (SessionLocal)  │
-│  ├─ /alertas             ├─ security.py (JWT)           │
-│  └─ /admin               └─ config.py (.env vars)       │
+│  app/api/routes/ (api_router)     app/api/v1/           │
+│  ├─ /auth               ├─ /alertas                     │
+│  ├─ /asistente          ├─ /balance                     │
+│  ├─ /clientes           ├─ /alimentos                   │
+│  ├─ /ejercicios         ├─ /nutricionista                │
+│  ├─ /nutricion          ├─ /admin                        │
+│  ├─ /dashboard          ├─ /usuarios                     │
+│  ├─ /copiloto           └─ /notifications                │
+│  └─ /api/v1/nutrition/parse_ingredients (único v1 activo)│
 │                                                          │
-│  app/services/           app/models/                    │
-│  ├─ asistente_service.py ├─ client.py                   │
-│  ├─ asistente_nutricion  ├─ alimento.py                 │
-│  ├─ asistente_registro_* ├─ plato.py                    │
-│  ├─ ml_service.py        ├─ ejercicio.py                │
-│  ├─ rutina_service.py    └─ nutricion.py (ProgresoCal.) │
-│  └─ plato_constructor.py                                 │
+│  app/core/               app/models/                    │
+│  ├─ database.py (SessionLocal)  ├─ client.py            │
+│  ├─ security.py (JWT)           ├─ alimento.py, plato.py │
+│  └─ config.py (.env vars)       └─ nutricion.py, ...    │
+│                                                          │
+│  app/services/asistente/  (orquestador + 5 módulos NLP) │
+│  app/services/nutrition/  (food resolver, plate builder)│
+│  app/services/ml_service.py, rutina_service.py, ...      │
 └──────────────────────┬──────────────────────────────────┘
                        │ SQLAlchemy ORM
                        ▼
 ┌─────────────────────────────────────────────────────────┐
 │         PostgreSQL 15 — BD_Calofit (Puerto 5433)        │
-│  37 tablas · pg_trgm · unaccent                         │
+│  39 tablas · pg_trgm · unaccent                          │
 └─────────────────────────────────────────────────────────┘
 ```
+
+> Nota histórica: hubo una "arquitectura nueva" bajo `/api/v1/assistant`, `/api/v1/exercise` y `app/api/dependencies.py` que nunca recibió tráfico real de Flutter — se eliminó el 2026-06-13 (ver `CLAUDE.md`). El único endpoint `/api/v1` en uso hoy es `parse_ingredients`.
 
 ### Flujo de una petición (ejemplo: registro de comida)
 
@@ -101,105 +103,55 @@ Flutter                Backend                     BD
 ## Estructura del proyecto
 
 ```
-PROYECTO/
-├── docker-compose.yml          # Orquesta los 3 contenedores
-├── schema_dump.sql             # Esquema completo de la BD (37 tablas)
-├── .env.example                # Template de variables de entorno
-├── CLAUDE.md                   # Diario de ingeniería completo
-│
-├── calofit_backend/
-│   ├── app/
-│   │   ├── main.py             # Entrada FastAPI: middlewares, routers, migraciones
-│   │   ├── core/
-│   │   │   ├── config.py       # Variables de entorno (settings)
-│   │   │   ├── database.py     # Engine + SessionLocal + get_db()
-│   │   │   ├── security.py     # Hash de contraseñas + JWT
-│   │   │   ├── utils.py        # Fecha Perú, parseo de macros, TMB
-│   │   │   ├── logging_config.py # get_logger() con RotatingFileHandler
-│   │   │   ├── mets_gym.py     # Diccionario MET por ejercicio (ACSM)
-│   │   │   └── macros_diarios.py # Cálculo P/C/G desde kcal y objetivo
-│   │   │
-│   │   ├── models/             # SQLAlchemy ORM (una clase por tabla)
-│   │   │   ├── client.py       # Client (clientes del gimnasio)
-│   │   │   ├── nutricion.py    # ProgresoCalorias, PlanNutricional, PlanDiario
-│   │   │   ├── alimento.py     # Alimento, AlimentoAlias
-│   │   │   ├── plato.py        # Plato, PlatoIngrediente
-│   │   │   ├── ejercicio.py    # Ejercicio, EjercicioAlias
-│   │   │   ├── historial.py    # SugerenciaGuardada, HistorialRecomendacion
-│   │   │   └── ...
-│   │   │
-│   │   ├── schemas/            # Pydantic: request/response validation
-│   │   │   ├── client.py       # ClientCreate, ClientUpdate, ClientResponse
-│   │   │   ├── nutricion.py    # NutricionResponse, MacrosResponse
-│   │   │   └── ...
-│   │   │
-│   │   ├── api/
-│   │   │   ├── __init__.py     # api_router: agrupa todas las rutas
-│   │   │   ├── dependencies.py # Inyección de servicios v1
-│   │   │   ├── routes/         # Capa principal (usada por Flutter)
-│   │   │   │   ├── auth.py         # /auth/login, /auth/register
-│   │   │   │   ├── asistente.py    # /asistente/consultar, /log-inteligente
-│   │   │   │   ├── clientes.py     # /clientes/perfil, /clientes/registrar
-│   │   │   │   ├── ejercicios.py   # /ejercicios/, /rutina, /log-series
-│   │   │   │   ├── balance.py      # /balance/hoy
-│   │   │   │   ├── dashboard.py    # /dashboard/resumen-diario, tendencias
-│   │   │   │   ├── nutricion.py    # /nutricion/recomendaciones
-│   │   │   │   ├── nutricionista.py# /nutricionista/clientes, /validar-plan
-│   │   │   │   ├── copiloto.py     # /copiloto/consultar (staff)
-│   │   │   │   ├── alertas.py      # /alertas/mis-clientes
-│   │   │   │   ├── alimentos.py    # /alimentos/{id}
-│   │   │   │   ├── admin.py        # /admin/*
-│   │   │   │   └── usuarios.py     # /usuarios/*
-│   │   │   └── v1/             # Capa modular (endpoints adicionales)
-│   │   │       ├── nutrition/parser.py  # /api/v1/nutrition/parse_ingredients
-│   │   │       ├── exercise/routines.py # /api/v1/exercise/routines
-│   │   │       └── assistant/chat.py    # /api/v1/assistant/chat
-│   │   │
-│   │   └── services/           # Lógica de negocio
-│   │       ├── asistente_service.py         # Orquestador del asistente
-│   │       ├── asistente_registro_comida.py # NLP 5 capas + registro BD
-│   │       ├── asistente_registro_ejercicio.py # MET + workout_logs
-│   │       ├── asistente_nutricion.py       # Motor de alimentos + platos
-│   │       ├── asistente_prompt.py          # Builder de prompt Groq
-│   │       ├── asistente_modos.py           # Clasificación de intención
-│   │       ├── asistente_plan.py            # Plan diario + Mifflin-St Jeor
-│   │       ├── asistente_recomendaciones.py # KNN + Random Forest
-│   │       ├── ml_service.py                # Clasificador RF + KNN
-│   │       ├── rutina_service.py            # Generador de rutinas adaptativas
-│   │       ├── plato_constructor.py         # Constructor dinámico via LLM
-│   │       ├── nlp_food_extractor.py        # Extractor NLP de alimentos
-│   │       ├── ia_service.py                # Wrapper Groq API
-│   │       ├── fatsecret_client.py          # FatSecret API
-│   │       └── ...
+calofit_backend/
+├── app/
+│   ├── main.py                 # Entrada FastAPI: middlewares, routers, migraciones manuales
+│   ├── core/
+│   │   ├── config.py           # Variables de entorno (settings)
+│   │   ├── database.py         # Engine + SessionLocal + get_db()
+│   │   ├── security.py         # Hash de contraseñas + JWT
+│   │   ├── utils.py            # Fecha Perú, parseo de macros, TMB
+│   │   ├── logging_config.py   # get_logger() con RotatingFileHandler
+│   │   ├── mets_gym.py         # Diccionario MET por ejercicio (ACSM)
+│   │   └── macros_diarios.py   # Cálculo P/C/G desde kcal y objetivo
 │   │
-│   ├── migrations/             # SQL de cambios de esquema
-│   ├── scripts/                # Entrenamiento ML, QA, seeds
-│   ├── tests/                  # Pytest (unit, integration, e2e)
-│   └── logs/                   # error.log (RotatingFileHandler)
+│   ├── models/                 # SQLAlchemy ORM (una clase por tabla)
+│   ├── schemas/                # Pydantic: request/response validation
+│   │
+│   ├── api/
+│   │   ├── __init__.py         # api_router: agrupa todas las rutas activas
+│   │   ├── routes/             # auth, asistente, clientes, ejercicios, balance,
+│   │   │                       # dashboard, nutricion, nutricionista, copiloto,
+│   │   │                       # alertas, alimentos, admin, usuarios, notifications
+│   │   └── v1/
+│   │       └── nutrition/parser.py  # único endpoint v1 activo
+│   │
+│   └── services/
+│       ├── asistente/          # orquestador + 5 módulos NLP (ver más abajo)
+│       ├── nutrition/          # food resolver, plate builder, validators
+│       ├── ml_service.py       # Clasificador RF + KNN
+│       ├── rutina_service.py   # Generador de rutinas adaptativas
+│       ├── plato_constructor.py # Constructor dinámico de platos vía LLM
+│       ├── nlp_food_extractor.py
+│       ├── ia_service.py       # Wrapper Groq API
+│       └── fatsecret_client.py # FatSecret API
 │
-└── calofit_frontend/
-    ├── lib/
-    │   ├── main.dart
-    │   ├── config/
-    │   │   └── api_config.dart     # BaseURL según entorno
-    │   ├── models/                 # Clases Dart (fromJson/toJson)
-    │   │   ├── client.dart
-    │   │   ├── assistant_response.dart
-    │   │   ├── exercise.dart
-    │   │   └── ...
-    │   ├── providers/              # Estado global (ChangeNotifier)
-    │   │   ├── auth_provider.dart
-    │   │   └── balance_provider.dart
-    │   ├── services/
-    │   │   ├── api_service.dart    # Todas las llamadas HTTP con Dio
-    │   │   └── url_service.dart    # URL helpers
-    │   ├── widgets/                # Componentes reutilizables
-    │   └── screens/
-    │       ├── auth/               # Login, registro
-    │       ├── client/views/       # Chat, balance, dashboard cliente
-    │       └── staff/views/        # Panel nutricionista/admin
-    └── android/, ios/, web/, linux/, macos/, windows/
+├── scripts/                    # Entrenamiento ML, QA, seeds puntuales
+├── tests/                      # Pytest (unit, integration, e2e, external)
+└── logs/                       # error.log (RotatingFileHandler)
 ```
+
+### Módulos del asistente (`app/services/asistente/`)
+
+| Módulo | Responsabilidad |
+|---|---|
+| `asistente_service.py` | Orquestador puro |
+| `asistente_plan.py` | `obtener_plan_hoy()` — Mifflin-St Jeor fallback |
+| `asistente_registro_comida.py` | 5 capas NLP + registro manual |
+| `asistente_registro_ejercicio.py` | MET formula + `workout_logs` (SQL raw) |
+| `asistente_recomendaciones.py` | 14 features RF + KNN coseno |
+| `asistente_prompt.py` | Builder de prompt + fallbacks deterministas |
+| `asistente_modos.py` | Clasificación de intención |
 
 ---
 
@@ -210,15 +162,13 @@ PROYECTO/
 - Docker Desktop >= 24.0
 - Git
 
-### 1. Clonar y configurar variables de entorno
+### 1. Configurar variables de entorno
 
 ```bash
-git clone <URL_REPOSITORIO>
-cd PROYECTO
-cp calofit_backend/.env.example calofit_backend/.env
+cp .env.example .env
 ```
 
-Editar `calofit_backend/.env`:
+Editar `.env`:
 
 | Variable | Cómo obtenerla |
 |----------|----------------|
@@ -228,7 +178,7 @@ Editar `calofit_backend/.env`:
 | `USDA_API_KEY` | https://fdc.nal.usda.gov/api-guide.html |
 | `POSTGRES_PASSWORD` | Contraseña que elijas |
 
-### 2. Levantar contenedores
+### 2. Levantar contenedores (desde la raíz del repo)
 
 ```bash
 docker-compose up --build -d
@@ -249,17 +199,10 @@ curl http://localhost:8000/health
 
 Documentación interactiva: http://localhost:8000/docs
 
-### 4. Cargar esquema y datos de prueba
+### 4. Cargar datos de prueba (esquema + datos completos)
 
 ```bash
-# Esquema completo (37 tablas)
-docker exec -i calofit_db psql -U postgres -d BD_Calofit < schema_dump.sql
-
-# Catálogo de ejercicios (139 ejercicios)
-docker exec -i calofit_db psql -U postgres -d BD_Calofit < calofit_backend/migrations/seed_ejercicios_gym.sql
-
-# Especies hidrobiológicas (8 pescados peruanos)
-docker exec -i calofit_db psql -U postgres -d BD_Calofit < calofit_backend/migrations/seed_hidrobiologico.sql
+docker exec -i calofit_db psql -U postgres -d BD_Calofit < ../backups/calofit_backup.sql
 ```
 
 ---
@@ -268,7 +211,7 @@ docker exec -i calofit_db psql -U postgres -d BD_Calofit < calofit_backend/migra
 
 Ejemplo completo: agregar `GET /clientes/{id}/resumen-macros` que devuelve los macros consumidos hoy.
 
-### Paso 1 — Crear o actualizar el modelo Pydantic (schema)
+### Paso 1 — Schema Pydantic
 
 ```python
 # app/schemas/client.py
@@ -280,7 +223,7 @@ class ResumenMacrosResponse(BaseModel):
     grasas_g: float
 ```
 
-### Paso 2 — Agregar la lógica en el servicio
+### Paso 2 — Lógica en el servicio
 
 ```python
 # app/services/nutricion_service.py (o el servicio que corresponda)
@@ -305,7 +248,7 @@ def obtener_resumen_macros_hoy(client_id: int, db: Session) -> dict:
     }
 ```
 
-### Paso 3 — Crear el endpoint en la ruta correspondiente
+### Paso 3 — Endpoint en la ruta correspondiente
 
 ```python
 # app/api/routes/clientes.py
@@ -323,40 +266,17 @@ def resumen_macros(
 
 > El router de `clientes.py` ya está registrado en `app/api/__init__.py` con el prefijo `/clientes`, así que el endpoint queda disponible en `GET /clientes/{id}/resumen-macros` sin ningún cambio adicional.
 
-### Paso 4 — Agregar el método en `ApiService` de Flutter
-
-```dart
-// lib/services/api_service.dart
-Future<Map<String, dynamic>> getResumenMacros(int clientId) async {
-  final response = await _dio.get('/clientes/$clientId/resumen-macros');
-  return response.data as Map<String, dynamic>;
-}
-```
-
-### Paso 5 — Consumir desde la pantalla Flutter
-
-```dart
-// En el widget o provider correspondiente
-final macros = await apiService.getResumenMacros(clientId);
-final kcal = macros['calorias_consumidas'];
-```
-
-### Checklist completo de un endpoint
+### Checklist
 
 ```
-Backend:
-  [ ] Schema Pydantic en app/schemas/
-  [ ] Lógica en app/services/
-  [ ] Endpoint en app/api/routes/<modulo>.py
-  [ ] El router ya está en app/api/__init__.py (verificar)
-  [ ] Si necesita nueva tabla: migration SQL + modelo SQLAlchemy
-
-Frontend:
-  [ ] Método en lib/services/api_service.dart
-  [ ] Modelo Dart en lib/models/ (si la respuesta es compleja)
-  [ ] Provider actualizado (si el estado global cambia)
-  [ ] UI consume el provider o llama al servicio directamente
+[ ] Schema Pydantic en app/schemas/
+[ ] Lógica en app/services/
+[ ] Endpoint en app/api/routes/<modulo>.py
+[ ] El router ya está en app/api/__init__.py (verificar)
+[ ] Si necesita nueva tabla: modelo SQLAlchemy + ALTER TABLE en main.py si aplica
 ```
+
+Para consumirlo desde Flutter, ver [`../calofit_frontend/README.md`](../calofit_frontend/README.md).
 
 ---
 
@@ -389,13 +309,6 @@ from app.api.routes.auth import get_current_user
 def mi_ruta(current_user=Depends(get_current_user)):
     # current_user es el objeto Client o User autenticado
     return {"email": current_user.email}
-```
-
-### Configurar el token en Flutter (Dio)
-
-```dart
-// ApiService lo maneja automáticamente via interceptor
-_dio.options.headers['Authorization'] = 'Bearer $token';
 ```
 
 ---
@@ -489,102 +402,17 @@ _dio.options.headers['Authorization'] = 'Bearer $token';
 |--------|------|-------------|
 | GET | `/alertas/mis-clientes` | Alertas de salud de los clientes |
 
+### Notificaciones — `/notifications`
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| — | `/notifications/*` | Notificaciones push (FCM) |
+
 ### API v1 — `/api/v1`
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
 | POST | `/api/v1/nutrition/parse_ingredients` | Parsear ingredientes por texto |
-| GET | `/api/v1/health` | Health check v1 |
-
----
-
-## Integración Flutter → Backend
-
-### ApiService (Dio)
-
-Toda comunicación HTTP está centralizada en `lib/services/api_service.dart`.
-
-```dart
-// Configuración base
-final Dio _dio = Dio(BaseOptions(
-  baseUrl: ApiConfig.baseUrl,  // http://localhost:8000 (dev) / IP real (prod)
-  headers: {'Content-Type': 'application/json'},
-));
-```
-
-### Manejo de token en interceptor
-
-El interceptor en `ApiService` agrega automáticamente el header `Authorization` y detecta errores 401/403 para forzar logout.
-
-### Routing de mensajes del chat
-
-`chat_screen.dart` decide si el mensaje va a `/log-inteligente` (registro directo) o `/consultar` (LLM) según palabras clave:
-
-```dart
-final logKeywords = [
-  "comí", "almorzé", "cené", "desayuné", "hice", "entrené",
-  "realice", "realicé", "registra", "anota", ...
-];
-bool isLogIntent = logKeywords.any((k) => lowerText.contains(k));
-// true  → POST /asistente/log-inteligente
-// false → POST /asistente/consultar
-```
-
-### Respuesta del asistente
-
-`/consultar` devuelve `AssistantResponse` con este formato:
-
-```json
-{
-  "asistente": "CaloFit IA",
-  "usuario": "Carlos",
-  "intencion": "RECIPE",
-  "tipo_pregunta": "FOOD",
-  "respuesta_ia": "Aquí tienes una receta de...",
-  "respuesta_estructurada": {
-    "intent": "RECIPE",
-    "texto_conversacional": "...",
-    "secciones": [
-      {
-        "tipo": "comida",
-        "nombre": "Cebiche de Caballa",
-        "ingredientes": ["200g caballa", "limón", ...],
-        "preparacion": ["Cortar el pescado...", ...],
-        "macros": "Cal: 320 kcal | P: 28g | C: 12g | G: 8g"
-      }
-    ]
-  },
-  "data_cientifica": {
-    "progreso_diario": {
-      "consumido": 1200,
-      "meta": 2000,
-      "restante": 800,
-      "quemado": 350
-    }
-  }
-}
-```
-
-`/log-inteligente` devuelve este formato más simple:
-
-```json
-{
-  "success": true,
-  "tipo_detectado": "ejercicio_series",
-  "mensaje": "Registré: Press de Banca — 4×15 | 20 min → 122 kcal",
-  "balance_actualizado": {
-    "consumido": 1850,
-    "quemado": 245
-  },
-  "datos": {
-    "ejercicio": "Press De Banca",
-    "series": 4,
-    "reps": 15,
-    "dur_min": 20,
-    "calorias": 122.5
-  }
-}
-```
 
 ---
 
@@ -632,10 +460,10 @@ WHERE p.id = 28
 GROUP BY p.nombre;
 ```
 
-### Regenerar schema_dump.sql
+### Regenerar el backup completo
 
 ```bash
-docker exec calofit_db pg_dump -U postgres -d BD_Calofit --schema-only > schema_dump.sql
+docker exec calofit_db pg_dump -U postgres -d BD_Calofit > ../backups/calofit_backup.sql
 ```
 
 ---
@@ -678,8 +506,6 @@ docker exec calofit_backend python scripts/evaluar_modelos_ml.py
 | B — Intermedio | 60–64 | `CaloFit2024!` | Adherencia ~60%, ejercicio 2-3x/sem |
 | C — Crítico | 65–69 | `CaloFit2024!` | Exceso carbs/grasas, sedentarios |
 
-Para obtener el email de cada usuario:
-
 ```sql
 SELECT id, first_name, email FROM clients WHERE id BETWEEN 55 AND 69;
 ```
@@ -688,10 +514,5 @@ SELECT id, first_name, email FROM clients WHERE id BETWEEN 55 AND 69;
 
 ## Logs de errores
 
-Los errores WARNING+ se guardan automáticamente en:
-
-```
-calofit_backend/logs/error.log
-```
-
+Los errores WARNING+ se guardan automáticamente en `logs/error.log`.
 Rotación: 5 MB por archivo, 3 backups. Configurado en `app/core/logging_config.py`.

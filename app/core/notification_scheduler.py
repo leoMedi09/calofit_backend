@@ -151,6 +151,67 @@ def enviar_motivacion_diaria():
         db.close()
 
 
+def alertar_racha_en_riesgo():
+    """
+    Job a las 21:00 (hora Perú): avisa a usuarios que tienen racha activa (≥2 días)
+    pero aún no registraron comida hoy — están a punto de perderla.
+    El recordatorio general de las 20:00 ya cubre a todos sin registro;
+    este es más urgente y personalizado para quienes tienen algo que perder.
+    """
+    db = SessionLocal()
+    try:
+        hoy = get_peru_date()
+        clientes = (
+            db.query(Client)
+            .filter(Client.fcm_token.isnot(None))
+            .filter(Client.notificaciones_activas.is_(True))
+            .all()
+        )
+        for cliente in clientes:
+            # Saltar si ya registró hoy
+            registro_hoy = (
+                db.query(ComidaRegistro)
+                .filter(ComidaRegistro.client_id == cliente.id)
+                .filter(ComidaRegistro.fecha == hoy)
+                .first()
+            )
+            if registro_hoy:
+                continue
+
+            # Calcular racha actual desde fechas distintas con registro
+            from datetime import timedelta as _td
+            from sqlalchemy import func as _f
+            fechas = sorted(
+                {r.fecha for r in db.query(ComidaRegistro.fecha)
+                 .filter(ComidaRegistro.client_id == cliente.id)
+                 .distinct().all()},
+                reverse=True,
+            )
+            racha = 0
+            ref = hoy - _td(days=1)  # ayer (hoy no registró)
+            for f in fechas:
+                if f == ref or f == ref - _td(days=1):
+                    racha += 1
+                    ref = f
+                elif f < ref - _td(days=1):
+                    break
+
+            if racha < 2:
+                continue  # sin racha que proteger
+
+            send_push_notification(
+                token=cliente.fcm_token,
+                title=f"🔥 Tu racha de {racha} días está en riesgo",
+                body="Registra algo hoy antes de que termine el día para no perderla.",
+                data={"tipo": "alerta_racha"},
+            )
+            logger.info("Alerta de racha enviada a client_id=%s (racha=%s)", cliente.id, racha)
+    except Exception as e:
+        logger.error("Error en job alerta_racha_en_riesgo: %s", e)
+    finally:
+        db.close()
+
+
 def iniciar_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone=PERU_TZ)
     scheduler.add_job(
@@ -175,6 +236,12 @@ def iniciar_scheduler() -> BackgroundScheduler:
         revisar_clientes_sin_registro,
         trigger=CronTrigger(hour=20, minute=0),
         id="recordatorio_diario_comidas",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        alertar_racha_en_riesgo,
+        trigger=CronTrigger(hour=21, minute=0),
+        id="alerta_racha_en_riesgo",
         replace_existing=True,
     )
     scheduler.start()

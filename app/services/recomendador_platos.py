@@ -38,7 +38,8 @@ _CONDICION_TOKENS: dict[str, set[str]] = {
         "pescado", "salmon", "salmón", "atun", "atún", "trucha", "caballa",
         "corvina", "cachema", "lisa", "mero", "tollo", "anchoveta",
         "mariscos", "camaron", "camarón", "langostino", "pulpo", "calamar",
-        "leche", "queso", "yogur", "yogurt", "mantequilla", "crema",
+        "leche", "queso", "yogur", "yogurt", "mantequilla",
+        "crema de leche", "crema agria", "crema chantilly",
         "manteca", "quesillo", "huevo",
     },
     "Vegetariano": {
@@ -50,7 +51,8 @@ _CONDICION_TOKENS: dict[str, set[str]] = {
         "mariscos", "camaron", "camarón", "langostino", "pulpo", "calamar",
     },
     "Intolerancia a la Lactosa": {
-        "leche", "queso", "yogur", "yogurt", "mantequilla", "crema",
+        "leche", "queso", "yogur", "yogurt", "mantequilla",
+        "crema de leche", "crema agria", "crema chantilly",
         "manteca", "quesillo", "lactosa",
     },
     "Celíaco": {

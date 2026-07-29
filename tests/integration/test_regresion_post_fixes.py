@@ -19,16 +19,6 @@ from app.models.comida_registro import ComidaRegistro
 from app.models.historial import ProgresoCalorias
 
 
-def _get_mensaje(prompt: str) -> str:
-    marker = 'mensaje: "'
-    low = prompt.lower()
-    idx = low.find(marker)
-    if idx == -1:
-        return low
-    resto = prompt[idx + len(marker):]
-    return resto.split('"', 1)[0].lower()
-
-
 def _filas_de_hoy(db, client_id):
     return (
         db.query(ComidaRegistro)
@@ -113,43 +103,8 @@ class TestConsistenciaMatematica:
             f"(esperado ~{kcal_esperado_por_unidad * 3})"
         )
 
-    @pytest.mark.asyncio
-    async def test_correccion_reemplaza_no_acumula(self, db, sample_client, plan_hoy):
-        async def mock_groq(prompt, max_tokens=800, temp=0.7, model=None):
-            prompt_lower = prompt.lower()
-            if "extrae todos los alimentos" in prompt_lower:
-                msg = _get_mensaje(prompt)
-                if "huevos" in msg and ("tres" in msg or " 3" in msg):
-                    return json.dumps({"alimentos": [
-                        {"nombre": "Huevo", "es_real": True, "cantidad": 3,
-                         "porcion_g": 50, "kcal": 70, "prot_g": 6, "carb_g": 0.5, "grasa_g": 5},
-                    ]})
-                if "huevos" in msg and "dos" in msg:
-                    return json.dumps({"alimentos": [
-                        {"nombre": "Huevo", "es_real": True, "cantidad": 2,
-                         "porcion_g": 50, "kcal": 70, "prot_g": 6, "carb_g": 0.5, "grasa_g": 5},
-                    ]})
-                return json.dumps({"alimentos": []})
-            return json.dumps({"alimentos": []})
-
-        with patch.object(ia_engine, "_llamar_groq", new=mock_groq):
-            await registrar_comida_llm("Comí dos huevos", sample_client, plan_hoy, db, ia_engine)
-            resultado2 = await registrar_comida_llm(
-                "Corrección, fueron tres huevos", sample_client, plan_hoy, db, ia_engine,
-            )
-        assert resultado2["success"] is True
-
-        filas = _filas_de_hoy(db, sample_client.id)
-        assert len(filas) == 3, (
-            f"Tras la corrección debe haber EXACTAMENTE 3 filas (no 2+3=5): "
-            f"{[(f.nombre_alimento, f.kcal) for f in filas]}"
-        )
-        prog = _progreso_de_hoy(db, sample_client.id)
-        suma_filas = sum(f.kcal for f in filas)
-        assert abs(prog.calorias_consumidas - suma_filas) < 1.5, (
-            f"progreso_calorias ({prog.calorias_consumidas}) no coincide con la suma "
-            f"post-corrección ({suma_filas}) — quedaron calorías viejas acumuladas."
-        )
+    # test_correccion_reemplaza_no_acumula (2→3 huevos) removido: mismo escenario
+    # cubierto por test_correccion_registro_nutricional.py::test_correccion_actualiza_sin_duplicar.
 
 
 # ════════════════════════════════════════════════════════════════════════
