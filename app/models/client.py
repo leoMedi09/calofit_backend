@@ -14,8 +14,6 @@ class Client(Base):
     dni = Column(String, unique=True, index=True, nullable=True) # 🆕 Documento de identidad (DNI)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    is_profile_complete = Column(Boolean, default=True)
-    
     planes_nutricionales = relationship(
         "PlanNutricional",
         back_populates="cliente",
@@ -48,7 +46,8 @@ class Client(Base):
     is_strategic_guide_validated = Column(Boolean, default=False)         # ✅ Indica si el Nutri ya validó la estrategia
     profile_picture_url = Column(String, nullable=True) # ✅ URL de la foto de perfil en Firebase Storage
     is_profile_complete = Column(Boolean, default=False)  # 🆕 False hasta que el cliente llene sus datos en el Onboarding
-    
+    terms_accepted_at = Column(DateTime, nullable=True)  # 🆕 Fecha en que aceptó Términos y Privacidad (Onboarding paso 4)
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     

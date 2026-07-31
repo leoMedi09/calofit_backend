@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List
-from datetime import date
+from datetime import date, datetime
 
 # --- TUS ESQUEMAS EXISTENTES ---
 
@@ -49,6 +49,7 @@ class ClientResponse(BaseModel):
     assigned_nutri_id: Optional[int]
     profile_picture_url: Optional[str] = None
     is_profile_complete: bool = False
+    terms_accepted_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -70,6 +71,7 @@ class ClientUpdate(BaseModel):
     session_duration: Optional[float] = None       # 🆕 Para ML Random Forest (en horas)
     profile_picture_url: Optional[str] = None
     is_profile_complete: Optional[bool] = None  # 🆕 El onboarding lo marca como True al terminar
+    terms_accepted_at: Optional[datetime] = None  # 🆕 Fecha de aceptación de Términos y Privacidad
 
 
 class AdminCreateClient(BaseModel):

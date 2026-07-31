@@ -21,6 +21,7 @@ with engine.connect() as connection:
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nutri_weekly_note TEXT;"))
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS fcm_token VARCHAR;"))
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS notificaciones_activas BOOLEAN DEFAULT TRUE;"))
+        connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP;"))
         connection.execute(text("DROP TABLE IF EXISTS platos_recomendados CASCADE;"))
         # Memoria conversacional persistida
         connection.execute(text("""
