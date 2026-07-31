@@ -1,13 +1,41 @@
+# === Entornos virtuales ===
 venv/
+env/
+.venv/
+
+# === Python cache ===
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.py[cod]
+
+# === Git ===
 .git/
+.gitignore
+
+# === Secretos y credenciales ===
 .env
+.env.*
+secrets.json
+*firebase-adminsdk*.json
+
+# === Calidad de código / tests (no necesarios en producción) ===
 .pytest_cache/
 htmlcov/
 .coverage
-# tests/ no se excluye en local: docker-compose monta ./calofit_backend:/app
-# como volumen, así que el contenido real para `docker exec ... pytest` es
-# el del filesystem local, no el que se copia en build. Sí reduce el tamaño
-# de una imagen construida para producción (ej. Railway) sin volumen.
+.coveragerc
+ruff.toml
 tests/
+
+# === IDE ===
+.vscode/
+.idea/
+
+# === Logs locales ===
+logs/
+*.log
+
+# === Docs y archivos auxiliares ===
+README.md
+*.md
