@@ -35,15 +35,27 @@ class LLMService:
 
     def __init__(self) -> None:
         groq_api_key = getattr(settings, "GROQ_API_KEY", "")
+        self._client = self._build_client(groq_api_key)
         if groq_api_key.startswith("sk-or-"):
+            logger.info("LLMService: Primary OpenRouter client initialized.")
+        else:
+            logger.info("LLMService: Primary Groq client initialized.")
+
+        backup_key = getattr(settings, "GROQ_BACKUP_API_KEY", "")
+        self._backup_client = self._build_client(backup_key) if backup_key else None
+        if self._backup_client:
+            logger.info("LLMService: Backup client initialized.")
+
+    def _build_client(self, api_key: str) -> Any:
+        if not api_key:
+            return None
+        if api_key.startswith("sk-or-"):
             from app.services.ai.openrouter_client import OpenRouterClient
-            self._client = OpenRouterClient(api_key=groq_api_key)
-            logger.info("LLMService: OpenRouter (sk-or-*) client initialized.")
+            return OpenRouterClient(api_key=api_key)
         else:
             if not _groq_available:
                 raise RuntimeError("groq SDK no instalado. Ejecutar: pip install groq")
-            self._client = AsyncGroq(api_key=groq_api_key)
-            logger.info("LLMService: Groq client initialized.")
+            return AsyncGroq(api_key=api_key)
 
     # ──────────────────────────────────────────────────────────────────
     # API pública
@@ -63,8 +75,8 @@ class LLMService:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        async def _call(m: str, mt: int) -> str:
-            resp = await self._client.chat.completions.create(
+        async def _call(client_obj: Any, m: str, mt: int) -> str:
+            resp = await client_obj.chat.completions.create(
                 model=m,
                 messages=messages,
                 temperature=temperature,
@@ -73,7 +85,7 @@ class LLMService:
             return resp.choices[0].message.content or ""
 
         try:
-            return await _call(model, max_tokens)
+            return await _call(self._client, model, max_tokens)
         except Exception as exc:
             err = str(exc).lower()
             # Si el prompt es demasiado grande para el modelo, reintentar con llama-3.3-70b-versatile
@@ -81,7 +93,7 @@ class LLMService:
                 if model != "llama-3.3-70b-versatile":
                     logger.warning("LLMService: prompt too large for %s. Retrying with llama-3.3-70b-versatile", model)
                     try:
-                        return await _call("llama-3.3-70b-versatile", max_tokens)
+                        return await _call(self._client, "llama-3.3-70b-versatile", max_tokens)
                     except Exception as fallback_exc:
                         logger.error("LLMService fallback to llama-3.3-70b-versatile failed: %s", fallback_exc)
                         err = str(fallback_exc).lower()
@@ -91,9 +103,19 @@ class LLMService:
                 if model != "groq/compound-mini":
                     logger.warning("LLMService: rate limit or timeout on %s. Retrying with groq/compound-mini", model)
                     try:
-                        return await _call("groq/compound-mini", 512)
+                        return await _call(self._client, "groq/compound-mini", 512)
                     except Exception as fallback_exc:
                         logger.error("LLMService fallback to groq/compound-mini failed: %s", fallback_exc)
+
+            # Si el cliente principal falló y existe un cliente de respaldo, reintentar con el respaldo
+            if self._backup_client:
+                logger.warning("LLMService: Primary client failed (%s). Retrying with BACKUP client...", exc)
+                try:
+                    backup_api_key = getattr(self._backup_client, "api_key", "")
+                    backup_model = "llama-3.3-70b-versatile" if backup_api_key.startswith("gsk_") else model
+                    return await _call(self._backup_client, backup_model, max_tokens)
+                except Exception as backup_exc:
+                    logger.error("LLMService: Backup client failed as well: %s", backup_exc)
             
             logger.error("LLMService.completar error: %s", exc)
             return ""
