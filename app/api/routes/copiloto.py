@@ -5,7 +5,9 @@ from app.api.routes.auth import get_current_user
 from app.services.nutricionista_service import nutricionista_ia_service
 from app.services.admin_service import admin_ia_service
 from pydantic import BaseModel
-import traceback
+from app.core.logging_config import get_logger
+
+logger = get_logger("api.copiloto")
 
 router = APIRouter()
 
@@ -54,6 +56,5 @@ async def consultar_copiloto(
         return resultado
 
     except Exception as e:
-        print(f"❌ ERROR EN /copiloto/consultar: {str(e)}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ERROR en /copiloto/consultar: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al procesar la consulta del copiloto")

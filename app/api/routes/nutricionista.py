@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from typing import List
 from app.core.database import get_db
 from app.models.client import Client
@@ -173,7 +173,13 @@ def get_assigned_patients(
         )
     # Admin: sin filtro — ve todos
 
-    clients = query.all()
+    # Eager-load de relaciones usadas dentro del bucle (evita N+1:
+    # progreso_calorias, historial_peso y planes_nutricionales por cliente)
+    clients = query.options(
+        selectinload(Client.progreso_calorias),
+        selectinload(Client.historial_peso),
+        selectinload(Client.planes_nutricionales),
+    ).all()
     
     now = get_peru_now()
     seven_days_ago = now - timedelta(days=7)
@@ -235,10 +241,16 @@ def _calcular_mes_status(c: Client, db: Session) -> str:
     Determina el estado del plan del paciente:
     - 'validado': Último plan aprobado por nutricionista.
     - 'pendiente': Sin plan o plan sin validar.
+
+    Nota de optimización: usa la relación `planes_nutricionales` ya cargada
+    (selectinload) en memoria en vez de una query por cliente dentro de bucles.
     """
-    ultimo_plan = db.query(PlanNutricional).filter(
-        PlanNutricional.client_id == c.id
-    ).order_by(PlanNutricional.fecha_creacion.desc()).first()
+    planes = c.planes_nutricionales or []
+    ultimo_plan = max(
+        planes,
+        key=lambda p: p.fecha_creacion,
+        default=None,
+    )
 
     if ultimo_plan and ultimo_plan.status == "validado":
         return "validado"
@@ -693,7 +705,12 @@ def get_nutri_stats(
         )
     # Admin: sin filtro
 
-    pacientes       = query.all()
+    # Eager-load de relaciones usadas dentro del bucle (evita N+1:
+    # progreso_calorias y historial_peso por paciente)
+    pacientes = query.options(
+        selectinload(Client.progreso_calorias),
+        selectinload(Client.historial_peso),
+    ).all()
     total_pacientes = len(pacientes)
     paciente_ids    = {c.id for c in pacientes}
 
@@ -725,6 +742,7 @@ def get_nutri_stats(
         )
         .join(Client)
         .filter(Client.id.in_(paciente_ids))
+        .options(selectinload(AlertaSalud.cliente))  # evita N+1 en a.cliente
     )
     alertas_db_count = alertas_db_query.count()
 

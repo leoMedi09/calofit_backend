@@ -8,6 +8,9 @@ from typing import List, Optional, Any, Dict
 
 from app.api.routes.auth import get_current_staff, get_current_user
 from app.services.ia_service import ia_engine 
+from app.core.logging_config import get_logger
+
+logger = get_logger("api.nutricion")
 
 router = APIRouter()
 
@@ -33,7 +36,8 @@ async def test_ia(
         )
         return {"calorias_recomendadas": calorias, "mensaje": "Prueba exitosa"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error en IA: {str(e)}")
+        logger.error("Error en test-ia: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error en el servicio de IA")
 
 @router.post("/", response_model=PlanNutricionalResponse)
 async def crear_plan_nutricional(
@@ -137,7 +141,8 @@ async def crear_plan_nutricional(
 
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
+        logger.error("Error al crear plan nutricional: %s", e, exc_info=True)
+        raise HTTPException(status_code=400, detail="Error al crear el plan nutricional")
 
 # Endpoint temporal para probar NLP y Fuzzy Logic (Solo para testing/desarrollo)
 @router.post("/test-nlp-fuzzy")
@@ -185,7 +190,8 @@ async def test_nlp_fuzzy(
             "mensaje": "Prueba de NLP y Fuzzy Logic exitosa"
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error en NLP/Fuzzy: {str(e)}")
+        logger.error("Error en test-nlp-fuzzy: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error en el servicio de NLP/Fuzzy")
 
 # =================================================================
 # 🍎 NUEVOS ENDPOINTS: GESTIÓN DE PLANES (FLUJO GYM REAL)

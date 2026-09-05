@@ -8,6 +8,9 @@ from app.models.auditoria import AuditoriaAdmin
 from app.schemas.user import UserCreate, UserResponse, PasswordUpdate, UserUpdate
 from app.core.security import security
 from app.api.routes.auth import get_current_user
+from app.core.logging_config import get_logger
+
+logger = get_logger("api.admin")
 
 router = APIRouter()
 
@@ -143,10 +146,10 @@ async def listar_personal_staff(
             })
         return res
     except Exception as e:
-        print(f"❌ ERROR LISTAR STAFF: {str(e)}")
+        logger.error("Error listando staff: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500, 
-            detail=f"Error en el servidor al obtener personal: {str(e)}"
+            detail="Error en el servidor al obtener el personal"
         )
 
 @router.put("/clientes/{cliente_id}/asignar")

@@ -11,6 +11,9 @@ from jose import JWTError, jwt
 from app.models.client import Client
 import hmac
 import hashlib
+from app.core.logging_config import get_logger
+
+logger = get_logger("api.auth")
 
 router = APIRouter()
 
@@ -289,10 +292,10 @@ async def sync_firebase_password(
         raise
     except Exception as e:
         db.rollback()
-        print(f"❌ Error sincronizando contraseña: {e}")
+        logger.error("Error sincronizando contraseña: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Error sincronizando contraseña: {str(e)}"
+            detail="Error sincronizando la contraseña"
         )
 
 
@@ -355,10 +358,10 @@ async def sync_password_from_firebase(
         }
     except Exception as e:
         db.rollback()
-        print(f"❌ Error sincronizando contraseña: {e}")
+        logger.error("Error sincronizando contraseña: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Error sincronizando contraseña: {str(e)}"
+            detail="Error sincronizando la contraseña"
         )
 
 
@@ -483,10 +486,10 @@ async def verify_and_sync_password(
         raise
     except Exception as e:
         db.rollback()
-        print(f"❌ Error verificando y sincronizando: {e}")
+        logger.error("Error verificando y sincronizando: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Error procesando solicitud: {str(e)}"
+            detail="Error procesando la solicitud"
         )
 
 # ----------------- RECUPERACIÓN DE CONTRASEÑA -----------------

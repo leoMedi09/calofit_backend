@@ -1651,13 +1651,25 @@ async def registrar_ejercicio_llm(
     kcal_total = 0.0
     ejercicios_guardados = []
 
+    # MET determinista del catálogo METS_GYM cuando el ejercicio existe — el
+    # LLM a veces inventa METs desproporcionados ("press banca" devolvió ~1.96
+    # → 36 kcal para 3×10; el catálogo fija 5.0 → ~92 kcal). La tabla interna
+    # es la fuente de verdad; el LLM solo estima para ejercicios no catalogados.
+    from app.services.asistente.asistente_ejercicio import resolver_met_mets_gym
+
     for datos in ejercicios_raw:
         nombre   = datos["ejercicio"]
         duracion = float(datos.get("duracion_min", 0) or 0)
         series   = datos.get("series")
         reps     = datos.get("reps")
         peso_ej  = datos.get("peso_kg")
-        met      = float(datos.get("met", 5.0) or 5.0)
+        _cat_key, _cat_met = resolver_met_mets_gym((f"{nombre} {mensaje or ''}").lower())
+        if _cat_met:
+            met = float(_cat_met)
+            _met_determinista = True
+        else:
+            met = float(datos.get("met", 5.0) or 5.0)
+            _met_determinista = False
         # "intensidad" SIEMPRE se deriva de "met" con la misma regla del prompt
         # (Alta MET>=8, Media 5-7.9, Baja <5) — nunca la etiqueta cruda del LLM.
         # Encontrado en pruebas reales: "jugué fútbol una hora" devolvía
@@ -1680,12 +1692,19 @@ async def registrar_ejercicio_llm(
             duracion = round(int(series) * 5, 1)
         kcal_formula = round(met * peso_kg * 3.5 / 200 * duracion, 1)
         kcal_llm     = round(float(datos.get("kcal_quemadas", 0) or 0), 1)
-        # Si kcal_formula es 0 (duracion real 0, sin series/reps para estimar),
-        # comparar kcal_llm contra ella siempre "parece" desproporcionado
-        # (cualquier valor positivo es ">2.5×0") y el guard lo sobrescribía a 0
-        # incluso cuando kcal_llm era razonable. En ese caso degenerado, confiar
-        # en kcal_llm si es positivo, no forzar 0.
-        if kcal_formula <= 0:
+        # MET de catálogo METS_GYM → la fórmula MET es la fuente de verdad
+        # (el LLM suele devolver kcal desproporcionadas pese al MET correcto:
+        # "press banca" 15min@82kg = 107.6 kcal, el LLM devolvía 53.5~36).
+        # Solo cuando el MET fue estimado por el LLM (ejercicio no catalogado)
+        # se usa el guard de proporción contra el kcal que devolvió el LLM.
+        if _met_determinista:
+            kcal = kcal_formula
+        elif kcal_formula <= 0:
+            # Si kcal_formula es 0 (duracion real 0, sin series/reps para
+            # estimar), comparar kcal_llm contra ella siempre "parece"
+            # desproporcionado y el guard lo sobrescribía a 0 incluso cuando
+            # kcal_llm era razonable. En ese caso degenerado, confiar en
+            # kcal_llm si es positivo, no forzar 0.
             kcal = kcal_llm if kcal_llm > 0 else 0.0
         else:
             kcal = kcal_formula if kcal_llm > kcal_formula * 2.5 or kcal_llm < kcal_formula * 0.3 else kcal_llm
@@ -2266,9 +2285,12 @@ async def respuesta_recomendacion_llm(
 
     _condiciones_list_reco = ctx.condiciones_medicas
     _condiciones_str_reco = " ".join(_condiciones_list_reco).lower()
+    from app.services.recomendador_platos import _detectar_dieta_en_mensaje
+    _condiciones_msg_reco = _detectar_dieta_en_mensaje(mensaje)
     es_vegano_reco = (
         "vegano" in dieta.lower() or "vegetariano" in dieta.lower()
         or "vegano" in _condiciones_str_reco or "vegetariano" in _condiciones_str_reco
+        or "Vegano" in _condiciones_msg_reco or "Vegetariano" in _condiciones_msg_reco
     )
 
     # 2. Restricciones por momento del día
@@ -2468,17 +2490,48 @@ async def respuesta_recomendacion_llm(
     # mensaje), no solo el mensaje — así "Ganar masa" guardado en el perfil
     # también activa la excepción aunque el mensaje actual no lo repita.
     _masa_muscular_match = _balance_reco["es_masa_muscular"]
-    # Si el restante es muy bajo pero el objetivo es ganar músculo, mostrar mínimo 500 kcal
-    # para que el LLM no recomiende snacks ridículos (el LLM usa el valor como referencia, no límite duro)
-    _restante_display = max(restante, 500.0) if _masa_muscular_match else restante
+    # Si el restante es muy bajo pero el objetivo es ganar músculo, mostrar un mínimo
+    # coherente con el MOMENTO (no siempre 500 — en merienda 500 kcal diría un rango
+    # imposible frente a las reglas del momento 80-280). El LLM usa el valor como
+    # referencia, no límite duro.
+    _display_floor_mm = {
+        "DESAYUNO": 450.0, "MERIENDA": 280.0, "CENA": 520.0,
+    }.get(momento_reco, 500.0)
+    _restante_display = max(restante, _display_floor_mm) if _masa_muscular_match else restante
+    # El objetivo masa muscular NO anula las reglas del momento (bug 2026-09-06):
+    # con "recomiéndame algo para merendar" el LLM devolvía platos de fondo 520-580 kcal
+    # porque este texto pedía "3 platos completos 400-700 kcal" para TODO momento.
+    # Ahora se adapta a la ventana del momento: merienda/desayuno = porción alta en
+    # proteína DENTRO del rango; almuerzo/cena = plato de fondo completo.
+    _MM_POR_MOMENTO = {
+        "DESAYUNO": (
+            "OBJETIVO MASA MUSCULAR: DESAYUNO dentro del rango del momento (250-450 kcal). "
+            "Rico en proteína: huevos, pan con queso fresco, avena con leche, quinua con "
+            "leche, yogur griego con granola. NO fuerces un plato de fondo ni superes 450 kcal."
+        ),
+        "MERIENDA": (
+            "OBJETIVO MASA MUSCULAR: MERIENDA/snack dentro del rango del momento (80-280 kcal). "
+            "Snack alto en proteína: yogur griego, pan con queso fresco, tostada con mantequilla "
+            "de maní, huevo sancochado, vaso de leche con quinua. NO conviertas la merienda en "
+            "un plato de fondo ni superes 280 kcal."
+        ),
+        "CENA": (
+            "OBJETIVO MASA MUSCULAR: CENA ligera pero proteica dentro del rango del momento "
+            "(200-520 kcal): pescado a la plancha, pollo a la plancha, tortilla de huevo, "
+            "menestra con quinua. NO superes 520 kcal — es la comida nocturna."
+        ),
+    }
     _masa_muscular_txt = (
-        "OBJETIVO MASA MUSCULAR: para ganar masa muscular se requiere un aporte calórico ALTO. "
-        "Propón 3 platos completos de 400-700 kcal cada uno con ALTA proteína (≥25g por plato). "
-        "Una ingesta calórica ligeramente superior al mantenimiento diario es CORRECTA y deseable "
-        "para este objetivo — NO limites los platos al déficit restante del día. "
-        "Usa fuentes de proteína magra: pollo a la plancha, pescado, res magra, huevos, "
-        "menestras con quinua. Incluye carbohidratos de calidad (arroz, papa, quinua) como "
-        "fuente de energía para el entrenamiento."
+        _MM_POR_MOMENTO.get(
+            momento_reco,
+            "OBJETIVO MASA MUSCULAR: para ganar masa muscular se requiere un aporte calórico ALTO. "
+            "Propón 3 platos completos de 400-700 kcal cada uno con ALTA proteína (≥25g por plato). "
+            "Una ingesta calórica ligeramente superior al mantenimiento diario es CORRECTA y deseable "
+            "para este objetivo — NO limites los platos al déficit restante del día. "
+            "Usa fuentes de proteína magra: pollo a la plancha, pescado, res magra, huevos, "
+            "menestras con quinua. Incluye carbohidratos de calidad (arroz, papa, quinua) como "
+            "fuente de energía para el entrenamiento.",
+        )
     ) if _masa_muscular_match else ""
 
     # Balance vs meta — bloque ya armado por _calcular_balance_meta (vacío si
@@ -2599,6 +2652,16 @@ async def respuesta_recomendacion_llm(
     }
     _ref_platos = _PLATOS_REFERENCIA.get(momento_reco, "")
 
+    # Restricciones por momento del día — DEFINIDAS arriba pero NUNCA usadas en
+    # el prompt (bug encontrado 2026-09-06): "recomiéndame para la merienda"
+    # devolvía Chuleta de Cerdo 650 kcal porque el LLM nunca veía el rango
+    # 80-280 kcal ni los platos válidos de merienda. Se elige la variante
+    # vegano/vegetariano si corresponde.
+    _restr_momento = (
+        (_RESTRICCIONES_MOMENTO_VEGANO if es_vegano_reco else _RESTRICCIONES_MOMENTO_RECO)
+        .get(momento_reco, "")
+    )
+
     # 7. Prompt al LLM — condiciones médicas al final (recency bias: LLM las lee último)
     # Contexto compacto que el LLM lee como un brief natural de nutricionista
     _contexto_dieta = restriccion_dieta_reco or (
@@ -2614,6 +2677,8 @@ async def respuesta_recomendacion_llm(
     _prompt_reco_comida = (
         f"Eres nutricionista del Gimnasio World Light Lambayeque. Habla directamente a {perfil.first_name}, en español natural y breve.\n"
         f"{perfil.first_name} tiene {round(_restante_display)} kcal disponibles para {momento_reco.lower()} hoy.\n"
+        + (f"\n⛔ REGLAS DEL MOMENTO ({momento_reco}): {_restr_momento}\n" if _restr_momento else "")
+        + (f"Ejemplos de {momento_reco.lower()} en Perú: {_ref_platos}.\n" if _ref_platos else "")
         + (f"\nRESTRICCIONES OBLIGATORIAS (respétalas todas): {_contexto_dieta}\n" if _contexto_dieta else "")
         + (f"{_restricciones_extra}\n" if _restricciones_extra else "")
         + (f"No repetir: {_ya_sugeridos_txt.replace('PLATOS YA RECOMENDADOS (NO repetir):', '').strip()}\n" if _ya_sugeridos_txt else "")
@@ -2720,6 +2785,8 @@ async def respuesta_recomendacion_llm(
                 + (_contexto_dieta or "opciones saludables")
                 + (f" | {exclusion_reco}" if exclusion_reco else "")
                 + (f"\nNO uses: {', '.join(_tokens_detectados)}.\n" if _tokens_detectados else "\n")
+                + (f"\n⛔ REGLAS DEL MOMENTO ({momento_reco}): {_restr_momento}\n" if _restr_momento else "")
+                + (f"Ejemplos de {momento_reco.lower()} en Perú: {_ref_platos}.\n" if _ref_platos else "")
                 + f"Sugiere 3 platos peruanos reales para {momento_reco.lower()} ({round(_restante_display)} kcal) "
                 + f"respondiendo: \"{mensaje[:200]}\"\n"
                 + f"1-2 oraciones naturales, luego:\n"

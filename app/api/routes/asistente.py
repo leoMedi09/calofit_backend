@@ -20,6 +20,9 @@ from app.api.routes.auth import get_current_user
 from app.services.asistente.asistente_service import asistente_service
 from app.models.historial import SugerenciaGuardada
 from app.models.client import Client
+from app.core.logging_config import get_logger
+
+logger = get_logger("api.asistente")
 
 router = APIRouter()
 
@@ -169,9 +172,8 @@ async def consultar_asistente(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        print(f"❌ ERROR EN /consultar: {str(e)}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ERROR en /consultar: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al procesar la consulta")
 
 
 @router.get("/historial")
@@ -226,9 +228,8 @@ async def registro_manual_alimento(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        print(f"ERROR EN /log-manual: {str(e)}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ERROR en /log-manual: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al registrar el alimento")
 
 
 class AlimentoDirectoItem(BaseModel):
@@ -326,8 +327,8 @@ async def registrar_macros_directos(
         }
     except Exception as e:
         db.rollback()
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ERROR en /registrar-directo: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al registrar los macros")
 
 
 @router.post("/calcular-ejercicio")
@@ -349,9 +350,8 @@ async def calcular_ejercicio(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        print(f"ERROR EN /calcular-ejercicio: {str(e)}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ERROR en /calcular-ejercicio: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al calcular el ejercicio")
 
 
 @router.post("/log-rutina-manual")
@@ -369,9 +369,8 @@ async def log_rutina_manual(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        print(f"ERROR EN /log-rutina-manual: {str(e)}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ERROR en /log-rutina-manual: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al registrar la rutina")
 
 
 @router.post("/confirmar-registro")
@@ -394,9 +393,8 @@ async def confirmar_registro_con_consulta_id(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        print(f"❌ ERROR EN /confirmar-registro: {str(e)}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ERROR en /confirmar-registro: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al confirmar el registro")
 
 
 # ═══ PART C: Guardar Sugerencias (Recetario Personal) ═══
@@ -473,8 +471,8 @@ async def guardar_sugerencia(
 
         return {"mensaje": f"🔖 '{body.nombre}' guardado en tu recetario", "id": nueva.id}
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ERROR en /guardar-sugerencia: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al guardar la sugerencia")
 
 
 @router.get("/mis-sugerencias")
@@ -504,8 +502,8 @@ async def listar_sugerencias(
             "fecha_guardado": str(s.fecha_guardado),
         } for s in items]
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ERROR en /mis-sugerencias: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al listar las sugerencias")
 
 
 @router.patch("/sugerencia/{sugerencia_id}/completar")
@@ -529,8 +527,8 @@ async def completar_sugerencia(
     except HTTPException:
         raise
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ERROR en /sugerencia completar: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al completar la sugerencia")
 
 
 @router.delete("/sugerencia/{sugerencia_id}")
@@ -554,8 +552,8 @@ async def eliminar_sugerencia(
     except HTTPException:
         raise
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ERROR en /sugerencia eliminar: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al eliminar la sugerencia")
 
 
 @router.get("/mi-racha")
@@ -629,5 +627,5 @@ async def mi_racha(
     except HTTPException:
         raise
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("ERROR en /mi-racha: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al calcular la racha")

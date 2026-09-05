@@ -57,14 +57,19 @@ async def listar_alertas_mis_clientes(
     
     # Ordenar por fecha (más recientes primero)
     alertas = query.order_by(AlertaSalud.fecha_deteccion.desc()).all()
-    
+
+    # Resolver Client y User en 1 solo query por tipo (evita N+1 por alerta)
+    clientes = {c.id: c for c in db.query(Client).filter(Client.id.in_(clientes_ids)).all()}
+    atendido_ids = {a.atendido_por_id for a in alertas if a.atendido_por_id}
+    usuarios = {
+        u.id: u for u in db.query(User).filter(User.id.in_(atendido_ids)).all()
+    } if atendido_ids else {}
+
     # Enriquecer con información del cliente y quien atendió
     resultado = []
     for alerta in alertas:
-        cliente = db.query(Client).filter(Client.id == alerta.client_id).first()
-        atendido_por = None
-        if alerta.atendido_por_id:
-            atendido_por = db.query(User).filter(User.id == alerta.atendido_por_id).first()
+        cliente = clientes.get(alerta.client_id)
+        atendido_por = usuarios.get(alerta.atendido_por_id) if alerta.atendido_por_id else None
         
         alerta_dict = {
             "id": alerta.id,
@@ -284,12 +289,15 @@ async def listar_alertas_por_cliente(
         AlertaSalud.client_id == cliente_id
     ).order_by(AlertaSalud.fecha_deteccion.desc()).all()
     
-    # Enriquecer con información
+    # Enriquecer con información (User en 1 solo query, evita N+1 por alerta)
+    atendido_ids = {a.atendido_por_id for a in alertas if a.atendido_por_id}
+    usuarios = {
+        u.id: u for u in db.query(User).filter(User.id.in_(atendido_ids)).all()
+    } if atendido_ids else {}
+
     resultado = []
     for alerta in alertas:
-        atendido_por = None
-        if alerta.atendido_por_id:
-            atendido_por = db.query(User).filter(User.id == alerta.atendido_por_id).first()
+        atendido_por = usuarios.get(alerta.atendido_por_id) if alerta.atendido_por_id else None
         
         alerta_dict = {
             "id": alerta.id,

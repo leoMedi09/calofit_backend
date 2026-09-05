@@ -16,6 +16,9 @@ from app.services.email_service import EmailService
 import random
 from datetime import datetime, timedelta
 from app.core.firebase import auth as firebase_admin_auth
+from app.core.logging_config import get_logger
+
+logger = get_logger("api.clientes")
 
 
 router = APIRouter()
@@ -182,11 +185,12 @@ def registrar_cliente(cliente_data: ClientCreate, db: Session = Depends(get_db))
             
     except IntegrityError as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=f"Error de integridad en la base de datos: {str(e)}")
+        logger.error("Error de integridad en registro de cliente: %s", e, exc_info=True)
+        raise HTTPException(status_code=400, detail="Error de integridad en la base de datos al registrar el cliente")
     except Exception as e:
         db.rollback()
-        print(f"❌ Error en registro: {e}")
-        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+        logger.error("Error interno en registro de cliente: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 
 @router.get("/perfil")
@@ -467,12 +471,12 @@ def actualizar_perfil_cliente(
         }
     except IntegrityError as e:
         db.rollback()
-        print(f"❌ Error de integridad: {e}")
-        raise HTTPException(status_code=400, detail=f"Error de integridad: {str(e)}")
+        logger.error("Error de integridad actualizando cliente: %s", e, exc_info=True)
+        raise HTTPException(status_code=400, detail="Error de integridad al actualizar el cliente")
     except Exception as e:
         db.rollback()
-        print(f"❌ Error: {e}")
-        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
+        logger.error("Error actualizando cliente: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al actualizar el cliente")
 
 
 # ✅ NUEVO ENDPOINT: Vincular UID de Flutter con perfil de salud
@@ -536,10 +540,10 @@ def vincular_uid_flutter(
         raise
     except Exception as e:
         db.rollback()
-        print(f"❌ Error vinculando UID: {e}")
+        logger.error("Error vinculando UID: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Error al vincular UID: {str(e)}"
+            detail="Error al vincular el UID al perfil"
         )
 
 
@@ -1021,10 +1025,10 @@ def admin_cambiar_contrasena_cliente(
         }
     except Exception as e:
         db.rollback()
-        print(f"❌ Error al cambiar contraseña: {e}")
+        logger.error("Error al cambiar contraseña: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Error al cambiar contraseña: {str(e)}"
+            detail="Error al cambiar la contraseña"
         )
 
 
@@ -1084,8 +1088,8 @@ def admin_cambiar_contrasena_usuario(
         }
     except Exception as e:
         db.rollback()
-        print(f"❌ Error al cambiar contraseña: {e}")
+        logger.error("Error al cambiar contraseña: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Error al cambiar contraseña: {str(e)}"
+            detail="Error al cambiar la contraseña"
         )

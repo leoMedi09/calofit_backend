@@ -6,6 +6,9 @@ from typing import List, Optional
 from app.core.database import get_db
 from app.api.routes.auth import get_current_user
 from app.services.ia_service import ia_engine
+from app.core.logging_config import get_logger
+
+logger = get_logger("api.v1.nutrition.parser")
 
 router = APIRouter(tags=["Nutrition Parser"])
 
@@ -108,6 +111,5 @@ async def parse_ingredients(
         )
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error en nutrition parser: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al procesar los ingredientes")
