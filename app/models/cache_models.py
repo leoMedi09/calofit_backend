@@ -68,34 +68,6 @@ class AppCachePlatos(Base):
         return f"<AppCachePlatos(plato={self.plato_normalized!r}, plato_id={self.plato_id})>"
 
 
-class AppCacheRutinas(Base):
-    """
-    Caché de rutinas generadas por el LLM para perfil/zonas/tiempo específicos.
-    """
-    __tablename__ = "app_cache_rutinas"
-
-    id            = Column(Integer, primary_key=True, index=True)
-    cache_key     = Column(String(512), nullable=False, unique=True, index=True)
-    user_id       = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=True, index=True)
-    perfil_tipo   = Column(String(16), nullable=True)
-    zonas_objetivo = Column(Text, nullable=True)
-    tiempo_min    = Column(Integer, nullable=True)
-    rutina_json   = Column(Text, nullable=False)
-    hit_count     = Column(Integer, default=1, nullable=False)
-    expires_at    = Column(DateTime(timezone=True), nullable=True)
-    created_at    = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-
-    # Relationships
-    client = relationship("Client", foreign_keys=[user_id])
-
-    __table_args__ = (
-        Index("idx_cache_rutinas_expires", "expires_at"),
-    )
-
-    def __repr__(self):
-        return f"<AppCacheRutinas(cache_key={self.cache_key!r}, perfil={self.perfil_tipo!r})>"
-
-
 class AlimentoSinResolver(Base):
     """
     Registro de alimentos que ninguna capa pudo resolver.

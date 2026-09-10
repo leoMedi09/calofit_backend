@@ -45,27 +45,6 @@ class AppCachePlatosResponse(AppCachePlatosCreate):
         from_attributes = True
 
 
-# ─── AppCacheRutinas ──────────────────────────────────────────────────────────
-
-class AppCacheRutinasCreate(BaseModel):
-    cache_key:      str
-    user_id:        Optional[int] = None
-    perfil_tipo:    Optional[str] = None
-    zonas_objetivo: Optional[str] = None
-    tiempo_min:     Optional[int] = None
-    rutina_json:    str
-    expires_at:     Optional[datetime] = None
-
-
-class AppCacheRutinasResponse(AppCacheRutinasCreate):
-    id:         int
-    hit_count:  int = 1
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
 # ─── AlimentoSinResolver ─────────────────────────────────────────────────────
 
 class AlimentoSinResolverCreate(BaseModel):
