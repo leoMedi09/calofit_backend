@@ -9,6 +9,7 @@ class PreferenciaAlimento(Base):
     Almacena las preferencias de alimentos de cada cliente
     basadas en su historial de consumo.
     """
+
     __tablename__ = "preferencias_alimentos"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -16,7 +17,7 @@ class PreferenciaAlimento(Base):
     alimento = Column(String(200), nullable=False)
     frecuencia = Column(Integer, default=1)
     puntuacion = Column(Float, default=1.0)
-    
+
     calorias = Column(Float, nullable=True, default=0.0)
     proteinas = Column(Float, nullable=True, default=0.0)
     carbohidratos = Column(Float, nullable=True, default=0.0)
@@ -35,6 +36,7 @@ class PreferenciaEjercicio(Base):
     Almacena las preferencias de ejercicios de cada cliente
     basadas en su historial de entrenamiento.
     """
+
     __tablename__ = "preferencias_ejercicios"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -42,9 +44,9 @@ class PreferenciaEjercicio(Base):
     ejercicio = Column(String(200), nullable=False)
     frecuencia = Column(Integer, default=1)
     puntuacion = Column(Float, default=1.0)
-    
+
     calorias_quemadas = Column(Float, nullable=True, default=0.0)
-    
+
     ultima_vez = Column(TIMESTAMP, server_default=func.now())
     created_at = Column(TIMESTAMP, server_default=func.now())
 

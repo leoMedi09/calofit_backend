@@ -7,6 +7,7 @@ from datetime import datetime
 import json
 import re
 
+
 class NutricionistaIAService:
     def __init__(self):
         self.ia = ia_engine
@@ -18,25 +19,25 @@ class NutricionistaIAService:
         """
         entidades = self._extraer_entidades_paciente(mensaje)
         contexto_paciente = ""
-        
+
         if entidades:
             query = db.query(Client)
-            if hasattr(current_user, 'id') and current_user.role_name.lower() != "admin":
+            if hasattr(current_user, "id") and current_user.role_name.lower() != "admin":
                 query = query.filter(Client.nutritionist_id == current_user.id)
-            
+
             for entidad in entidades:
                 query = query.filter(
-                    (Client.first_name.ilike(f"%{entidad}%")) | 
-                    (Client.last_name_paternal.ilike(f"%{entidad}%")) |
-                    (Client.last_name_maternal.ilike(f"%{entidad}%"))
+                    (Client.first_name.ilike(f"%{entidad}%"))
+                    | (Client.last_name_paternal.ilike(f"%{entidad}%"))
+                    | (Client.last_name_maternal.ilike(f"%{entidad}%"))
                 )
-            
+
             paciente = query.first()
             if paciente:
                 contexto_paciente = self._generar_contexto_clinico(paciente, db)
-        
-        nombre_staff = current_user.first_name if hasattr(current_user, 'first_name') else "colega"
-        
+
+        nombre_staff = current_user.first_name if hasattr(current_user, "first_name") else "colega"
+
         prompt_sistema = (
             f"Eres el Asistente Clínico Inteligente (Copiloto) de Calofit. "
             f"Estás hablando con {nombre_staff}, un profesional de la salud ({current_user.role_name}). "
@@ -54,20 +55,23 @@ class NutricionistaIAService:
             contexto=prompt_sistema,
             mensaje_usuario=mensaje,
             historial=historial,
-            tono_applied="Profesional clínico-nutricional"
+            tono_applied="Profesional clínico-nutricional",
         )
 
         from app.services.response_parser import parsear_respuesta_para_frontend
+
         respuesta_estructurada = parsear_respuesta_para_frontend(respuesta_ia, mensaje_usuario=mensaje)
-        
+
         if "secciones" in respuesta_estructurada:
-            respuesta_estructurada["secciones"] = [s for s in respuesta_estructurada["secciones"] if s.get("tipo") != "comida"]
+            respuesta_estructurada["secciones"] = [
+                s for s in respuesta_estructurada["secciones"] if s.get("tipo") != "comida"
+            ]
 
         return {
             "staff": nombre_staff,
             "respuesta_ia": respuesta_ia,
             "respuesta_estructurada": respuesta_estructurada,
-            "rol": "nutricionista"
+            "rol": "nutricionista",
         }
 
     def _extraer_entidades_paciente(self, mensaje: str):
@@ -77,16 +81,28 @@ class NutricionistaIAService:
         for i, palabra in enumerate(palabras):
             clean_word = palabra.replace("?", "").replace(".", "").replace(",", "")
             if clean_word.lower() in claves and i + 1 < len(palabras):
-                entidades.append(palabras[i+1].replace("?", "").replace(".", "").replace(",", ""))
+                entidades.append(palabras[i + 1].replace("?", "").replace(".", "").replace(",", ""))
             elif clean_word and clean_word[0].isupper() and i > 0:
                 entidades.append(clean_word)
         return list(set(entidades))
 
     def _generar_contexto_clinico(self, paciente: Client, db: Session):
         hoy = get_peru_date()
-        alertas = db.query(AlertaSalud).filter(AlertaSalud.client_id == paciente.id).order_by(AlertaSalud.fecha_deteccion.desc()).limit(3).all()
-        progreso = db.query(ProgresoCalorias).filter(ProgresoCalorias.client_id == paciente.id).order_by(ProgresoCalorias.fecha.desc()).limit(7).all()
-        
+        alertas = (
+            db.query(AlertaSalud)
+            .filter(AlertaSalud.client_id == paciente.id)
+            .order_by(AlertaSalud.fecha_deteccion.desc())
+            .limit(3)
+            .all()
+        )
+        progreso = (
+            db.query(ProgresoCalorias)
+            .filter(ProgresoCalorias.client_id == paciente.id)
+            .order_by(ProgresoCalorias.fecha.desc())
+            .limit(7)
+            .all()
+        )
+
         texto_alertas = "; ".join([f"{a.tipo}: {a.descripcion} ({a.severidad})" for a in alertas]) or "Sin alertas."
         media_adherencia = sum([p.calorias_consumidas for p in progreso]) / len(progreso) if progreso else 0
 
@@ -96,5 +112,6 @@ class NutricionistaIAService:
             f"ALERTAS: {texto_alertas}. "
             f"ADHERENCIA MEDIA: {media_adherencia:.0f} kcal."
         )
+
 
 nutricionista_ia_service = NutricionistaIAService()

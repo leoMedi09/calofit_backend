@@ -14,65 +14,65 @@ logger = get_logger("api.admin")
 
 router = APIRouter()
 
+
 def check_is_admin(current_user):
     role = str(getattr(current_user, "role_name", "")).lower()
     if role not in ["admin", "administrador"]:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo el administrador puede realizar esta acción"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Solo el administrador puede realizar esta acción"
         )
     return True
 
+
 def _log_admin_action(db: Session, admin_id: int, accion: str, descripcion: str, tabla: str = None, reg_id: int = None):
     log = AuditoriaAdmin(
-        admin_id=admin_id,
-        accion=accion,
-        descripcion=descripcion,
-        tabla_afectada=tabla,
-        registro_id=reg_id
+        admin_id=admin_id, accion=accion, descripcion=descripcion, tabla_afectada=tabla, registro_id=reg_id
     )
     db.add(log)
     db.commit()
 
+
 @router.post("/usuarios", response_model=UserResponse)
 async def crear_personal_staff(
-    usuario_data: UserCreate, 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    usuario_data: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """
     Permite al administrador crear cuentas para nutricionistas y entrenadores.
     """
     check_is_admin(current_user)
-    
+
     usuario_existente = db.query(User).filter(User.email == usuario_data.email).first()
     if usuario_existente:
         raise HTTPException(status_code=400, detail="El correo electrónico ya está registrado")
 
     hashed_pwd = security.hash_password(usuario_data.password)
-    
+
     nuevo_usuario = User(
         first_name=usuario_data.first_name,
         last_name_paternal=usuario_data.last_name_paternal,
         last_name_maternal=usuario_data.last_name_maternal,
         email=usuario_data.email,
         hashed_password=hashed_pwd,
-        role_name=usuario_data.role, 
-        role_id=usuario_data.role_id 
+        role_name=usuario_data.role,
+        role_id=usuario_data.role_id,
     )
-    
+
     db.add(nuevo_usuario)
     db.commit()
     db.refresh(nuevo_usuario)
-    
+
     _log_admin_action(
-        db, current_user.id, "REGISTRO_STAFF", 
+        db,
+        current_user.id,
+        "REGISTRO_STAFF",
         f"Se registró a {nuevo_usuario.first_name} ({nuevo_usuario.role_name})",
-        "users", nuevo_usuario.id
+        "users",
+        nuevo_usuario.id,
     )
-    
+
     try:
         from app.services.email_service import EmailService
+
         EmailService.send_welcome_staff_brevo(
             email_to=usuario_data.email,
             password=usuario_data.password,
@@ -82,38 +82,37 @@ async def crear_personal_staff(
         )
     except Exception as e:
         print(f"⚠️ No se pudo enviar el correo de bienvenida al staff: {e}")
-    
+
     return nuevo_usuario
 
+
 @router.get("/staff")
-async def listar_personal_staff(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+async def listar_personal_staff(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Lista el personal del staff (nutricionistas, entrenadores y otros administradores).
     """
     check_is_admin(current_user)
-    
-    try:
-        usuarios_db = db.query(User).filter(
-            User.role_name.ilike("%admin%"),
-            User.id != current_user.id
-        ).all()
 
-        especialistas = db.query(User).filter(
-            (User.role_name.ilike("%nutri%")) |
-            (User.role_name.ilike("%coach%")) |
-            (User.role_name.ilike("%train%")) |
-            (User.role_name.ilike("%entrenador%")),
-            User.id != current_user.id
-        ).all()
+    try:
+        usuarios_db = db.query(User).filter(User.role_name.ilike("%admin%"), User.id != current_user.id).all()
+
+        especialistas = (
+            db.query(User)
+            .filter(
+                (User.role_name.ilike("%nutri%"))
+                | (User.role_name.ilike("%coach%"))
+                | (User.role_name.ilike("%train%"))
+                | (User.role_name.ilike("%entrenador%")),
+                User.id != current_user.id,
+            )
+            .all()
+        )
 
         seen = {}
         for u in usuarios_db + especialistas:
             seen[u.id] = u
         usuarios_db = sorted(seen.values(), key=lambda u: u.id)
-        
+
         res = []
         for u in usuarios_db:
             role_lower = u.role_name.lower()
@@ -122,29 +121,29 @@ async def listar_personal_staff(
                 count = len(u.clients_as_nutri)
             elif "coach" in role_lower or "train" in role_lower:
                 count = len(u.clients_as_coach)
-                
+
             _fn = u.first_name or ""
             _lp = u.last_name_paternal or ""
             _lm = u.last_name_maternal or ""
             _full = f"{_fn} {_lp} {_lm}".strip() or u.email
-            res.append({
-                "id": u.id,
-                "first_name": _fn or "N/A",
-                "last_name_paternal": _lp,
-                "last_name_maternal": _lm,
-                "full_name": _full,
-                "email": u.email if u.email else "sin@email.com",
-                "role_name": u.role_name if u.role_name else "staff",
-                "is_active": u.is_active,
-                "pacientes_count": count
-            })
+            res.append(
+                {
+                    "id": u.id,
+                    "first_name": _fn or "N/A",
+                    "last_name_paternal": _lp,
+                    "last_name_maternal": _lm,
+                    "full_name": _full,
+                    "email": u.email if u.email else "sin@email.com",
+                    "role_name": u.role_name if u.role_name else "staff",
+                    "is_active": u.is_active,
+                    "pacientes_count": count,
+                }
+            )
         return res
     except Exception as e:
         logger.error("Error listando staff: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=500, 
-            detail="Error en el servidor al obtener el personal"
-        )
+        raise HTTPException(status_code=500, detail="Error en el servidor al obtener el personal")
+
 
 @router.put("/clientes/{cliente_id}/asignar")
 async def asignar_especialistas_a_cliente(
@@ -152,44 +151,56 @@ async def asignar_especialistas_a_cliente(
     nutri_id: int = None,
     trainer_id: int = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
     Vincula a un cliente con un nutricionista y un entrenador específico.
     """
     check_is_admin(current_user)
-    
+
     cliente = db.query(Client).filter(Client.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
-        
+
     if nutri_id:
-        nutri = db.query(User).filter(
-            User.id == nutri_id, 
-            (User.role_name.ilike("%nutri%")) | (User.role_name.ilike("%nutritionist%"))
-        ).first()
+        nutri = (
+            db.query(User)
+            .filter(User.id == nutri_id, (User.role_name.ilike("%nutri%")) | (User.role_name.ilike("%nutritionist%")))
+            .first()
+        )
         if not nutri:
-            raise HTTPException(status_code=400, detail="ID de nutricionista no válido o el usuario no tiene rol de nutricionista")
+            raise HTTPException(
+                status_code=400, detail="ID de nutricionista no válido o el usuario no tiene rol de nutricionista"
+            )
         cliente.assigned_nutri_id = nutri_id
-        
+
     if trainer_id:
-        trainer = db.query(User).filter(
-            User.id == trainer_id, 
-            (User.role_name.ilike("%coach%")) | (User.role_name.ilike("%trainer%")) | (User.role_name.ilike("%entrenador%"))
-        ).first()
+        trainer = (
+            db.query(User)
+            .filter(
+                User.id == trainer_id,
+                (User.role_name.ilike("%coach%"))
+                | (User.role_name.ilike("%trainer%"))
+                | (User.role_name.ilike("%entrenador%")),
+            )
+            .first()
+        )
         if not trainer:
-            raise HTTPException(status_code=400, detail="ID de entrenador no válido o el usuario no tiene rol de entrenador")
+            raise HTTPException(
+                status_code=400, detail="ID de entrenador no válido o el usuario no tiene rol de entrenador"
+            )
         cliente.assigned_coach_id = trainer_id
-        
+
     db.commit()
     return {"message": f"Especialistas asignados correctamente al cliente {cliente.first_name}"}
+
 
 @router.put("/staff/{user_id}/password")
 async def cambiar_password_staff(
     user_id: int,
     password_data: PasswordUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
     Permite al administrador cambiar la contraseña de cualquier miembro del staff.
@@ -198,18 +209,22 @@ async def cambiar_password_staff(
     usuario = db.query(User).filter(User.id == user_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario del staff no encontrado")
-        
+
     usuario.hashed_password = security.hash_password(password_data.new_password)
     db.commit()
 
     _log_admin_action(
-        db, current_user.id, "CAMBIO_PASSWORD",
+        db,
+        current_user.id,
+        "CAMBIO_PASSWORD",
         f"Se cambió la contraseña de {usuario.first_name} ({usuario.email})",
-        "users", usuario.id
+        "users",
+        usuario.id,
     )
 
     try:
         from app.services.email_service import EmailService
+
         EmailService.send_password_updated_staff_brevo(
             email_to=usuario.email,
             staff_name=f"{usuario.first_name} {usuario.last_name_paternal}".strip(),
@@ -221,18 +236,19 @@ async def cambiar_password_staff(
 
     return {"message": f"Contraseña de {usuario.first_name} actualizada correctamente"}
 
+
 @router.put("/staff/{user_id}")
 async def actualizar_personal_staff(
     user_id: int,
     usuario_data: UserUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
     Permite al administrador actualizar los datos básicos de un miembro del staff.
     """
     check_is_admin(current_user)
-    
+
     usuario = db.query(User).filter(User.id == user_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario del staff no encontrado")
@@ -256,26 +272,28 @@ async def actualizar_personal_staff(
 
     db.commit()
     db.refresh(usuario)
-    
+
     _log_admin_action(
-        db, current_user.id, "ACTUALIZACION_STAFF", 
+        db,
+        current_user.id,
+        "ACTUALIZACION_STAFF",
         f"Se actualizaron los datos de {usuario.first_name} ({usuario.email})",
-        "users", usuario.id
+        "users",
+        usuario.id,
     )
-    
+
     return {"message": f"Datos de {usuario.first_name} actualizados correctamente"}
+
 
 @router.put("/staff/{user_id}/status")
 async def alternar_estado_staff(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """
     Permite al administrador suspender (dar de baja) o reactivar a un miembro del staff.
     """
     check_is_admin(current_user)
-    
+
     usuario = db.query(User).filter(User.id == user_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario del staff no encontrado")
@@ -283,31 +301,26 @@ async def alternar_estado_staff(
     nuevo_estado = not usuario.is_active
     usuario.is_active = nuevo_estado
     db.commit()
-    
+
     accion = "PERSONAL_SUSPENDIDO" if not nuevo_estado else "PERSONAL_REACTIVADO"
-    descripcion = f"Se {'suspendió' if not nuevo_estado else 'reactivó'} la cuenta de {usuario.first_name} ({usuario.email})"
-    
-    _log_admin_action(
-        db, current_user.id, accion, descripcion,
-        "users", usuario.id
+    descripcion = (
+        f"Se {'suspendió' if not nuevo_estado else 'reactivó'} la cuenta de {usuario.first_name} ({usuario.email})"
     )
-    
-    return {
-        "message": descripcion,
-        "is_active": nuevo_estado
-    }
+
+    _log_admin_action(db, current_user.id, accion, descripcion, "users", usuario.id)
+
+    return {"message": descripcion, "is_active": nuevo_estado}
+
 
 @router.delete("/staff/{user_id}")
 async def eliminar_personal_staff(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """
     Permite al administrador eliminar permanentemente a un miembro del staff.
     """
     check_is_admin(current_user)
-    
+
     usuario = db.query(User).filter(User.id == user_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario del staff no encontrado")
@@ -325,34 +338,35 @@ async def eliminar_personal_staff(
 
     db.delete(usuario)
     db.commit()
-    
+
     _log_admin_action(
-        db, current_user.id, "PERSONAL_ELIMINADO", 
+        db,
+        current_user.id,
+        "PERSONAL_ELIMINADO",
         f"Se eliminó permanentemente la cuenta de {nombre_baja}",
-        "users", None
+        "users",
+        None,
     )
-    
+
     return {"message": f"Personal eliminado correctamente"}
 
+
 @router.get("/logs")
-async def listar_logs_admin(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+async def listar_logs_admin(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Lista los eventos de auditoría administrativa.
     """
     check_is_admin(current_user)
-    
+
     logs = db.query(AuditoriaAdmin).order_by(AuditoriaAdmin.fecha_evento.desc()).limit(100).all()
-    
+
     return [
         {
             "id": log.id,
             "accion": log.accion,
             "descripcion": log.descripcion,
             "fecha": log.fecha_evento,
-            "admin_id": log.admin_id
+            "admin_id": log.admin_id,
         }
         for log in logs
     ]

@@ -16,22 +16,20 @@ class DetalleAlimentoRequest(BaseModel):
 
 @router.post("/detalle")
 async def obtener_detalle_alimento(
-    request: DetalleAlimentoRequest,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    request: DetalleAlimentoRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)
 ):
     """
     🍎 DETALLE DE ALIMENTO: Genera info nutricional completa con IA
-    
+
     Usa Groq para generar:
     - Datos nutricionales detallados
     - Recomendaciones de consumo
     - Sugerencias de combinación
     - Porciones comunes
-    
+
     Perfecto para la pantalla "Ver Detalle" en Flutter.
     """
-    
+
     prompt = f"""
     Eres un nutricionista experto. Genera información nutricional COMPLETA para el siguiente alimento:
     
@@ -70,27 +68,24 @@ async def obtener_detalle_alimento(
     
     SOLO responde con JSON válido, sin texto adicional.
     """
-    
+
     try:
         response = await ia_engine.groq_client.chat.completions.create(
-            model="groq/compound-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=600,
-            temperature=0.3
+            model="groq/compound-mini", messages=[{"role": "user", "content": prompt}], max_tokens=600, temperature=0.3
         )
-        
+
         respuesta_texto = response.choices[0].message.content.strip()
-        
+
         import json
         import re
-        
-        json_match = re.search(r'\{.*\}', respuesta_texto, re.DOTALL)
+
+        json_match = re.search(r"\{.*\}", respuesta_texto, re.DOTALL)
         if json_match:
             detalle = json.loads(json_match.group())
             return detalle
         else:
             raise ValueError("No se pudo parsear JSON de Groq")
-            
+
     except Exception as e:
         print(f"Error generando detalle con Groq: {e}")
         return {
@@ -102,66 +97,58 @@ async def obtener_detalle_alimento(
                 "proteinas": 10,
                 "carbohidratos": 15,
                 "grasas": 5,
-                "fibra": 2
+                "fibra": 2,
             },
             "recomendaciones": [
                 "Consulta con un nutricionista para info personalizada",
                 "Combina con vegetales para mayor nutrición",
-                "Consume con moderación según tu plan"
+                "Consume con moderación según tu plan",
             ],
             "porciones_comunes": [
                 {"nombre": "1 porción estándar", "gramos": 100},
                 {"nombre": "1 porción grande", "gramos": 150},
-                {"nombre": "1 porción pequeña", "gramos": 75}
+                {"nombre": "1 porción pequeña", "gramos": 75},
             ],
-            "alternativas_saludables": [
-                "Consulta tu plan nutricional personalizado"
-            ]
+            "alternativas_saludables": ["Consulta tu plan nutricional personalizado"],
         }
 
 
 @router.post("/actualizar-porcion")
 async def actualizar_porcion_balance(
-    alimento: str,
-    nueva_porcion_gramos: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    alimento: str, nueva_porcion_gramos: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)
 ):
     """
     🔄 ACTUALIZAR PORCIÓN: Ajusta la cantidad de un alimento ya registrado
-    
+
     Se usa cuando el usuario cambia la porción desde la pantalla de detalle.
     """
     from app.models.client import Client
     from app.models.historial import ProgresoCalorias
     from datetime import date
-    
+
     cliente = db.query(Client).filter(Client.email == current_user.email).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
-    
-    detalle_request = DetalleAlimentoRequest(
-        alimento=alimento,
-        porcion_gramos=nueva_porcion_gramos
-    )
-    
+
+    detalle_request = DetalleAlimentoRequest(alimento=alimento, porcion_gramos=nueva_porcion_gramos)
+
     detalle = await obtener_detalle_alimento(detalle_request, db, current_user)
     nuevas_calorias = detalle["datos_nutricionales"]["calorias"]
-    
+
     hoy = date.today()
-    progreso = db.query(ProgresoCalorias).filter(
-        ProgresoCalorias.client_id == cliente.id,
-        ProgresoCalorias.fecha == hoy
-    ).first()
-    
+    progreso = (
+        db.query(ProgresoCalorias)
+        .filter(ProgresoCalorias.client_id == cliente.id, ProgresoCalorias.fecha == hoy)
+        .first()
+    )
+
     if not progreso:
         raise HTTPException(status_code=404, detail="No hay registros de hoy para actualizar")
-    
-    
+
     return {
         "success": True,
         "alimento": alimento,
         "nueva_porcion": f"{nueva_porcion_gramos}g",
         "nuevas_calorias": nuevas_calorias,
-        "mensaje": f"Porción de {alimento} actualizada a {nueva_porcion_gramos}g"
+        "mensaje": f"Porción de {alimento} actualizada a {nueva_porcion_gramos}g",
     }

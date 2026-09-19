@@ -6,6 +6,7 @@ Caso encontrado en la auditoría final pre-demo: "Comí dos huevos" seguido de
 nuevo y/o podía duplicar filas en comida_registros. Ver llm_registro.py:
 _RX_CORRECCION_REGISTRO + bloque de corrección al inicio de registrar_comida_llm.
 """
+
 import json
 
 import pytest
@@ -25,13 +26,12 @@ def _get_mensaje(prompt: str) -> str:
     idx = low.find(marker)
     if idx == -1:
         return low
-    resto = prompt[idx + len(marker):]
+    resto = prompt[idx + len(marker) :]
     return resto.split('"', 1)[0].lower()
 
 
 @pytest.mark.integration
 class TestCorreccionRegistroNutricional:
-
     @pytest.fixture(autouse=True)
     def mock_groq_extraccion(self):
         async def mock_llamar_groq(prompt, max_tokens=800, temp=0.7, model=None):
@@ -39,21 +39,39 @@ class TestCorreccionRegistroNutricional:
             if "extrae todos los alimentos" in prompt_lower or "responde solo con json" in prompt_lower:
                 msg = _get_mensaje(prompt)
                 if "huevos" in msg and ("tres" in msg or " 3" in msg):
-                    return json.dumps({
-                        "alimentos": [
-                            {"nombre": "Huevos", "es_real": True, "cantidad": 3,
-                             "porcion_g": 50, "kcal": 75, "prot_g": 6.3,
-                             "carb_g": 0.6, "grasa_g": 5.0}
-                        ]
-                    })
+                    return json.dumps(
+                        {
+                            "alimentos": [
+                                {
+                                    "nombre": "Huevos",
+                                    "es_real": True,
+                                    "cantidad": 3,
+                                    "porcion_g": 50,
+                                    "kcal": 75,
+                                    "prot_g": 6.3,
+                                    "carb_g": 0.6,
+                                    "grasa_g": 5.0,
+                                }
+                            ]
+                        }
+                    )
                 if "huevos" in msg and ("dos" in msg or " 2" in msg):
-                    return json.dumps({
-                        "alimentos": [
-                            {"nombre": "Huevos", "es_real": True, "cantidad": 2,
-                             "porcion_g": 50, "kcal": 75, "prot_g": 6.3,
-                             "carb_g": 0.6, "grasa_g": 5.0}
-                        ]
-                    })
+                    return json.dumps(
+                        {
+                            "alimentos": [
+                                {
+                                    "nombre": "Huevos",
+                                    "es_real": True,
+                                    "cantidad": 2,
+                                    "porcion_g": 50,
+                                    "kcal": 75,
+                                    "prot_g": 6.3,
+                                    "carb_g": 0.6,
+                                    "grasa_g": 5.0,
+                                }
+                            ]
+                        }
+                    )
                 return json.dumps({"alimentos": [], "prot_total": 0, "carb_total": 0, "grasa_total": 0})
             return json.dumps({"alimentos": []})
 

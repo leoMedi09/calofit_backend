@@ -12,6 +12,7 @@ from app.api import api_router
 Base.metadata.create_all(bind=engine)
 
 from sqlalchemy import text
+
 with engine.connect() as connection:
     try:
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS dni VARCHAR UNIQUE;"))
@@ -19,10 +20,13 @@ with engine.connect() as connection:
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS session_duration FLOAT DEFAULT 1.0;"))
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nutri_weekly_note TEXT;"))
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS fcm_token VARCHAR;"))
-        connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS notificaciones_activas BOOLEAN DEFAULT TRUE;"))
+        connection.execute(
+            text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS notificaciones_activas BOOLEAN DEFAULT TRUE;")
+        )
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP;"))
         connection.execute(text("DROP TABLE IF EXISTS platos_recomendados CASCADE;"))
-        connection.execute(text("""
+        connection.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS chat_historial (
                 id SERIAL PRIMARY KEY,
                 client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -30,11 +34,11 @@ with engine.connect() as connection:
                 contenido TEXT NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT NOW()
             )
-        """))
-        connection.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_chat_historial_client "
-            "ON chat_historial(client_id, created_at DESC)"
-        ))
+        """)
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_chat_historial_client ON chat_historial(client_id, created_at DESC)")
+        )
         connection.commit()
         print("Migraciones manuales aplicadas correctamente.")
     except Exception as e:
@@ -53,6 +57,7 @@ app.add_middleware(
 app.include_router(api_router)
 
 from app.api.v1 import router as api_v1_router
+
 app.include_router(api_v1_router)
 
 UPLOAD_DIR = "app/uploads"
@@ -65,6 +70,7 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 @app.on_event("startup")
 def iniciar_notificaciones():
     from app.core.notification_scheduler import iniciar_scheduler
+
     iniciar_scheduler()
 
 

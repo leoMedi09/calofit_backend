@@ -3,10 +3,12 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
 
+
 class HistorialPeso(Base):
     """
     Tabla para almacenar el historial de peso de los clientes
     """
+
     __tablename__ = "historial_peso"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -18,10 +20,12 @@ class HistorialPeso(Base):
 
     cliente = relationship("Client", back_populates="historial_peso")
 
+
 class HistorialIMC(Base):
     """
     Tabla para almacenar el historial de IMC de los clientes
     """
+
     __tablename__ = "historial_imc"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -33,10 +37,12 @@ class HistorialIMC(Base):
 
     cliente = relationship("Client", back_populates="historial_imc")
 
+
 class ProgresoCalorias(Base):
     """
     Tabla para almacenar el progreso diario de calorías consumidas y quemadas
     """
+
     __tablename__ = "progreso_calorias"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -44,11 +50,11 @@ class ProgresoCalorias(Base):
     fecha = Column(Date, nullable=False, default=func.current_date())
     calorias_consumidas = Column(Integer, nullable=True, default=0)
     calorias_quemadas = Column(Integer, nullable=False, default=0)
-    
+
     proteinas_consumidas = Column(Float, nullable=True, default=0.0)
     carbohidratos_consumidos = Column(Float, nullable=True, default=0.0)
     grasas_consumidas = Column(Float, nullable=True, default=0.0)
-    
+
     deficit_superavit = Column(Integer, nullable=True)
     alerta_exceso_enviada = Column(Boolean, nullable=False, default=False)
     created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
@@ -63,27 +69,29 @@ class ProgresoCalorias(Base):
             self.deficit_superavit = int(self.calorias_consumidas - (tmb_diario + self.calorias_quemadas))
         return self.deficit_superavit
 
+
 class AlertaSalud(Base):
     """
     Tabla para registrar alertas de salud (fatiga, lesiones, desánimo)
     detectadas por la IA o reportadas por el cliente.
     """
+
     __tablename__ = "alertas_salud"
 
     id = Column(Integer, primary_key=True, index=True)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
-    
+
     tipo = Column(String(50), nullable=False)
     descripcion = Column(Text, nullable=False)
-    
-    severidad = Column(String(20), default='bajo')
-    
-    estado = Column(String(20), default='pendiente')
-    
+
+    severidad = Column(String(20), default="bajo")
+
+    estado = Column(String(20), default="pendiente")
+
     atendido_por_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    
+
     notas = Column(Text, nullable=True)
-    
+
     fecha_deteccion = Column(TIMESTAMP, nullable=False, default=func.now())
     fecha_atencion = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, nullable=False, default=func.now())
@@ -97,6 +105,7 @@ class SugerenciaGuardada(Base):
     Permite al usuario guardar platos o ejercicios sugeridos por la IA
     para prepararlos o hacerlos después.
     """
+
     __tablename__ = "sugerencias_guardadas"
 
     id = Column(Integer, primary_key=True, index=True)

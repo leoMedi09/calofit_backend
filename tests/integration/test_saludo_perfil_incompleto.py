@@ -4,6 +4,7 @@ onboarding incompleto). Encontrado en la auditoría final pre-demo: el saludo
 quedaba con una coma colgando ("Buenos días, . ¿En qué te ayudo hoy?") cuando
 el nombre estaba vacío. Ver asistente_service.py, bloque de saludo puro.
 """
+
 from datetime import datetime
 
 import pytest
@@ -14,7 +15,6 @@ from app.services.asistente.asistente_service import AsistenteService
 
 @pytest.mark.integration
 class TestSaludoPerfilIncompleto:
-
     @pytest.fixture
     def cliente_sin_nombre(self, db):
         client = Client(
@@ -37,9 +37,7 @@ class TestSaludoPerfilIncompleto:
             email = cliente_sin_nombre.email
 
         asistente = AsistenteService()
-        resp = await asistente.consultar(
-            mensaje="Hola", db=db, current_user=MockUser(), historial=[]
-        )
+        resp = await asistente.consultar(mensaje="Hola", db=db, current_user=MockUser(), historial=[])
         texto = resp["respuesta_ia"]
         assert ", ." not in texto
         assert ",." not in texto

@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, Boolean
 from app.core.database import Base
 from datetime import datetime, timedelta
 
+
 class PasswordReset(Base):
     __tablename__ = "password_resets"
 

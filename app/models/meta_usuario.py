@@ -2,6 +2,7 @@
 Metas nutricionales y requerimientos por usuario (TMB, GET personalizados).
 Fórmula Mifflin-St Jeor para TMB; GET = TMB * factor_actividad.
 """
+
 from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -30,4 +31,3 @@ class MetaUsuario(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-

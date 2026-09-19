@@ -4,6 +4,7 @@ from datetime import datetime
 from app.core.config import settings
 from app.core.firebase import upload_to_firebase
 
+
 class LocalStorage:
     @staticmethod
     def save_file(file_bytes: bytes, original_filename: str) -> str:
@@ -14,24 +15,24 @@ class LocalStorage:
             ext = os.path.splitext(original_filename)[1]
             if not ext:
                 ext = ".jpg"
-            
+
             remote_path = f"profiles/{uuid.uuid4()}{ext}"
-            
+
             content_type = "image/jpeg"
             if ext.lower() == ".png":
                 content_type = "image/png"
             elif ext.lower() == ".webp":
                 content_type = "image/webp"
-                
+
             public_url = upload_to_firebase(file_bytes, remote_path, content_type=content_type)
-            
+
             if public_url:
                 print(f"✅ Imagen subida con éxito a Firebase: {public_url}")
                 return public_url
-            
+
         except Exception as e:
             print(f"❌ Error al subir a Firebase Storage: {e}")
-            
+
         return ""
 
     @staticmethod
@@ -42,10 +43,10 @@ class LocalStorage:
         """
         if not relative_path:
             return ""
-            
+
         if relative_path.startswith("http"):
             return relative_path
-            
+
         base_url = os.getenv("BASE_URL", "http://localhost:8000")
         return f"{base_url}{relative_path}"
 
@@ -56,9 +57,12 @@ class LocalStorage:
         """
         if not public_url:
             return False
-            
+
         try:
-            if any(domain in public_url for domain in ["cloudinary.com", "firebasestorage.googleapis.com", "storage.googleapis.com"]):
+            if any(
+                domain in public_url
+                for domain in ["cloudinary.com", "firebasestorage.googleapis.com", "storage.googleapis.com"]
+            ):
                 return True
 
             relative_path = ""
@@ -68,14 +72,15 @@ class LocalStorage:
                 return False
 
             system_path = os.path.join("app", relative_path.lstrip("/"))
-            
+
             if os.path.exists(system_path) and os.path.isfile(system_path):
                 if system_path.startswith("app/uploads"):
                     os.remove(system_path)
                     return True
         except Exception as e:
             print(f"❌ Error eliminando archivo local: {e}")
-            
+
         return False
+
 
 local_storage = LocalStorage()

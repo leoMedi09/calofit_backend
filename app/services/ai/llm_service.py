@@ -1,6 +1,7 @@
 """
 Servicio LLM centralizado — wrapper sobre Groq/Llama-3.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,13 +14,14 @@ logger = logging.getLogger(__name__)
 
 try:
     from groq import AsyncGroq
+
     _groq_available = True
 except ImportError:
     AsyncGroq = None
     _groq_available = False
 
 _DEFAULT_MODEL = "groq/compound-mini"
-_DEFAULT_TEMP   = 0.3
+_DEFAULT_TEMP = 0.3
 _DEFAULT_TOKENS = 512
 
 
@@ -51,12 +53,12 @@ class LLMService:
             return None
         if api_key.startswith("sk-or-"):
             from app.services.ai.openrouter_client import OpenRouterClient
+
             return OpenRouterClient(api_key=api_key)
         else:
             if not _groq_available:
                 raise RuntimeError("groq SDK no instalado. Ejecutar: pip install groq")
             return AsyncGroq(api_key=api_key)
-
 
     async def completar(
         self,
@@ -93,7 +95,7 @@ class LLMService:
                     except Exception as fallback_exc:
                         logger.error("LLMService fallback to llama-3.3-70b-versatile failed: %s", fallback_exc)
                         err = str(fallback_exc).lower()
-            
+
             if "429" in err or "rate_limit" in err or "rate limit" in err or "timed out" in err or "timeout" in err:
                 if model != "groq/compound-mini":
                     logger.warning("LLMService: rate limit or timeout on %s. Retrying with groq/compound-mini", model)
@@ -110,7 +112,7 @@ class LLMService:
                     return await _call(self._backup_client, backup_model, max_tokens)
                 except Exception as backup_exc:
                     logger.error("LLMService: Backup client failed as well: %s", backup_exc)
-            
+
             logger.error("LLMService.completar error: %s", exc)
             return ""
 
@@ -163,11 +165,11 @@ class LLMService:
                 return op
         return opciones[0]
 
-
     @staticmethod
     def _parsear_json(texto: str) -> Optional[Any]:
         """Intenta parsear JSON del texto, extrayendo bloques ```json``` si existen."""
         import re
+
         bloque = re.search(r"```(?:json)?\s*([\s\S]*?)```", texto)
         candidato = bloque.group(1).strip() if bloque else texto.strip()
         try:

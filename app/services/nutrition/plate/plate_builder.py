@@ -1,6 +1,7 @@
 """
 Constructor de platos (PlatoBuilder).
 """
+
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 class PlatoBuilder:
     """
     Constructor de platos VALIDADOS.
-    
+
     Proceso:
     1. Resuelve ingredientes (FoodSourceResolver)
     2. Valida semántica (¿tiene sentido?)
@@ -35,7 +36,7 @@ class PlatoBuilder:
     6. Cachea resultado
     7. Retorna PlatoConstructionResult
     """
-    
+
     def __init__(
         self,
         db: Session,
@@ -47,7 +48,7 @@ class PlatoBuilder:
         self.cache_manager = cache_manager
         self.semantic_validator = SemanticValidator(db)
         self.nutritional_validator = NutritionalValidator()
-    
+
     def construir_plato(
         self,
         nombre_plato: str,
@@ -57,92 +58,87 @@ class PlatoBuilder:
     ) -> PlatoConstructionResultDTO:
         """
         Construye y valida un plato.
-        
+
         Args:
             nombre_plato: nombre del plato
             ingredientes: [{'nombre': str, 'gramos': float}, ...]
             client_id: ID del cliente (para caché + restricciones)
             tipo_plato: desayuno|almuerzo|cena|snack|cualquiera
-            
+
         Returns:
             PlatoConstructionResultDTO
         """
-        
+
         logger.info(f"Construyendo plato: {nombre_plato} para cliente {client_id}")
-        
+
         nombre_norm = nombre_plato.lower().strip()
         resultado_cache = self._buscar_en_cache(nombre_norm, client_id)
         if resultado_cache:
             logger.info(f"✅ Plato en caché: {nombre_plato}")
             resultado_cache.cached = True
             return resultado_cache
-        
+
         ingredientes_resueltos = self.food_resolver.resolver_ingredientes_lote(
             ingredientes=ingredientes,
             user_id=client_id,
         )
-        
-        ingredientes_fallidos = [
-            ing for ing in ingredientes_resueltos if not ing['exito']
-        ]
+
+        ingredientes_fallidos = [ing for ing in ingredientes_resueltos if not ing["exito"]]
         if ingredientes_fallidos:
             logger.warning(f"⚠️ {len(ingredientes_fallidos)} ingredientes no resueltos")
-        
+
         macros_totales = self._calcular_macros_totales(ingredientes_resueltos)
-        peso_total = sum(ing.get('gramos', 0) for ing in ingredientes)
-        
-        validacion_semantica = self.semantic_validator.validar({
-            'nombre_plato': nombre_plato,
-            'ingredientes': [
-                {'nombre': ing['nombre']} for ing in ingredientes_resueltos
-            ],
-            'client_id': client_id,
-        })
-        
+        peso_total = sum(ing.get("gramos", 0) for ing in ingredientes)
+
+        validacion_semantica = self.semantic_validator.validar(
+            {
+                "nombre_plato": nombre_plato,
+                "ingredientes": [{"nombre": ing["nombre"]} for ing in ingredientes_resueltos],
+                "client_id": client_id,
+            }
+        )
+
         meta = self.db.query(MetaUsuario).filter(MetaUsuario.client_id == client_id).first()
         tdee = meta.calorias_objetivo if meta else None
-        
-        validacion_nutricional = self.nutritional_validator.validar({
-            'nombre_plato': nombre_plato,
-            'peso_total_gramos': peso_total,
-            'calorias_total': macros_totales['calorias'],
-            'proteina_total': macros_totales['proteina'],
-            'carbohidratos_total': macros_totales['carbohidratos'],
-            'grasas_total': macros_totales['grasas'],
-            'tdee_usuario': tdee,
-            'momento_dia': tipo_plato,
-        })
-        
+
+        validacion_nutricional = self.nutritional_validator.validar(
+            {
+                "nombre_plato": nombre_plato,
+                "peso_total_gramos": peso_total,
+                "calorias_total": macros_totales["calorias"],
+                "proteina_total": macros_totales["proteina"],
+                "carbohidratos_total": macros_totales["carbohidratos"],
+                "grasas_total": macros_totales["grasas"],
+                "tdee_usuario": tdee,
+                "momento_dia": tipo_plato,
+            }
+        )
+
         fingerprint = FingerprintGenerator.generar_fingerprint_plato(
             nombre=nombre_plato,
-            ingredientes=[
-                {'nombre': ing['nombre'], 'gramos': ing.get('gramos', 0)}
-                for ing in ingredientes_resueltos
-            ],
+            ingredientes=[{"nombre": ing["nombre"], "gramos": ing.get("gramos", 0)} for ing in ingredientes_resueltos],
             macros=macros_totales,
         )
-        
+
         confianza_global = self._calcular_confianza_global(
             validacion_semantica.confianza,
             validacion_nutricional.confianza,
             len(ingredientes_fallidos),
             len(ingredientes),
         )
-        
+
         plato_id = self._guardar_plato(nombre_plato, ingredientes_resueltos)
-        
+
         self._cachear_resultado(
             nombre_norm=nombre_norm,
             plato_id=plato_id,
             client_id=client_id,
         )
-        
+
         es_valido = (
-            validacion_semantica.es_valido and
-            validacion_nutricional.es_valido and
-            len(ingredientes_fallidos) == 0
+            validacion_semantica.es_valido and validacion_nutricional.es_valido and len(ingredientes_fallidos) == 0
         )
-        
+
         resultado = PlatoConstructionResultDTO(
             exito=es_valido,
             plato_id=plato_id,
@@ -150,14 +146,14 @@ class PlatoBuilder:
             peso_total_gramos=peso_total,
             ingredientes=[
                 IngredienteDTO(
-                    nombre=ing['nombre'],
-                    gramos=ing.get('gramos', 0),
-                    alimento_id=ing.get('alimento_id'),
-                    macros_100g=ing.get('macros_100g'),
-                    macros_totales=ing.get('macros_totales'),
-                    source=ing.get('source'),
-                    confianza=ing.get('confianza', 0),
-                    fingerprint=ing.get('fingerprint'),
+                    nombre=ing["nombre"],
+                    gramos=ing.get("gramos", 0),
+                    alimento_id=ing.get("alimento_id"),
+                    macros_100g=ing.get("macros_100g"),
+                    macros_totales=ing.get("macros_totales"),
+                    source=ing.get("source"),
+                    confianza=ing.get("confianza", 0),
+                    fingerprint=ing.get("fingerprint"),
                 )
                 for ing in ingredientes_resueltos
             ],
@@ -168,17 +164,21 @@ class PlatoBuilder:
             confianza_global=confianza_global,
             timestamp=datetime.utcnow().isoformat(),
         )
-        
+
         logger.info(f"✅ Plato construido: {nombre_plato} (válido={es_valido})")
         return resultado
-    
+
     def _buscar_en_cache(self, nombre_norm: str, client_id: int) -> Optional[PlatoConstructionResultDTO]:
         """Busca plato en caché (solo comprueba existencia — reconstrucción completa omitida)."""
         try:
-            cache_plato = self.db.query(AppCachePlatos).filter(
-                AppCachePlatos.plato_normalized == nombre_norm,
-                AppCachePlatos.user_id == client_id,
-            ).first()
+            cache_plato = (
+                self.db.query(AppCachePlatos)
+                .filter(
+                    AppCachePlatos.plato_normalized == nombre_norm,
+                    AppCachePlatos.user_id == client_id,
+                )
+                .first()
+            )
 
             if not cache_plato:
                 return None
@@ -193,28 +193,28 @@ class PlatoBuilder:
         except Exception as exc:
             logger.error(f"Error buscando en caché: {exc}")
             return None
-    
+
     def _calcular_macros_totales(self, ingredientes_resueltos: List[Dict]) -> Dict[str, float]:
         """Calcula macros totales del plato."""
         macros = {
-            'calorias': 0,
-            'proteina': 0,
-            'carbohidratos': 0,
-            'grasas': 0,
-            'fibra': 0,
-            'azucar': 0,
+            "calorias": 0,
+            "proteina": 0,
+            "carbohidratos": 0,
+            "grasas": 0,
+            "fibra": 0,
+            "azucar": 0,
         }
-        
+
         for ing in ingredientes_resueltos:
-            if ing['exito'] and ing.get('macros_totales'):
-                mt = ing['macros_totales']
-                macros['calorias'] += mt.get('calorias', 0)
-                macros['proteina'] += mt.get('proteina', 0)
-                macros['carbohidratos'] += mt.get('carbohidratos', 0)
-                macros['grasas'] += mt.get('grasas', 0)
-        
+            if ing["exito"] and ing.get("macros_totales"):
+                mt = ing["macros_totales"]
+                macros["calorias"] += mt.get("calorias", 0)
+                macros["proteina"] += mt.get("proteina", 0)
+                macros["carbohidratos"] += mt.get("carbohidratos", 0)
+                macros["grasas"] += mt.get("grasas", 0)
+
         return macros
-    
+
     def _calcular_confianza_global(
         self,
         conf_semantica: int,
@@ -224,13 +224,13 @@ class PlatoBuilder:
     ) -> int:
         """Calcula confianza global."""
         confianza = (conf_semantica + conf_nutricional) / 2
-        
+
         if total_ingredientes > 0:
             porcentaje_fallidos = (ingredientes_fallidos / total_ingredientes) * 100
             confianza -= porcentaje_fallidos * 0.5
-        
+
         return max(0, min(100, int(confianza)))
-    
+
     def _guardar_plato(
         self,
         nombre_plato: str,
@@ -245,52 +245,51 @@ class PlatoBuilder:
             nombre_norm = nombre_plato.lower().strip()
 
             ingredientes_validos = [
-                ing for ing in ingredientes_resueltos
-                if ing.get('exito') and ing.get('alimento_id')
+                ing for ing in ingredientes_resueltos if ing.get("exito") and ing.get("alimento_id")
             ]
             if len(ingredientes_validos) < 2:
                 logger.warning(
                     "Plato '%s' descartado — solo %d ingrediente(s) válido(s) (necesita ≥2)",
-                    nombre_plato, len(ingredientes_validos),
+                    nombre_plato,
+                    len(ingredientes_validos),
                 )
                 return None
 
-            plato = self.db.query(Plato).filter(
-                Plato.nombre_normalizado == nombre_norm
-            ).first()
+            plato = self.db.query(Plato).filter(Plato.nombre_normalizado == nombre_norm).first()
 
             if not plato:
                 plato = Plato(
                     nombre=nombre_plato,
                     nombre_normalizado=nombre_norm,
-                    tipo_plato='cualquiera',
-                    origen='llm',
+                    tipo_plato="cualquiera",
+                    origen="llm",
                 )
                 self.db.add(plato)
                 self.db.flush()
 
-            self.db.query(PlatoIngrediente).filter(
-                PlatoIngrediente.plato_id == plato.id
-            ).delete()
+            self.db.query(PlatoIngrediente).filter(PlatoIngrediente.plato_id == plato.id).delete()
 
             for idx, ing in enumerate(ingredientes_validos):
-                self.db.add(PlatoIngrediente(
-                    plato_id=plato.id,
-                    alimento_id=ing['alimento_id'],
-                    gramos=ing.get('gramos', 100),
-                    orden=idx + 1,
-                ))
+                self.db.add(
+                    PlatoIngrediente(
+                        plato_id=plato.id,
+                        alimento_id=ing["alimento_id"],
+                        gramos=ing.get("gramos", 100),
+                        orden=idx + 1,
+                    )
+                )
 
             self.db.commit()
-            logger.info("Plato '%s' persistido id=%s con %d ingredientes",
-                        nombre_plato, plato.id, len(ingredientes_validos))
+            logger.info(
+                "Plato '%s' persistido id=%s con %d ingredientes", nombre_plato, plato.id, len(ingredientes_validos)
+            )
             return plato.id
 
         except Exception as e:
             logger.error("Error guardando plato '%s': %s", nombre_plato, e)
             self.db.rollback()
             return None
-    
+
     def _cachear_resultado(
         self,
         nombre_norm: str,
@@ -304,7 +303,7 @@ class PlatoBuilder:
                 plato_normalized=nombre_norm,
                 plato_id=plato_id,
                 user_id=client_id,
-                source='PlatoBuilder',
+                source="PlatoBuilder",
                 expires_at=expires,
             )
             self.db.add(cache_entry)

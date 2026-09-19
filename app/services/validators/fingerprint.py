@@ -1,6 +1,7 @@
 """
 Generador de fingerprints SHA-256 deterministas para platos, rutinas y alimentos.
 """
+
 import hashlib
 import json
 from typing import Dict, Any, List
@@ -21,11 +22,8 @@ class FingerprintGenerator:
     ) -> str:
         datos = {
             "nombre": nombre.lower().strip(),
-            "ingredientes": sorted(
-                ingredientes, key=lambda x: x.get("nombre", "").lower()
-            ),
-            "macros": {k: round(v, 2) if isinstance(v, float) else v
-                       for k, v in macros.items()},
+            "ingredientes": sorted(ingredientes, key=lambda x: x.get("nombre", "").lower()),
+            "macros": {k: round(v, 2) if isinstance(v, float) else v for k, v in macros.items()},
         }
         return _sha256(datos)
 
@@ -54,10 +52,10 @@ class FingerprintGenerator:
         datos = {
             "nombre": nombre.lower().strip(),
             "macros_100g": {
-                "calorias":       round(calorias_100g, 2),
-                "proteina":       round(proteina_100g, 2),
-                "carbohidratos":  round(carbohidratos_100g, 2),
-                "grasas":         round(grasas_100g, 2),
+                "calorias": round(calorias_100g, 2),
+                "proteina": round(proteina_100g, 2),
+                "carbohidratos": round(carbohidratos_100g, 2),
+                "grasas": round(grasas_100g, 2),
             },
             "source": source.lower(),
         }

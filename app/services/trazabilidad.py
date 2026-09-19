@@ -4,6 +4,7 @@ Trazabilidad de ingesta.
 comida_registros  → fuente de verdad auditada por evento
 progreso_calorias → derivado: recalcular_progreso_diario() lo mantiene sincronizado
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -19,24 +20,24 @@ from app.models.historial import ProgresoCalorias
 logger = get_logger("trazabilidad")
 
 _TIPO_RESOLUCION_MAP: dict[str, str] = {
-    "platos":         "bd_plato",
+    "platos": "bd_plato",
     "plato_dinamico": "plato_dinamico",
-    "manual":         "manual",
-    "llm":            "llm_estimado",
-    "bd":             "bd_alimento",
-    "nlp_extractor":  "bd_alimento",
-    "usda":           "bd_alimento",
-    "fatsecret":      "bd_alimento",
-    "estimado":       "llm_estimado",
-    "postgres":       "bd_alimento",
+    "manual": "manual",
+    "llm": "llm_estimado",
+    "bd": "bd_alimento",
+    "nlp_extractor": "bd_alimento",
+    "usda": "bd_alimento",
+    "fatsecret": "bd_alimento",
+    "estimado": "llm_estimado",
+    "postgres": "bd_alimento",
 }
 
 _CONFIANZA_MAP: dict[str, float] = {
-    "bd_plato":       1.0,
-    "bd_alimento":    1.0,
+    "bd_plato": 1.0,
+    "bd_alimento": 1.0,
     "plato_dinamico": 0.85,
-    "llm_estimado":   0.5,
-    "manual":         1.0,
+    "llm_estimado": 0.5,
+    "manual": 1.0,
 }
 
 
@@ -49,28 +50,36 @@ def recalcular_progreso_diario(
     Suma los ComidaRegistro del día y actualiza (o crea) la fila en progreso_calorias.
     Retorna el objeto actualizado sin hacer commit.
     """
-    totales = db.query(
-        sqlfunc.coalesce(sqlfunc.sum(ComidaRegistro.kcal), 0.0),
-        sqlfunc.coalesce(sqlfunc.sum(ComidaRegistro.proteina_g), 0.0),
-        sqlfunc.coalesce(sqlfunc.sum(ComidaRegistro.carbohidratos_g), 0.0),
-        sqlfunc.coalesce(sqlfunc.sum(ComidaRegistro.grasas_g), 0.0),
-    ).filter(
-        ComidaRegistro.client_id == client_id,
-        ComidaRegistro.fecha == fecha,
-    ).first()
+    totales = (
+        db.query(
+            sqlfunc.coalesce(sqlfunc.sum(ComidaRegistro.kcal), 0.0),
+            sqlfunc.coalesce(sqlfunc.sum(ComidaRegistro.proteina_g), 0.0),
+            sqlfunc.coalesce(sqlfunc.sum(ComidaRegistro.carbohidratos_g), 0.0),
+            sqlfunc.coalesce(sqlfunc.sum(ComidaRegistro.grasas_g), 0.0),
+        )
+        .filter(
+            ComidaRegistro.client_id == client_id,
+            ComidaRegistro.fecha == fecha,
+        )
+        .first()
+    )
 
-    progreso = db.query(ProgresoCalorias).filter(
-        ProgresoCalorias.client_id == client_id,
-        ProgresoCalorias.fecha == fecha,
-    ).first()
+    progreso = (
+        db.query(ProgresoCalorias)
+        .filter(
+            ProgresoCalorias.client_id == client_id,
+            ProgresoCalorias.fecha == fecha,
+        )
+        .first()
+    )
     if not progreso:
         progreso = ProgresoCalorias(client_id=client_id, fecha=fecha)
         db.add(progreso)
 
-    progreso.calorias_consumidas      = int(round(float(totales[0])))
-    progreso.proteinas_consumidas     = round(float(totales[1]), 1)
+    progreso.calorias_consumidas = int(round(float(totales[0])))
+    progreso.proteinas_consumidas = round(float(totales[1]), 1)
     progreso.carbohidratos_consumidos = round(float(totales[2]), 1)
-    progreso.grasas_consumidas        = round(float(totales[3]), 1)
+    progreso.grasas_consumidas = round(float(totales[3]), 1)
 
     return progreso
 
@@ -143,6 +152,10 @@ def crear_comida_registros(
 
     logger.info(
         "Creados %d ComidaRegistro para client=%d fecha=%s (tipo=%s confianza=%.2f)",
-        len(registros), client_id, fecha, tipo_resolucion, confianza,
+        len(registros),
+        client_id,
+        fecha,
+        tipo_resolucion,
+        confianza,
     )
     return registros

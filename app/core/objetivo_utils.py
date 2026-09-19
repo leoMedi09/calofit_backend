@@ -41,18 +41,19 @@ Uso:
     if es_superavit(perfil.goal):
         ...  # ganar_leve o ganar masa — ambos son SUPERAVIT
 """
+
 from __future__ import annotations
 
-DEFICIT       = "DEFICIT"
+DEFICIT = "DEFICIT"
 MANTENIMIENTO = "MANTENIMIENTO"
-SUPERAVIT     = "SUPERAVIT"
+SUPERAVIT = "SUPERAVIT"
 
 _GOAL_MAP: dict[str, str] = {
-    "perder peso":   DEFICIT,
-    "perder_leve":   DEFICIT,
+    "perder peso": DEFICIT,
+    "perder_leve": DEFICIT,
     "mantener peso": MANTENIMIENTO,
-    "ganar_leve":    SUPERAVIT,
-    "ganar masa":    SUPERAVIT,
+    "ganar_leve": SUPERAVIT,
+    "ganar masa": SUPERAVIT,
 }
 
 

@@ -11,6 +11,7 @@ Uso:
 
 Cliente de prueba: ID 55 (Carlos, Perfil A — disciplinado, datos validados).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -27,13 +28,13 @@ from app.services.asistente.asistente_registro_comida import registro_comida_han
 from app.services.ia_service import ia_engine
 
 
-SEP  = "─" * 80
+SEP = "─" * 80
 SEP2 = "═" * 80
 
-STATUS_PASS  = "PASS "
-STATUS_FAIL  = "FAIL "
+STATUS_PASS = "PASS "
+STATUS_FAIL = "FAIL "
 STATUS_ERROR = "ERROR"
-STATUS_SKIP  = "SKIP "
+STATUS_SKIP = "SKIP "
 
 
 @dataclass
@@ -61,8 +62,6 @@ class TestCase:
 
 
 CASOS: list[TestCase] = [
-
-
     TestCase(
         test_id="G1-01",
         grupo="Individuales",
@@ -113,8 +112,6 @@ CASOS: list[TestCase] = [
         foods_min=1,
         descripcion="Manzana — porción entera ~120g, ~50-80 kcal",
     ),
-
-
     TestCase(
         test_id="G2-06",
         grupo="Platos compuestos",
@@ -145,8 +142,6 @@ CASOS: list[TestCase] = [
         foods_min=1,
         descripcion="Avena con leche — debe registrarse como un solo item",
     ),
-
-
     TestCase(
         test_id="G3-09",
         grupo="Concatenacion",
@@ -177,8 +172,6 @@ CASOS: list[TestCase] = [
         foods_min=2,
         descripcion="Pechuga 200g + arroz 100g — dos gramajes explícitos",
     ),
-
-
     TestCase(
         test_id="G4-12",
         grupo="Complejos",
@@ -209,8 +202,6 @@ CASOS: list[TestCase] = [
         foods_min=1,
         descripcion="Batido plátano+avena — smoothie 200-500 kcal",
     ),
-
-
     TestCase(
         test_id="G5-15",
         grupo="Anti-fraude",
@@ -286,26 +277,25 @@ async def _ejecutar_caso(caso: TestCase, perfil, plan_hoy_data: dict, db) -> Non
     caso.duracion_s = time.perf_counter() - t0
     caso.resultado = result
 
-    success       = result.get("success", False)
-    tipo          = result.get("tipo_detectado", "")
-    datos         = result.get("datos") or {}
-    kcal          = float(datos.get("calorias") or 0)
-    alimentos     = result.get("alimentos") or []
-    n_alimentos   = len(alimentos)
+    success = result.get("success", False)
+    tipo = result.get("tipo_detectado", "")
+    datos = result.get("datos") or {}
+    kcal = float(datos.get("calorias") or 0)
+    alimentos = result.get("alimentos") or []
+    n_alimentos = len(alimentos)
 
-    caso.kcal_real  = kcal
+    caso.kcal_real = kcal
     caso.foods_real = alimentos
 
     if caso.expect_blocked:
         is_blocked = (not success) and (kcal == 0)
         if is_blocked:
-            caso.status  = STATUS_PASS
+            caso.status = STATUS_PASS
             caso.detalle = f"Bloqueado correctamente (tipo={tipo})"
         else:
-            caso.status  = STATUS_FAIL
+            caso.status = STATUS_FAIL
             caso.detalle = (
-                f"ESPERABA BLOQUEO pero got success={success}, kcal={kcal:.1f}, "
-                f"tipo={tipo}, alimentos={alimentos}"
+                f"ESPERABA BLOQUEO pero got success={success}, kcal={kcal:.1f}, tipo={tipo}, alimentos={alimentos}"
             )
         return
 
@@ -326,14 +316,14 @@ async def _ejecutar_caso(caso: TestCase, perfil, plan_hoy_data: dict, db) -> Non
             problemas.append(f"alimentos={n_alimentos} > max_esperado={caso.foods_max}")
 
         if not problemas:
-            caso.status  = STATUS_PASS
+            caso.status = STATUS_PASS
             caso.detalle = f"kcal={kcal:.1f}, alimentos({n_alimentos})={alimentos[:3]}"
         else:
-            caso.status  = STATUS_FAIL
+            caso.status = STATUS_FAIL
             caso.detalle = " | ".join(problemas) + f" | alimentos={alimentos}"
         return
 
-    caso.status  = STATUS_SKIP
+    caso.status = STATUS_SKIP
     caso.detalle = "Sin expectativa definida"
 
 
@@ -347,9 +337,9 @@ async def _run_grupo6(perfil, plan_hoy_data: dict, db) -> TestCase:
 
     kcal_a = CASO_SUM_A.kcal_real
     kcal_b = CASO_SUM_B.kcal_real
-    suma   = round(kcal_a + kcal_b, 1)
+    suma = round(kcal_a + kcal_b, 1)
 
-    CASO_SUM_VERIFY.kcal_real  = suma
+    CASO_SUM_VERIFY.kcal_real = suma
     CASO_SUM_VERIFY.foods_real = []
 
     problemas = []
@@ -365,17 +355,14 @@ async def _run_grupo6(perfil, plan_hoy_data: dict, db) -> TestCase:
             sum_max = CASO_SUM_A.kcal_max + CASO_SUM_B.kcal_max
             if suma < sum_min - 5 or suma > sum_max + 5:
                 problemas.append(
-                    f"suma={suma:.1f} fuera de [{sum_min},{sum_max}] "
-                    f"(kcal_A={kcal_a:.1f} + kcal_B={kcal_b:.1f})"
+                    f"suma={suma:.1f} fuera de [{sum_min},{sum_max}] (kcal_A={kcal_a:.1f} + kcal_B={kcal_b:.1f})"
                 )
 
     if not problemas:
-        CASO_SUM_VERIFY.status  = STATUS_PASS
-        CASO_SUM_VERIFY.detalle = (
-            f"kcal_A={kcal_a:.1f} + kcal_B={kcal_b:.1f} = {suma:.1f} kcal — matematica OK"
-        )
+        CASO_SUM_VERIFY.status = STATUS_PASS
+        CASO_SUM_VERIFY.detalle = f"kcal_A={kcal_a:.1f} + kcal_B={kcal_b:.1f} = {suma:.1f} kcal — matematica OK"
     else:
-        CASO_SUM_VERIFY.status  = STATUS_FAIL
+        CASO_SUM_VERIFY.status = STATUS_FAIL
         CASO_SUM_VERIFY.detalle = " | ".join(problemas)
 
     return CASO_SUM_VERIFY
@@ -384,15 +371,15 @@ async def _run_grupo6(perfil, plan_hoy_data: dict, db) -> TestCase:
 def _print_caso_inline(caso: TestCase) -> None:
     """Imprime una línea de resultado para la tabla de resumen."""
     status_icon = {
-        STATUS_PASS:  "OK  ",
-        STATUS_FAIL:  "FAIL",
+        STATUS_PASS: "OK  ",
+        STATUS_FAIL: "FAIL",
         STATUS_ERROR: "ERR ",
-        STATUS_SKIP:  "SKIP",
+        STATUS_SKIP: "SKIP",
     }.get(caso.status, "????")
 
     foods_str = ", ".join(caso.foods_real[:2]) if caso.foods_real else "—"
     if len(caso.foods_real) > 2:
-        foods_str += f" (+{len(caso.foods_real)-2})"
+        foods_str += f" (+{len(caso.foods_real) - 2})"
 
     kcal_str = f"{caso.kcal_real:.1f}" if caso.kcal_real > 0 else "0"
 
@@ -409,7 +396,7 @@ def _print_detalle_caso(caso: TestCase) -> None:
     """Imprime el bloque completo de diagnóstico de un caso."""
     print(f"\n  {SEP}")
     print(f"  [{caso.status}] {caso.test_id} — {caso.grupo}")
-    print(f"  Mensaje   : \"{caso.mensaje}\"")
+    print(f'  Mensaje   : "{caso.mensaje}"')
     print(f"  Descripcion: {caso.descripcion}")
     print(f"  kcal_real : {caso.kcal_real:.1f}")
     print(f"  Alimentos : {caso.foods_real}")
@@ -429,6 +416,7 @@ async def main_async() -> int:
     Retorna 0 si todos pasan, 1 si hay algún fallo.
     """
     from datetime import datetime
+
     print(f"\n{SEP2}")
     print("  QA — Motor de Registro de Alimentos CaloFit")
     print(f"  Hora   : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -449,10 +437,10 @@ async def main_async() -> int:
         print(f"  Peso: {perfil.weight}kg | Altura: {perfil.height}cm")
 
         plan_hoy_data = {
-            "calorias_dia":       2000,
-            "proteinas_g":        150,
-            "carbohidratos_g":    220,
-            "grasas_g":            55,
+            "calorias_dia": 2000,
+            "proteinas_g": 150,
+            "carbohidratos_g": 220,
+            "grasas_g": 55,
         }
 
         print(f"\n{SEP}")
@@ -489,19 +477,15 @@ async def main_async() -> int:
         print("  TABLA DE RESULTADOS DETALLADA")
         print(SEP2)
         print(
-            f"  {'ID':<7} | {'GRUPO':<15} | {'MENSAJE (truncado)':<40} | "
-            f"{'KCAL':>6} | {'N_FOODS':>7} | {'ESTADO':<5}"
+            f"  {'ID':<7} | {'GRUPO':<15} | {'MENSAJE (truncado)':<40} | {'KCAL':>6} | {'N_FOODS':>7} | {'ESTADO':<5}"
         )
-        print(f"  {'-'*7}-+-{'-'*15}-+-{'-'*40}-+-{'-'*6}-+-{'-'*7}-+-{'-'*5}")
+        print(f"  {'-' * 7}-+-{'-' * 15}-+-{'-' * 40}-+-{'-' * 6}-+-{'-' * 7}-+-{'-' * 5}")
 
         for caso in todos_los_casos:
-            msg_t   = caso.mensaje[:38] + (".." if len(caso.mensaje) > 38 else "  ")
-            kcal_s  = f"{caso.kcal_real:.1f}" if caso.kcal_real > 0 else "—"
-            nfoods  = str(len(caso.foods_real)) if caso.foods_real else "—"
-            print(
-                f"  {caso.test_id:<7} | {caso.grupo:<15} | {msg_t:<40} | "
-                f"{kcal_s:>6} | {nfoods:>7} | {caso.status}"
-            )
+            msg_t = caso.mensaje[:38] + (".." if len(caso.mensaje) > 38 else "  ")
+            kcal_s = f"{caso.kcal_real:.1f}" if caso.kcal_real > 0 else "—"
+            nfoods = str(len(caso.foods_real)) if caso.foods_real else "—"
+            print(f"  {caso.test_id:<7} | {caso.grupo:<15} | {msg_t:<40} | {kcal_s:>6} | {nfoods:>7} | {caso.status}")
 
         fallidos = [c for c in todos_los_casos if c.status in (STATUS_FAIL, STATUS_ERROR)]
         if fallidos:
@@ -510,11 +494,11 @@ async def main_async() -> int:
             for caso in fallidos:
                 _print_detalle_caso(caso)
 
-        total   = len(todos_los_casos)
-        n_pass  = sum(1 for c in todos_los_casos if c.status == STATUS_PASS)
-        n_fail  = sum(1 for c in todos_los_casos if c.status == STATUS_FAIL)
+        total = len(todos_los_casos)
+        n_pass = sum(1 for c in todos_los_casos if c.status == STATUS_PASS)
+        n_fail = sum(1 for c in todos_los_casos if c.status == STATUS_FAIL)
         n_error = sum(1 for c in todos_los_casos if c.status == STATUS_ERROR)
-        n_skip  = sum(1 for c in todos_los_casos if c.status == STATUS_SKIP)
+        n_skip = sum(1 for c in todos_los_casos if c.status == STATUS_SKIP)
 
         print(f"\n{SEP2}")
         print("  RESUMEN FINAL")

@@ -12,4 +12,3 @@ class AlimentoAlias(Base):
     alimento_id = Column(Integer, ForeignKey("alimentos.id", ondelete="CASCADE"), nullable=False)
     alias = Column(String(255), nullable=False)
     alias_normalizado = Column(String(255), nullable=False, index=True)
-

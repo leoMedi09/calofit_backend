@@ -6,6 +6,7 @@ Endpoints de ejercicios — CaloFit.
   POST /ejercicios/log-series        — Registrar series/reps directamente
   GET  /ejercicios/logs/{client_id}  — Historial de workout_logs
 """
+
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -25,19 +26,19 @@ class RutinaRequest(BaseModel):
     zonas_objetivo: List[str] = Field(
         ...,
         description="Grupos musculares objetivo: Pecho, Espalda, Piernas, Hombros, "
-                    "Bíceps, Tríceps, Core, Glúteos, Cardio, Cuerpo Completo",
+        "Bíceps, Tríceps, Core, Glúteos, Cardio, Cuerpo Completo",
         example=["Piernas", "Glúteos"],
     )
     tiempo_min: int = Field(default=60, ge=15, le=180, description="Tiempo disponible en minutos")
 
 
 class LogSeriesRequest(BaseModel):
-    ejercicio:       str   = Field(..., max_length=200, description="Nombre del ejercicio")
-    series:          int   = Field(..., ge=1, le=20)
-    reps:            int   = Field(..., ge=1, le=100)
-    peso_kg:         Optional[float] = Field(default=None, ge=0, le=500)
-    met:             float = Field(default=5.0, ge=1.0, le=20.0)
-    duracion_min:    float = Field(default=45.0, ge=1.0, le=240.0)
+    ejercicio: str = Field(..., max_length=200, description="Nombre del ejercicio")
+    series: int = Field(..., ge=1, le=20)
+    reps: int = Field(..., ge=1, le=100)
+    peso_kg: Optional[float] = Field(default=None, ge=0, le=500)
+    met: float = Field(default=5.0, ge=1.0, le=20.0)
+    duracion_min: float = Field(default=45.0, ge=1.0, le=240.0)
 
 
 @router.get("/")
@@ -64,22 +65,31 @@ async def listar_ejercicios(
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    rows = db.execute(_sql(f"""
+    rows = db.execute(
+        _sql(f"""
         SELECT id, nombre, musculo_principal, tipo, nivel, met,
                tipo_metrica, grupo_padre, es_cardio
         FROM ejercicios
         {where}
         ORDER BY nombre
         LIMIT :lim
-    """), params).fetchall()
+    """),
+        params,
+    ).fetchall()
 
     return {
         "total": len(rows),
         "ejercicios": [
             {
-                "id": r[0], "nombre": r[1], "musculo_principal": r[2],
-                "tipo": r[3], "nivel": r[4], "met": r[5],
-                "tipo_metrica": r[6], "grupo_padre": r[7], "es_cardio": r[8],
+                "id": r[0],
+                "nombre": r[1],
+                "musculo_principal": r[2],
+                "tipo": r[3],
+                "nivel": r[4],
+                "met": r[5],
+                "tipo_metrica": r[6],
+                "grupo_padre": r[7],
+                "es_cardio": r[8],
             }
             for r in rows
         ],
@@ -89,13 +99,15 @@ async def listar_ejercicios(
 @router.get("/grupos")
 async def listar_grupos(db: Session = Depends(get_db)):
     """Lista todos los grupos_padre disponibles con conteo de ejercicios."""
-    rows = db.execute(_sql("""
+    rows = db.execute(
+        _sql("""
         SELECT grupo_padre, COUNT(*) as total
         FROM ejercicios
         WHERE grupo_padre IS NOT NULL
         GROUP BY grupo_padre
         ORDER BY total DESC
-    """)).fetchall()
+    """)
+    ).fetchall()
     return {"grupos": [{"nombre": r[0], "total": r[1]} for r in rows]}
 
 
@@ -110,6 +122,7 @@ async def generar_rutina(
     lesiones del usuario y zonas objetivo.
     """
     from app.models.client import Client
+
     perfil = db.query(Client).filter(Client.email.ilike(current_user.email)).first()
     if not perfil:
         raise HTTPException(status_code=404, detail="Perfil de cliente no encontrado")
@@ -136,6 +149,7 @@ async def registrar_series(
     y sincroniza con progreso_calorias y Random Forest features.
     """
     from app.models.client import Client
+
     perfil = db.query(Client).filter(Client.email.ilike(current_user.email)).first()
     if not perfil:
         raise HTTPException(status_code=404, detail="Perfil de cliente no encontrado")
@@ -162,6 +176,7 @@ async def historial_logs(
 ):
     """Historial de workout_logs del usuario autenticado."""
     from app.models.client import Client
+
     perfil = db.query(Client).filter(Client.email.ilike(current_user.email)).first()
     if not perfil:
         raise HTTPException(status_code=404, detail="Perfil no encontrado")

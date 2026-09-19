@@ -8,6 +8,7 @@ from app.services.ia_service import ia_engine
 from app.core.utils import get_peru_date
 from datetime import datetime, timedelta
 
+
 class AdminIAService:
     def __init__(self):
         self.ia = ia_engine
@@ -18,9 +19,9 @@ class AdminIAService:
         Enfoque: KPIs globales, rendimiento del staff, volumen de pacientes y alertas críticas.
         """
         stats_globales = self._obtener_stats_sistema(db)
-        
-        nombre_admin = current_user.first_name if hasattr(current_user, 'first_name') else "Administrador"
-        
+
+        nombre_admin = current_user.first_name if hasattr(current_user, "first_name") else "Administrador"
+
         prompt_sistema = (
             f"Eres el Asistente Gerencial Inteligente (Copiloto Admin) de Calofit. "
             f"Hablas con {nombre_admin}, el Administrador General del sistema. "
@@ -39,42 +40,42 @@ class AdminIAService:
         )
 
         respuesta_ia = await self.ia.asistir_cliente(
-            contexto=prompt_sistema,
-            mensaje_usuario=mensaje,
-            historial=historial,
-            tono_applied="Ejecutivo y analítico"
+            contexto=prompt_sistema, mensaje_usuario=mensaje, historial=historial, tono_applied="Ejecutivo y analítico"
         )
 
         from app.services.response_parser import parsear_respuesta_para_frontend
+
         respuesta_estructurada = parsear_respuesta_para_frontend(respuesta_ia, mensaje_usuario=mensaje)
 
         return {
             "staff": nombre_admin,
             "respuesta_ia": respuesta_ia,
             "respuesta_estructurada": respuesta_estructurada,
-            "rol": "admin"
+            "rol": "admin",
         }
 
     def _obtener_stats_sistema(self, db: Session):
         total_pacientes = db.query(Client).count()
         total_nutris = db.query(User).filter(User.role_name == "nutricionista").count()
-        
+
         hoy = get_peru_date()
-        alertas_hoy = db.query(AlertaSalud).filter(
-            AlertaSalud.estado == "pendiente",
-            func.date(AlertaSalud.fecha_deteccion) == hoy
-        ).count()
-        
+        alertas_hoy = (
+            db.query(AlertaSalud)
+            .filter(AlertaSalud.estado == "pendiente", func.date(AlertaSalud.fecha_deteccion) == hoy)
+            .count()
+        )
+
         progresos_hoy = db.query(ProgresoCalorias).filter(ProgresoCalorias.fecha == hoy).all()
         adherencia_media = 0
         if progresos_hoy:
-             adherencia_media = 85.5
-             
+            adherencia_media = 85.5
+
         return {
             "total_pacientes": total_pacientes,
             "total_nutris": total_nutris,
             "alertas_hoy": alertas_hoy,
-            "adherencia_media": adherencia_media
+            "adherencia_media": adherencia_media,
         }
+
 
 admin_ia_service = AdminIAService()

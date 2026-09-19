@@ -4,6 +4,7 @@ Caché en proceso (sin Redis).
 Misma API que antes: consultas del asistente, comidas recientes, alimentos en nutrición_unificado.
 En multi-worker cada proceso tiene su propia caché; para un solo uvicorn es suficiente.
 """
+
 import json
 import threading
 import time

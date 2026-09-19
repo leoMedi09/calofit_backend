@@ -9,6 +9,7 @@ Flujo con fallback LLM (NUEVO):
   5. *** LLM Estimación (NUEVO) → guarda en BD para consistencia ***
   6. Registra como pendiente (último recurso)
 """
+
 from __future__ import annotations
 
 from typing import Optional, Dict, Any, List
@@ -88,7 +89,7 @@ class FoodSourceResolver:
                     nombre=nombre_ingrediente,
                     macros_100g=cached_macros,
                     gramos=gramos,
-                    source='Cache',
+                    source="Cache",
                     confianza=90,
                     alimento_id=cached_alimento_id,
                 )
@@ -99,19 +100,18 @@ class FoodSourceResolver:
             self.cache_manager.guardar_en_cache(
                 food_normalized=nombre_norm,
                 user_id=user_id,
-                macros=resultado_bd['macros'],
-                source='BD',
-                alimento_id=resultado_bd['id'],
+                macros=resultado_bd["macros"],
+                source="BD",
+                alimento_id=resultado_bd["id"],
             )
             return self._construir_resultado(
                 nombre=nombre_ingrediente,
-                alimento_id=resultado_bd['id'],
-                macros_100g=resultado_bd['macros'],
+                alimento_id=resultado_bd["id"],
+                macros_100g=resultado_bd["macros"],
                 gramos=gramos,
-                source='BD',
+                source="BD",
                 confianza=95,
             )
-
 
         resultado_llm = self._estimar_con_llm(nombre_norm, nombre_ingrediente)
         if resultado_llm:
@@ -120,13 +120,13 @@ class FoodSourceResolver:
                 nombre=nombre_ingrediente,
                 nombre_norm=nombre_norm,
                 macros=resultado_llm,
-                source='LLM_Estimado',
+                source="LLM_Estimado",
             )
             self.cache_manager.guardar_en_cache(
                 food_normalized=nombre_norm,
                 user_id=user_id,
                 macros=resultado_llm,
-                source='LLM_Estimado',
+                source="LLM_Estimado",
                 alimento_id=alimento_id,
             )
             return self._construir_resultado(
@@ -134,7 +134,7 @@ class FoodSourceResolver:
                 alimento_id=alimento_id,
                 macros_100g=resultado_llm,
                 gramos=gramos,
-                source='LLM_Estimado',
+                source="LLM_Estimado",
                 confianza=65,
                 advertencias=[
                     f"'{nombre_ingrediente}' estimado por IA — valores aproximados. "
@@ -146,18 +146,17 @@ class FoodSourceResolver:
         self._registrar_sin_resolver(nombre=nombre_norm, user_id=user_id)
 
         return {
-            'exito': False,
-            'nombre': nombre_ingrediente,
-            'gramos': gramos or 100,
-            'alimento_id': None,
-            'macros_100g': None,
-            'macros_totales': None,
-            'source': 'Nutricionista (pendiente)',
-            'confianza': 0,
-            'fingerprint': None,
-            'advertencias': [
-                f"Ingrediente '{nombre_ingrediente}' no se pudo resolver. "
-                "Registrado para validación del nutricionista."
+            "exito": False,
+            "nombre": nombre_ingrediente,
+            "gramos": gramos or 100,
+            "alimento_id": None,
+            "macros_100g": None,
+            "macros_totales": None,
+            "source": "Nutricionista (pendiente)",
+            "confianza": 0,
+            "fingerprint": None,
+            "advertencias": [
+                f"Ingrediente '{nombre_ingrediente}' no se pudo resolver. Registrado para validación del nutricionista."
             ],
         }
 
@@ -169,13 +168,12 @@ class FoodSourceResolver:
         """Resuelve múltiples ingredientes eficientemente."""
         return [
             self.resolver_ingrediente(
-                nombre_ingrediente=ing['nombre'],
+                nombre_ingrediente=ing["nombre"],
                 user_id=user_id,
-                gramos=ing.get('gramos', 100),
+                gramos=ing.get("gramos", 100),
             )
             for ing in ingredientes
         ]
-
 
     def _estimar_con_llm(
         self,
@@ -220,6 +218,7 @@ class FoodSourceResolver:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
                     import concurrent.futures
+
                     with concurrent.futures.ThreadPoolExecutor() as pool:
                         future = pool.submit(
                             asyncio.run,
@@ -227,22 +226,16 @@ class FoodSourceResolver:
                         )
                         respuesta = future.result(timeout=10)
                 else:
-                    respuesta = loop.run_until_complete(
-                        llm.completar(prompt=prompt, max_tokens=200)
-                    )
+                    respuesta = loop.run_until_complete(llm.completar(prompt=prompt, max_tokens=200))
             except Exception:
-                respuesta = asyncio.run(
-                    llm.completar(prompt=prompt, max_tokens=200)
-                )
+                respuesta = asyncio.run(llm.completar(prompt=prompt, max_tokens=200))
 
             if not respuesta:
                 return None
 
             macros = self._extraer_json_macros(respuesta)
             if macros and self._validar_macros_estimadas(macros):
-                logger.info(
-                    f"LLM estimó '{nombre_norm}': {macros.get('calorias_100g')} kcal/100g"
-                )
+                logger.info(f"LLM estimó '{nombre_norm}': {macros.get('calorias_100g')} kcal/100g")
                 return macros
 
             return None
@@ -263,7 +256,7 @@ class FoodSourceResolver:
         except Exception:
             pass
 
-        match = re.search(r'\{[^{}]+\}', texto, re.DOTALL)
+        match = re.search(r"\{[^{}]+\}", texto, re.DOTALL)
         if match:
             try:
                 data = json_lib.loads(match.group())
@@ -276,20 +269,22 @@ class FoodSourceResolver:
     def _normalizar_macros(self, data: dict) -> Optional[Dict[str, float]]:
         """Normaliza y valida el dict de macros del LLM."""
         required = {
-            'calorias_100g', 'proteina_100g',
-            'carbohidratos_100g', 'grasas_100g',
+            "calorias_100g",
+            "proteina_100g",
+            "carbohidratos_100g",
+            "grasas_100g",
         }
         if not required.issubset(data.keys()):
             return None
 
         try:
             return {
-                'calorias_100g': max(0.0, float(data.get('calorias_100g') or 0)),
-                'proteina_100g': max(0.0, float(data.get('proteina_100g') or 0)),
-                'carbohidratos_100g': max(0.0, float(data.get('carbohidratos_100g') or 0)),
-                'grasas_100g': max(0.0, float(data.get('grasas_100g') or 0)),
-                'fibra_100g': max(0.0, float(data.get('fibra_100g') or 0)),
-                'azucar_100g': max(0.0, float(data.get('azucar_100g') or 0)),
+                "calorias_100g": max(0.0, float(data.get("calorias_100g") or 0)),
+                "proteina_100g": max(0.0, float(data.get("proteina_100g") or 0)),
+                "carbohidratos_100g": max(0.0, float(data.get("carbohidratos_100g") or 0)),
+                "grasas_100g": max(0.0, float(data.get("grasas_100g") or 0)),
+                "fibra_100g": max(0.0, float(data.get("fibra_100g") or 0)),
+                "azucar_100g": max(0.0, float(data.get("azucar_100g") or 0)),
             }
         except (TypeError, ValueError):
             return None
@@ -299,10 +294,10 @@ class FoodSourceResolver:
         Valida que las macros estimadas tengan sentido físico.
         Aplica la regla de Atwater: 4*P + 4*C + 9*G ≈ kcal (±30%).
         """
-        kcal = macros.get('calorias_100g', 0)
-        prot = macros.get('proteina_100g', 0)
-        carb = macros.get('carbohidratos_100g', 0)
-        gras = macros.get('grasas_100g', 0)
+        kcal = macros.get("calorias_100g", 0)
+        prot = macros.get("proteina_100g", 0)
+        carb = macros.get("carbohidratos_100g", 0)
+        gras = macros.get("grasas_100g", 0)
 
         if kcal < 0 or kcal > 900:
             return False
@@ -315,9 +310,7 @@ class FoodSourceResolver:
         if kcal_calc > 0:
             ratio = kcal / kcal_calc
             if ratio < 0.5 or ratio > 2.0:
-                logger.warning(
-                    f"Macros LLM no pasan Atwater: {kcal}kcal vs {kcal_calc}kcal calculadas"
-                )
+                logger.warning(f"Macros LLM no pasan Atwater: {kcal}kcal vs {kcal_calc}kcal calculadas")
                 return False
 
         return True
@@ -335,9 +328,7 @@ class FoodSourceResolver:
         Retorna el ID del alimento creado o None si falla.
         """
         try:
-            existente = self.db.query(Alimento).filter(
-                Alimento.nombre_normalizado == nombre_norm
-            ).first()
+            existente = self.db.query(Alimento).filter(Alimento.nombre_normalizado == nombre_norm).first()
 
             if existente:
                 logger.info(f"Alimento ya existe en BD: {nombre_norm} (ID={existente.id})")
@@ -346,12 +337,12 @@ class FoodSourceResolver:
             nuevo = Alimento(
                 nombre=nombre.title(),
                 nombre_normalizado=nombre_norm,
-                calorias_100g=macros['calorias_100g'],
-                proteina_100g=macros['proteina_100g'],
-                carbohidratos_100g=macros['carbohidratos_100g'],
-                grasas_100g=macros['grasas_100g'],
-                fibra_100g=macros.get('fibra_100g', 0.0),
-                azucar_100g=macros.get('azucar_100g', 0.0),
+                calorias_100g=macros["calorias_100g"],
+                proteina_100g=macros["proteina_100g"],
+                carbohidratos_100g=macros["carbohidratos_100g"],
+                grasas_100g=macros["grasas_100g"],
+                fibra_100g=macros.get("fibra_100g", 0.0),
+                azucar_100g=macros.get("azucar_100g", 0.0),
                 fuente=source,
                 es_confiable=False,
             )
@@ -375,12 +366,12 @@ class FoodSourceResolver:
             return self._llm
         try:
             from app.services.ai.llm_service import LLMService
+
             self._llm = LLMService()
             return self._llm
         except Exception as exc:
             logger.warning(f"LLMService no disponible: {exc}")
             return None
-
 
     def _normalizar_nombre(self, nombre: str) -> str:
         """Normaliza nombre para búsqueda."""
@@ -402,15 +393,15 @@ class FoodSourceResolver:
 
         def _row_to_dict(row) -> Dict:
             return {
-                'id': row[0],
-                'nombre': row[1],
-                'macros': {
-                    'calorias_100g':      float(row[2] or 0),
-                    'proteina_100g':      float(row[3] or 0),
-                    'carbohidratos_100g': float(row[4] or 0),
-                    'grasas_100g':        float(row[5] or 0),
-                    'fibra_100g':         float(row[6] or 0),
-                    'azucar_100g':        float(row[7] or 0),
+                "id": row[0],
+                "nombre": row[1],
+                "macros": {
+                    "calorias_100g": float(row[2] or 0),
+                    "proteina_100g": float(row[3] or 0),
+                    "carbohidratos_100g": float(row[4] or 0),
+                    "grasas_100g": float(row[5] or 0),
+                    "fibra_100g": float(row[6] or 0),
+                    "azucar_100g": float(row[7] or 0),
                 },
             }
 
@@ -425,27 +416,23 @@ class FoodSourceResolver:
             if not tokens:
                 return None
 
-            conds = " AND ".join([
-                f"unaccent(lower(nombre_normalizado)) ~* "
-                f"('(^| )' || unaccent(lower(:t{i})) || '( |$)')"
-                for i in range(len(tokens))
-            ])
-            params = {f't{i}': tok for i, tok in enumerate(tokens)}
+            conds = " AND ".join(
+                [
+                    f"unaccent(lower(nombre_normalizado)) ~* ('(^| )' || unaccent(lower(:t{i})) || '( |$)')"
+                    for i in range(len(tokens))
+                ]
+            )
+            params = {f"t{i}": tok for i, tok in enumerate(tokens)}
 
             row = self.db.execute(
-                sql_text(
-                    f"{_SELECT} WHERE {conds} "
-                    "ORDER BY length(nombre_normalizado) ASC LIMIT 1"
-                ),
+                sql_text(f"{_SELECT} WHERE {conds} ORDER BY length(nombre_normalizado) ASC LIMIT 1"),
                 params,
             ).fetchone()
 
             if row:
                 return _row_to_dict(row)
 
-            alias = self.db.query(AlimentoAlias).filter(
-                AlimentoAlias.alias == nombre_norm
-            ).first()
+            alias = self.db.query(AlimentoAlias).filter(AlimentoAlias.alias == nombre_norm).first()
             if alias:
                 row = self.db.execute(
                     sql_text(f"{_SELECT} WHERE id = :aid LIMIT 1"),
@@ -471,11 +458,15 @@ class FoodSourceResolver:
     def _registrar_sin_resolver(self, nombre: str, user_id: int) -> bool:
         """Registra alimento que no se pudo resolver."""
         try:
-            existing = self.db.query(AlimentoSinResolver).filter(
-                AlimentoSinResolver.nombre_normalizado == nombre,
-                AlimentoSinResolver.user_id == user_id,
-                AlimentoSinResolver.estado == 'pendiente',
-            ).first()
+            existing = (
+                self.db.query(AlimentoSinResolver)
+                .filter(
+                    AlimentoSinResolver.nombre_normalizado == nombre,
+                    AlimentoSinResolver.user_id == user_id,
+                    AlimentoSinResolver.estado == "pendiente",
+                )
+                .first()
+            )
 
             if existing:
                 existing.intentos = (existing.intentos or 0) + 1
@@ -486,7 +477,7 @@ class FoodSourceResolver:
                 nombre_original=nombre,
                 nombre_normalizado=nombre,
                 user_id=user_id,
-                estado='pendiente',
+                estado="pendiente",
             )
             self.db.add(sin_resolver)
             self.db.commit()
@@ -496,7 +487,6 @@ class FoodSourceResolver:
             logger.error(f"Error registrando sin resolver: {exc}")
             self.db.rollback()
             return False
-
 
     def _construir_resultado(
         self,
@@ -511,30 +501,30 @@ class FoodSourceResolver:
         """Construye resultado de resolución."""
         gramos = gramos or 100
         macros_totales = {
-            'calorias':       (macros_100g.get('calorias_100g', 0) / 100) * gramos,
-            'proteina':       (macros_100g.get('proteina_100g', 0) / 100) * gramos,
-            'carbohidratos':  (macros_100g.get('carbohidratos_100g', 0) / 100) * gramos,
-            'grasas':         (macros_100g.get('grasas_100g', 0) / 100) * gramos,
+            "calorias": (macros_100g.get("calorias_100g", 0) / 100) * gramos,
+            "proteina": (macros_100g.get("proteina_100g", 0) / 100) * gramos,
+            "carbohidratos": (macros_100g.get("carbohidratos_100g", 0) / 100) * gramos,
+            "grasas": (macros_100g.get("grasas_100g", 0) / 100) * gramos,
         }
 
         fingerprint = FingerprintGenerator.generar_fingerprint_alimento(
             nombre=nombre,
-            calorias_100g=macros_100g.get('calorias_100g', 0),
-            proteina_100g=macros_100g.get('proteina_100g', 0),
-            carbohidratos_100g=macros_100g.get('carbohidratos_100g', 0),
-            grasas_100g=macros_100g.get('grasas_100g', 0),
+            calorias_100g=macros_100g.get("calorias_100g", 0),
+            proteina_100g=macros_100g.get("proteina_100g", 0),
+            carbohidratos_100g=macros_100g.get("carbohidratos_100g", 0),
+            grasas_100g=macros_100g.get("grasas_100g", 0),
             source=source,
         )
 
         return {
-            'exito': True,
-            'nombre': nombre,
-            'gramos': gramos,
-            'alimento_id': alimento_id,
-            'macros_100g': macros_100g,
-            'macros_totales': macros_totales,
-            'source': source,
-            'confianza': confianza,
-            'fingerprint': fingerprint,
-            'advertencias': advertencias or [],
+            "exito": True,
+            "nombre": nombre,
+            "gramos": gramos,
+            "alimento_id": alimento_id,
+            "macros_100g": macros_100g,
+            "macros_totales": macros_totales,
+            "source": source,
+            "confianza": confianza,
+            "fingerprint": fingerprint,
+            "advertencias": advertencias or [],
         }

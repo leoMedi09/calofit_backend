@@ -1,6 +1,7 @@
 """
 Clase base para todos los validadores.
 """
+
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
@@ -21,10 +22,7 @@ class ValidationResult(BaseModel):
             object.__setattr__(self, "timestamp", datetime.utcnow())
 
     def __repr__(self) -> str:
-        return (
-            f"<ValidationResult(valido={self.es_valido}, "
-            f"confianza={self.confianza}, errores={len(self.errores)})>"
-        )
+        return f"<ValidationResult(valido={self.es_valido}, confianza={self.confianza}, errores={len(self.errores)})>"
 
 
 class BaseValidator(ABC):

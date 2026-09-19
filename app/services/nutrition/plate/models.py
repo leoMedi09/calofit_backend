@@ -1,6 +1,7 @@
 """
 DTOs (Data Transfer Objects) para platos.
 """
+
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 from app.services.validators.base_validator import ValidationResult
@@ -8,6 +9,7 @@ from app.services.validators.base_validator import ValidationResult
 
 class IngredienteDTO(BaseModel):
     """DTO para un ingrediente en un plato."""
+
     nombre: str
     gramos: float = Field(gt=0)
     alimento_id: Optional[int] = None
@@ -23,6 +25,7 @@ ValidationResultDTO = ValidationResult
 
 class MacrosDTO(BaseModel):
     """Macros totales."""
+
     calorias: float
     proteina: float
     carbohidratos: float
@@ -33,6 +36,7 @@ class MacrosDTO(BaseModel):
 
 class PlatoConstructionResultDTO(BaseModel):
     """Resultado de construcción de plato."""
+
     exito: bool
     plato_id: Optional[int] = None
     nombre: str

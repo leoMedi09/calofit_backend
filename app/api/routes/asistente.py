@@ -50,7 +50,7 @@ class RegistroManualAlimentoRequest(BaseModel):
 class CalcularEjercicioRequest(BaseModel):
     nombre: str
     series: int = 0
-    reps:   int = 0
+    reps: int = 0
     peso_kg: float = 0.0
     duracion_min: float = 0.0
 
@@ -82,10 +82,10 @@ def _cargar_historial_bd(client_id: int, db: Session, limite: int = 8) -> list:
     from sqlalchemy import text as _t
     from datetime import datetime, timezone, timedelta
 
-    last_row = db.execute(_t(
-        "SELECT created_at FROM chat_historial "
-        "WHERE client_id = :cid ORDER BY created_at DESC LIMIT 1"
-    ), {"cid": client_id}).fetchone()
+    last_row = db.execute(
+        _t("SELECT created_at FROM chat_historial WHERE client_id = :cid ORDER BY created_at DESC LIMIT 1"),
+        {"cid": client_id},
+    ).fetchone()
 
     if not last_row:
         return []
@@ -97,28 +97,34 @@ def _cargar_historial_bd(client_id: int, db: Session, limite: int = 8) -> list:
     if (now_utc - last_ts) > timedelta(hours=2):
         return []
 
-    rows = db.execute(_t(
-        "SELECT rol, contenido FROM chat_historial "
-        "WHERE client_id = :cid ORDER BY created_at DESC LIMIT :n"
-    ), {"cid": client_id, "n": limite}).fetchall()
+    rows = db.execute(
+        _t("SELECT rol, contenido FROM chat_historial WHERE client_id = :cid ORDER BY created_at DESC LIMIT :n"),
+        {"cid": client_id, "n": limite},
+    ).fetchall()
     return [{"role": r.rol, "content": r.contenido} for r in reversed(rows)]
 
 
 def _guardar_turno_bd(client_id: int, mensaje_user: str, texto_asistente: str, db: Session):
     """Persiste un turno completo (user + assistant) en chat_historial."""
     from sqlalchemy import text as _t
+
     try:
-        db.execute(_t(
-            "INSERT INTO chat_historial (client_id, rol, contenido) VALUES (:cid, :rol, :cont)"
-        ), {"cid": client_id, "rol": "user", "cont": mensaje_user[:2000]})
-        db.execute(_t(
-            "INSERT INTO chat_historial (client_id, rol, contenido) VALUES (:cid, :rol, :cont)"
-        ), {"cid": client_id, "rol": "assistant", "cont": texto_asistente[:2000]})
-        db.execute(_t(
-            "DELETE FROM chat_historial WHERE client_id = :cid AND id NOT IN ("
-            "  SELECT id FROM chat_historial WHERE client_id = :cid "
-            "  ORDER BY created_at DESC LIMIT 100)"
-        ), {"cid": client_id})
+        db.execute(
+            _t("INSERT INTO chat_historial (client_id, rol, contenido) VALUES (:cid, :rol, :cont)"),
+            {"cid": client_id, "rol": "user", "cont": mensaje_user[:2000]},
+        )
+        db.execute(
+            _t("INSERT INTO chat_historial (client_id, rol, contenido) VALUES (:cid, :rol, :cont)"),
+            {"cid": client_id, "rol": "assistant", "cont": texto_asistente[:2000]},
+        )
+        db.execute(
+            _t(
+                "DELETE FROM chat_historial WHERE client_id = :cid AND id NOT IN ("
+                "  SELECT id FROM chat_historial WHERE client_id = :cid "
+                "  ORDER BY created_at DESC LIMIT 100)"
+            ),
+            {"cid": client_id},
+        )
         db.commit()
     except Exception:
         db.rollback()
@@ -135,9 +141,7 @@ async def consultar_asistente(
         cliente = db.query(Client).filter(Client.email == current_user.email).first()
 
         historial_sesion = request.historial or []
-        historial_combinado = historial_sesion or (
-            _cargar_historial_bd(cliente.id, db) if cliente else []
-        )
+        historial_combinado = historial_sesion or (_cargar_historial_bd(cliente.id, db) if cliente else [])
 
         resultado = await asistente_service.consultar(
             mensaje=request.mensaje,
@@ -150,9 +154,8 @@ async def consultar_asistente(
         )
 
         if cliente and not resultado.get("_blocked"):
-            texto_resp = (
-                resultado.get("respuesta_estructurada", {}).get("texto_conversacional", "")
-                or resultado.get("respuesta", "")
+            texto_resp = resultado.get("respuesta_estructurada", {}).get("texto_conversacional", "") or resultado.get(
+                "respuesta", ""
             )
             if texto_resp:
                 _guardar_turno_bd(cliente.id, request.mensaje, texto_resp, db)
@@ -173,13 +176,17 @@ async def obtener_historial_chat(
 ):
     """Devuelve los últimos mensajes del chat para restaurar conversación entre sesiones."""
     from sqlalchemy import text as _t
+
     cliente = db.query(Client).filter(Client.email == current_user.email).first()
     if not cliente:
         return []
-    rows = db.execute(_t(
-        "SELECT rol, contenido, created_at FROM chat_historial "
-        "WHERE client_id = :cid ORDER BY created_at DESC LIMIT :n"
-    ), {"cid": cliente.id, "n": min(limite, 60)}).fetchall()
+    rows = db.execute(
+        _t(
+            "SELECT rol, contenido, created_at FROM chat_historial "
+            "WHERE client_id = :cid ORDER BY created_at DESC LIMIT :n"
+        ),
+        {"cid": cliente.id, "n": min(limite, 60)},
+    ).fetchall()
     return [
         {
             "role": r.rol,
@@ -251,42 +258,49 @@ async def registrar_macros_directos(
         raise HTTPException(status_code=404, detail="Perfil no encontrado")
 
     hoy = get_peru_date()
-    kcal_total  = round(sum(a.kcal          for a in body.alimentos), 1)
-    prot_total  = round(sum(a.proteinas_g   for a in body.alimentos), 1)
-    carb_total  = round(sum(a.carbohidratos_g for a in body.alimentos), 1)
-    grasa_total = round(sum(a.grasas_g      for a in body.alimentos), 1)
+    kcal_total = round(sum(a.kcal for a in body.alimentos), 1)
+    prot_total = round(sum(a.proteinas_g for a in body.alimentos), 1)
+    carb_total = round(sum(a.carbohidratos_g for a in body.alimentos), 1)
+    grasa_total = round(sum(a.grasas_g for a in body.alimentos), 1)
 
     try:
-        prog = db.query(ProgresoCalorias).filter(
-            ProgresoCalorias.client_id == perfil.id,
-            ProgresoCalorias.fecha == hoy,
-        ).first()
+        prog = (
+            db.query(ProgresoCalorias)
+            .filter(
+                ProgresoCalorias.client_id == perfil.id,
+                ProgresoCalorias.fecha == hoy,
+            )
+            .first()
+        )
         if not prog:
             prog = ProgresoCalorias(client_id=perfil.id, fecha=hoy)
             db.add(prog)
-        prog.calorias_consumidas      = int((prog.calorias_consumidas or 0)      + kcal_total)
-        prog.proteinas_consumidas     = round((prog.proteinas_consumidas or 0)   + prot_total, 1)
+        prog.calorias_consumidas = int((prog.calorias_consumidas or 0) + kcal_total)
+        prog.proteinas_consumidas = round((prog.proteinas_consumidas or 0) + prot_total, 1)
         prog.carbohidratos_consumidos = round((prog.carbohidratos_consumidos or 0) + carb_total, 1)
-        prog.grasas_consumidas        = round((prog.grasas_consumidas or 0)      + grasa_total, 1)
+        prog.grasas_consumidas = round((prog.grasas_consumidas or 0) + grasa_total, 1)
 
         for item in body.alimentos:
-            db.add(ComidaRegistro(
-                client_id=perfil.id,
-                fecha=hoy,
-                nombre_alimento=item.nombre,
-                kcal=item.kcal,
-                proteina_g=item.proteinas_g,
-                carbohidratos_g=item.carbohidratos_g,
-                grasas_g=item.grasas_g,
-                tipo_resolucion="manual_exacto",
-                confianza=1.0,
-                texto_original=body.texto_original[:490] if body.texto_original else "",
-            ))
+            db.add(
+                ComidaRegistro(
+                    client_id=perfil.id,
+                    fecha=hoy,
+                    nombre_alimento=item.nombre,
+                    kcal=item.kcal,
+                    proteina_g=item.proteinas_g,
+                    carbohidratos_g=item.carbohidratos_g,
+                    grasas_g=item.grasas_g,
+                    tipo_resolucion="manual_exacto",
+                    confianza=1.0,
+                    texto_original=body.texto_original[:490] if body.texto_original else "",
+                )
+            )
 
         db.commit()
 
         from app.core.notification_scheduler import notificar_si_excede_meta
         from app.services.asistente.asistente_plan import obtener_meta_calorica_hoy
+
         notificar_si_excede_meta(perfil, prog, obtener_meta_calorica_hoy(perfil, db))
         db.commit()
 
@@ -294,7 +308,8 @@ async def registrar_macros_directos(
             "success": True,
             "mensaje": f"✅ Registré {len(body.alimentos)} ingrediente(s) — {round(kcal_total)} kcal totales.",
             "datos": {
-                "nombre": " + ".join(a.nombre for a in body.alimentos[:3]) + (f" y {len(body.alimentos)-3} más" if len(body.alimentos) > 3 else ""),
+                "nombre": " + ".join(a.nombre for a in body.alimentos[:3])
+                + (f" y {len(body.alimentos) - 3} más" if len(body.alimentos) > 3 else ""),
                 "alimentos_lista": [a.nombre for a in body.alimentos],
                 "calorias": kcal_total,
                 "proteinas_g": prot_total,
@@ -413,34 +428,38 @@ async def guardar_sugerencia(
                 m = _re.search(pattern, text or "")
                 return float(m.group(1)) if m else 0.0
 
-            _cal  = _parse_macro(r"Cal:\s*([\d.]+)", body.macros)
-            _prot = _parse_macro(r"P:\s*([\d.]+)",   body.macros)
-            _carb = _parse_macro(r"C:\s*([\d.]+)",   body.macros)
-            _gras = _parse_macro(r"G:\s*([\d.]+)",   body.macros)
+            _cal = _parse_macro(r"Cal:\s*([\d.]+)", body.macros)
+            _prot = _parse_macro(r"P:\s*([\d.]+)", body.macros)
+            _carb = _parse_macro(r"C:\s*([\d.]+)", body.macros)
+            _gras = _parse_macro(r"G:\s*([\d.]+)", body.macros)
 
-            pref = db.query(PreferenciaAlimento).filter(
-                PreferenciaAlimento.client_id == perfil.id,
-                PreferenciaAlimento.alimento   == nombre_lower,
-            ).first()
+            pref = (
+                db.query(PreferenciaAlimento)
+                .filter(
+                    PreferenciaAlimento.client_id == perfil.id,
+                    PreferenciaAlimento.alimento == nombre_lower,
+                )
+                .first()
+            )
 
             if pref:
-                pref.es_favorito    = 1
-                pref.frecuencia     = (pref.frecuencia or 0) + 1
-                pref.calorias       = _cal  if _cal  > 0 else (pref.calorias or 0)
-                pref.proteinas      = _prot if _prot > 0 else (pref.proteinas or 0)
-                pref.carbohidratos  = _carb if _carb > 0 else (pref.carbohidratos or 0)
-                pref.grasas         = _gras if _gras > 0 else (pref.grasas or 0)
+                pref.es_favorito = 1
+                pref.frecuencia = (pref.frecuencia or 0) + 1
+                pref.calorias = _cal if _cal > 0 else (pref.calorias or 0)
+                pref.proteinas = _prot if _prot > 0 else (pref.proteinas or 0)
+                pref.carbohidratos = _carb if _carb > 0 else (pref.carbohidratos or 0)
+                pref.grasas = _gras if _gras > 0 else (pref.grasas or 0)
             else:
                 pref = PreferenciaAlimento(
-                    client_id      = perfil.id,
-                    alimento       = nombre_lower,
-                    es_favorito    = 1,
-                    frecuencia     = 1,
-                    puntuacion     = 1.0,
-                    calorias       = _cal,
-                    proteinas      = _prot,
-                    carbohidratos  = _carb,
-                    grasas         = _gras,
+                    client_id=perfil.id,
+                    alimento=nombre_lower,
+                    es_favorito=1,
+                    frecuencia=1,
+                    puntuacion=1.0,
+                    calorias=_cal,
+                    proteinas=_prot,
+                    carbohidratos=_carb,
+                    grasas=_gras,
                 )
                 db.add(pref)
 
@@ -463,21 +482,27 @@ async def listar_sugerencias(
         if not perfil:
             raise HTTPException(status_code=404, detail="Perfil no encontrado")
 
-        items = db.query(SugerenciaGuardada).filter(
-            SugerenciaGuardada.client_id == perfil.id
-        ).order_by(SugerenciaGuardada.fecha_guardado.desc()).all()
+        items = (
+            db.query(SugerenciaGuardada)
+            .filter(SugerenciaGuardada.client_id == perfil.id)
+            .order_by(SugerenciaGuardada.fecha_guardado.desc())
+            .all()
+        )
 
-        return [{
-            "id": s.id,
-            "tipo": s.tipo,
-            "nombre": s.nombre,
-            "ingredientes": s.ingredientes or [],
-            "preparacion": s.preparacion or [],
-            "macros": s.macros or "",
-            "nota": s.nota or "",
-            "completada": s.completada,
-            "fecha_guardado": str(s.fecha_guardado),
-        } for s in items]
+        return [
+            {
+                "id": s.id,
+                "tipo": s.tipo,
+                "nombre": s.nombre,
+                "ingredientes": s.ingredientes or [],
+                "preparacion": s.preparacion or [],
+                "macros": s.macros or "",
+                "nota": s.nota or "",
+                "completada": s.completada,
+                "fecha_guardado": str(s.fecha_guardado),
+            }
+            for s in items
+        ]
     except Exception as e:
         logger.error("ERROR en /mis-sugerencias: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno al listar las sugerencias")
@@ -492,10 +517,14 @@ async def completar_sugerencia(
     """Marca una sugerencia como completada (ya la preparó/hizo)."""
     try:
         perfil = db.query(Client).filter(Client.email == current_user.email).first()
-        item = db.query(SugerenciaGuardada).filter(
-            SugerenciaGuardada.id == sugerencia_id,
-            SugerenciaGuardada.client_id == perfil.id,
-        ).first()
+        item = (
+            db.query(SugerenciaGuardada)
+            .filter(
+                SugerenciaGuardada.id == sugerencia_id,
+                SugerenciaGuardada.client_id == perfil.id,
+            )
+            .first()
+        )
         if not item:
             raise HTTPException(status_code=404, detail="Sugerencia no encontrada")
         item.completada = True
@@ -517,10 +546,14 @@ async def eliminar_sugerencia(
     """Elimina una sugerencia guardada."""
     try:
         perfil = db.query(Client).filter(Client.email == current_user.email).first()
-        item = db.query(SugerenciaGuardada).filter(
-            SugerenciaGuardada.id == sugerencia_id,
-            SugerenciaGuardada.client_id == perfil.id,
-        ).first()
+        item = (
+            db.query(SugerenciaGuardada)
+            .filter(
+                SugerenciaGuardada.id == sugerencia_id,
+                SugerenciaGuardada.client_id == perfil.id,
+            )
+            .first()
+        )
         if not item:
             raise HTTPException(status_code=404, detail="Sugerencia no encontrada")
         db.delete(item)
@@ -560,6 +593,7 @@ async def mi_racha(
         fechas = sorted({r.fecha for r in fechas_raw}, reverse=True)
 
         from app.core.utils import get_peru_date
+
         hoy = get_peru_date()
         registrado_hoy = bool(fechas and fechas[0] == hoy)
 

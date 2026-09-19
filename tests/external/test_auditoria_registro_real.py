@@ -15,6 +15,7 @@ de la corrida por defecto (`pytest tests/` usa `-m "not external"`, ver
 tests/pytest.ini). Ejecutar a mano con:
     pytest tests/external/test_auditoria_registro_real.py -v
 """
+
 import asyncio
 
 import pytest
@@ -85,18 +86,18 @@ def _aislar_cache_por_test():
 @pytest.mark.integration
 @pytest.mark.external
 class TestAuditoriaRegistroReal:
-
     @pytest.mark.asyncio
     async def test_caso1_batido_contenedor_e_ingredientes(self, db, sample_client, plan_hoy):
         diag = await _registrar(
             "Me hice un batido de avena, leche, dos plátanos, miel",
-            sample_client, plan_hoy, db,
+            sample_client,
+            plan_hoy,
+            db,
         )
         nombres_norm = _normalizar_lista(diag["alimentos"])
         tiene_contenedor = any("batido" in n for n in nombres_norm)
         ingredientes_sueltos = [
-            n for n in nombres_norm
-            if any(ing in n for ing in ("avena", "leche", "plátano", "platano", "miel"))
+            n for n in nombres_norm if any(ing in n for ing in ("avena", "leche", "plátano", "platano", "miel"))
         ]
         duplicado = tiene_contenedor and len(ingredientes_sueltos) >= 2
 
@@ -110,7 +111,10 @@ class TestAuditoriaRegistroReal:
     @pytest.mark.asyncio
     async def test_caso2_alimento_inexistente_umas(self, db, sample_client, plan_hoy):
         diag = await _registrar(
-            "Comí tres umas y dos tazas de café", sample_client, plan_hoy, db,
+            "Comí tres umas y dos tazas de café",
+            sample_client,
+            plan_hoy,
+            db,
         )
         nombres_norm = _normalizar_lista(diag["alimentos"])
         tiene_umas = any("uma" in n for n in nombres_norm)
@@ -122,10 +126,13 @@ class TestAuditoriaRegistroReal:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("mensaje", [
-        "Hoy en el desayuno comí avena",
-        "Registré mi almuerzo",
-    ])
+    @pytest.mark.parametrize(
+        "mensaje",
+        [
+            "Hoy en el desayuno comí avena",
+            "Registré mi almuerzo",
+        ],
+    )
     async def test_caso3_momento_dia_no_es_alimento(self, db, sample_client, plan_hoy, mensaje):
         diag = await _registrar(mensaje, sample_client, plan_hoy, db)
         nombres_norm = _normalizar_lista(diag["alimentos"])
@@ -194,7 +201,9 @@ class TestAuditoriaRegistroReal:
     async def test_caso5_gramaje_explicito_macros_razonables(self, db, sample_client, plan_hoy):
         diag = await _registrar(
             "arroz y cerdo 200gr + ensalada con medio pepinillo + media palta",
-            sample_client, plan_hoy, db,
+            sample_client,
+            plan_hoy,
+            db,
         )
         kcal = diag["kcal"] or 0
         prot = diag["prot_g"] or 0
@@ -215,10 +224,7 @@ class TestAuditoriaRegistroReal:
         nombres_norm = _normalizar_lista(diag["alimentos"])
         tiene_multiplicador = any("×2" in n or "x2" in n for n in nombres_norm)
 
-        filas_mandarina = [
-            f for f in diag["filas_comida_registro_recientes"]
-            if "mandarin" in f[0].lower()
-        ]
+        filas_mandarina = [f for f in diag["filas_comida_registro_recientes"] if "mandarin" in f[0].lower()]
 
         assert tiene_multiplicador or len(filas_mandarina) == 2, (
             f"BUG CONFIRMADO (Caso 6): 'dos mandarinas' no se refleja como x2 — "

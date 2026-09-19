@@ -6,32 +6,32 @@ from app.core.security import security
 from app.schemas.user import UserCreate, StaffSelfUpdate
 from app.api.routes.auth import get_current_user
 from app.core.local_storage import local_storage
-from datetime import datetime 
+from datetime import datetime
 
 router = APIRouter()
 
+
 @router.post("/perfil/foto")
 async def subir_foto_perfil(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """Sube una foto de perfil localmente y actualiza la URL en la base de datos"""
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="El archivo debe ser una imagen")
-    
+
     file_bytes = await file.read()
-    
+
     if current_user.profile_picture_url:
         local_storage.delete_file(current_user.profile_picture_url)
-    
+
     relative_path = local_storage.save_file(file_bytes, file.filename)
     public_url = local_storage.get_public_url(relative_path)
-    
+
     current_user.profile_picture_url = public_url
     db.commit()
-    
+
     return {"message": "Foto de perfil actualizada exitosamente", "url": public_url}
+
 
 @router.post("/registrar", status_code=201)
 async def registrar_usuario(
@@ -61,6 +61,7 @@ async def registrar_usuario(
 
     try:
         from app.services.email_service import EmailService
+
         admin_name = f"{current_user.first_name} {current_user.last_name_paternal}".strip()
         staff_name = f"{nuevo_usuario.first_name} {nuevo_usuario.last_name_paternal}".strip()
         EmailService.send_welcome_staff_brevo(
@@ -74,8 +75,8 @@ async def registrar_usuario(
         print(f"⚠️ No se pudo enviar correo de bienvenida al staff: {e}")
 
     return nuevo_usuario
-    
-    
+
+
 @router.get("/me")
 async def leer_mi_perfil(current_user: User = Depends(get_current_user)):
     """Retorna los datos del usuario logueado usando su Token JWT"""
@@ -85,14 +86,14 @@ async def leer_mi_perfil(current_user: User = Depends(get_current_user)):
             "apellido_paterno": current_user.last_name_paternal,
             "apellido_materno": current_user.last_name_maternal,
             "email": current_user.email,
-            "foto_perfil": current_user.profile_picture_url
+            "foto_perfil": current_user.profile_picture_url,
         },
         "fisico": {
             "edad": getattr(current_user, "age", None),
             "peso_kg": getattr(current_user, "weight", None),
             "talla_m": getattr(current_user, "height", None),
-            "condiciones": getattr(current_user, "medical_conditions", [])
-        }
+            "condiciones": getattr(current_user, "medical_conditions", []),
+        },
     }
 
 

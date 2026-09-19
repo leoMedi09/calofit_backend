@@ -1,22 +1,23 @@
 """
 Validador nutricional: coherencia de macros y densidad calórica.
 """
+
 from typing import Dict, Any, List, Optional
 from app.services.validators.base_validator import BaseValidator, ValidationResult
 
-_KCAL_PROT  = 4.0
-_KCAL_CARB  = 4.0
-_KCAL_GRAS  = 9.0
+_KCAL_PROT = 4.0
+_KCAL_CARB = 4.0
+_KCAL_GRAS = 9.0
 _TOLERANCIA = 0.15
 
-_DENSIDAD_MIN  =  20.0
-_DENSIDAD_MAX  = 800.0
+_DENSIDAD_MIN = 20.0
+_DENSIDAD_MAX = 800.0
 
 _TDEE_PCT: Dict[str, float] = {
     "desayuno": 0.30,
     "almuerzo": 0.40,
-    "cena":     0.30,
-    "snack":    0.15,
+    "cena": 0.30,
+    "snack": 0.15,
 }
 
 
@@ -39,22 +40,21 @@ class NutritionalValidator(BaseValidator):
         super().__init__("NutritionalValidator")
 
     def validar(self, datos: Dict[str, Any]) -> ValidationResult:
-        nombre  = datos.get("nombre_plato", "")
-        peso    = float(datos.get("peso_total_gramos", 0) or 0)
-        kcal    = float(datos.get("calorias_total", 0) or 0)
-        prot    = float(datos.get("proteina_total", 0) or 0)
-        carb    = float(datos.get("carbohidratos_total", 0) or 0)
-        gras    = float(datos.get("grasas_total", 0) or 0)
-        tdee    = float(datos.get("tdee_usuario", 0) or 0)
+        nombre = datos.get("nombre_plato", "")
+        peso = float(datos.get("peso_total_gramos", 0) or 0)
+        kcal = float(datos.get("calorias_total", 0) or 0)
+        prot = float(datos.get("proteina_total", 0) or 0)
+        carb = float(datos.get("carbohidratos_total", 0) or 0)
+        gras = float(datos.get("grasas_total", 0) or 0)
+        tdee = float(datos.get("tdee_usuario", 0) or 0)
         momento = (datos.get("momento_dia") or "almuerzo").lower()
 
-        errores:     List[str] = []
+        errores: List[str] = []
         advertencias: List[str] = []
-        sugerencias:  List[str] = []
+        sugerencias: List[str] = []
         confianza = 100
 
-        for campo, val in [("Calorías", kcal), ("Proteína", prot),
-                           ("Carbohidratos", carb), ("Grasas", gras)]:
+        for campo, val in [("Calorías", kcal), ("Proteína", prot), ("Carbohidratos", carb), ("Grasas", gras)]:
             if val < 0:
                 errores.append(f"{campo} negativo: {val}")
         if errores:
@@ -69,21 +69,17 @@ class NutritionalValidator(BaseValidator):
             if desv > _TOLERANCIA:
                 advertencias.append(
                     f"Atwater: declarado {kcal:.0f} kcal vs calculado {kcal_calc:.0f} kcal "
-                    f"(desviación {desv*100:.1f}%, tolerancia {_TOLERANCIA*100:.0f}%)"
+                    f"(desviación {desv * 100:.1f}%, tolerancia {_TOLERANCIA * 100:.0f}%)"
                 )
                 confianza -= 10
 
         if peso > 0:
             densidad = kcal / peso * 100
             if densidad < _DENSIDAD_MIN:
-                advertencias.append(
-                    f"Densidad calórica muy baja: {densidad:.1f} kcal/100g (mín {_DENSIDAD_MIN:.0f})"
-                )
+                advertencias.append(f"Densidad calórica muy baja: {densidad:.1f} kcal/100g (mín {_DENSIDAD_MIN:.0f})")
                 confianza -= 5
             elif densidad > _DENSIDAD_MAX:
-                advertencias.append(
-                    f"Densidad calórica muy alta: {densidad:.1f} kcal/100g (máx {_DENSIDAD_MAX:.0f})"
-                )
+                advertencias.append(f"Densidad calórica muy alta: {densidad:.1f} kcal/100g (máx {_DENSIDAD_MAX:.0f})")
                 confianza -= 10
         else:
             advertencias.append("Peso total no informado — no se puede calcular densidad")
@@ -102,7 +98,7 @@ class NutritionalValidator(BaseValidator):
 
         if tdee > 0:
             pct_tdee = kcal / tdee * 100
-            limite   = _TDEE_PCT.get(momento, 0.40) * 100
+            limite = _TDEE_PCT.get(momento, 0.40) * 100
             if pct_tdee > limite:
                 advertencias.append(
                     f"{momento.capitalize()}: {kcal:.0f} kcal = {pct_tdee:.1f}% del TDEE "
@@ -118,12 +114,12 @@ class NutritionalValidator(BaseValidator):
             advertencias=advertencias,
             sugerencias=sugerencias,
             metadata={
-                "nombre_plato":      nombre,
+                "nombre_plato": nombre,
                 "densidad_calorica": densidad_final,
                 "proporciones": {
-                    "proteina_pct":      round(pct_prot, 1),
+                    "proteina_pct": round(pct_prot, 1),
                     "carbohidratos_pct": round(pct_carb, 1),
-                    "grasas_pct":        round(pct_gras, 1),
+                    "grasas_pct": round(pct_gras, 1),
                 },
             },
         )

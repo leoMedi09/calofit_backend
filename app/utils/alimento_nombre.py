@@ -3,6 +3,7 @@ Nombres legibles para alimentos INS/CENAN y clave normalizada para búsqueda/res
 
 La clave incluye la letra «ñ»; antes se perdía con patrones ASCII [a-z0-9] solamente.
 """
+
 from __future__ import annotations
 
 import re

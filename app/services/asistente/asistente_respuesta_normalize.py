@@ -4,6 +4,7 @@ Paso 2 — respuesta estructurada más estable para el cliente.
 - ``schema_version``: versión del contrato en ``respuesta_estructurada``.
 - ``macros_normalizados`` por sección comida: kcal y gramos P/C/G parseados del mismo ``macros`` que ve la tarjeta.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional

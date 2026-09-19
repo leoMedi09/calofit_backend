@@ -10,6 +10,7 @@ excluida de la corrida por defecto (`pytest tests/` usa -m "not external",
 ver tests/pytest.ini). Ejecutar a mano con:
     pytest tests/external/test_filtros_no_rompen_registros_normales.py -v
 """
+
 import pytest
 
 from app.core.utils import get_peru_date
@@ -63,16 +64,13 @@ def _limpiar_cache_explicito():
 @pytest.mark.integration
 @pytest.mark.external
 class TestFiltrosNoRompenRegistrosNormales:
-
     @pytest.mark.asyncio
     async def test_caso_a_batido_de_avena_sin_duplicar(self, db, sample_client, plan_hoy):
         diag = await _registrar_real("Comí un batido de avena", sample_client, plan_hoy, db)
         assert diag["success"] is True
         nombres_norm = [n.lower() for n in diag["alimentos"]]
         items_avena = [n for n in nombres_norm if "avena" in n or "batido" in n]
-        assert len(items_avena) <= 1, (
-            f"Posible doble conteo de avena/batido: {diag['alimentos']} ({diag['kcal']} kcal)"
-        )
+        assert len(items_avena) <= 1, f"Posible doble conteo de avena/batido: {diag['alimentos']} ({diag['kcal']} kcal)"
 
     @pytest.mark.asyncio
     async def test_caso_b_arroz_con_pollo_no_se_elimina_mal(self, db, sample_client, plan_hoy):
@@ -81,9 +79,7 @@ class TestFiltrosNoRompenRegistrosNormales:
         nombres_norm = [n.lower() for n in diag["alimentos"]]
         menciona_arroz = any("arroz" in n for n in nombres_norm)
         menciona_pollo = any("pollo" in n for n in nombres_norm)
-        assert menciona_arroz and menciona_pollo, (
-            f"Se perdió arroz o pollo del registro: {diag['alimentos']}"
-        )
+        assert menciona_arroz and menciona_pollo, f"Se perdió arroz o pollo del registro: {diag['alimentos']}"
         assert len(diag["alimentos"]) == 1, (
             f"'Arroz con pollo' no debería duplicarse en varios ítems: {diag['alimentos']}"
         )
@@ -91,7 +87,10 @@ class TestFiltrosNoRompenRegistrosNormales:
     @pytest.mark.asyncio
     async def test_caso_c_ensalada_no_se_descarta_sin_duplicados(self, db, sample_client, plan_hoy):
         diag = await _registrar_real(
-            "Comí ensalada de pollo con palta", sample_client, plan_hoy, db,
+            "Comí ensalada de pollo con palta",
+            sample_client,
+            plan_hoy,
+            db,
         )
         assert diag["success"] is True
         nombres_norm = [n.lower() for n in diag["alimentos"]]
@@ -99,18 +98,14 @@ class TestFiltrosNoRompenRegistrosNormales:
             f"Demasiados ítems para una sola ensalada — posible duplicado: {diag['alimentos']}"
         )
         texto_unido = " ".join(nombres_norm)
-        assert "pollo" in texto_unido and "palta" in texto_unido, (
-            f"Se perdió pollo o palta: {diag['alimentos']}"
-        )
+        assert "pollo" in texto_unido and "palta" in texto_unido, f"Se perdió pollo o palta: {diag['alimentos']}"
 
     @pytest.mark.asyncio
     async def test_caso_d_avena_no_se_elimina_por_palabra_desayuno(self, db, sample_client, plan_hoy):
         diag = await _registrar_real("Hoy desayuné avena", sample_client, plan_hoy, db)
         assert diag["success"] is True
         nombres_norm = [n.lower() for n in diag["alimentos"]]
-        assert any("avena" in n for n in nombres_norm), (
-            f"'avena' no quedó registrada: {diag['alimentos']}"
-        )
+        assert any("avena" in n for n in nombres_norm), f"'avena' no quedó registrada: {diag['alimentos']}"
         assert not any(n.strip() == "desayuno" for n in nombres_norm), (
             f"'desayuno' quedó como ítem aparte: {diag['alimentos']}"
         )
@@ -134,7 +129,5 @@ class TestFiltrosNoRompenRegistrosNormales:
     @pytest.mark.asyncio
     async def test_caso_g_cafe_se_acepta_aunque_tenga_pocas_kcal(self, db, sample_client, plan_hoy):
         diag = await _registrar_real("Comí café", sample_client, plan_hoy, db)
-        assert diag["success"] is True, (
-            f"'café' fue rechazado pese a ser una bebida real de ~0 kcal: {diag}"
-        )
+        assert diag["success"] is True, f"'café' fue rechazado pese a ser una bebida real de ~0 kcal: {diag}"
         assert any("caf" in n.lower() for n in diag["alimentos"])

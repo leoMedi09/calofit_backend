@@ -23,12 +23,12 @@ import numpy as np
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
-SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
-DATA_DIR    = os.path.join(PROJECT_DIR, "app", "data")
-INS_JSON    = os.path.join(DATA_DIR, "alimentos_peru_ins.json")
-OFF_JSON    = os.path.join(DATA_DIR, "alimentos_peru_off.json")
-OUTPUT_DIR  = os.path.join(PROJECT_DIR, "app", "models", "ai_models")
+DATA_DIR = os.path.join(PROJECT_DIR, "app", "data")
+INS_JSON = os.path.join(DATA_DIR, "alimentos_peru_ins.json")
+OFF_JSON = os.path.join(DATA_DIR, "alimentos_peru_off.json")
+OUTPUT_DIR = os.path.join(PROJECT_DIR, "app", "models", "ai_models")
 OUTPUT_PATH = os.path.join(OUTPUT_DIR, "recomendador_knn.pkl")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -69,10 +69,7 @@ df_raw = pd.DataFrame(data_comida)
 print(f"\n  Total registros iniciales: {len(df_raw)}")
 
 df = df_raw.copy()
-columnas_ml = [
-    "alimento", "calorias_100g", "proteina_100g", 
-    "carbohindratos_100g", "grasas_100g"
-]
+columnas_ml = ["alimento", "calorias_100g", "proteina_100g", "carbohindratos_100g", "grasas_100g"]
 for col in columnas_ml:
     if col not in df.columns:
         df[col] = 0.0
@@ -118,21 +115,27 @@ print("\n" + "═" * 65)
 print("  FASE 5: EVALUATION (Pruebas Dinámicas)")
 print("═" * 65)
 
+
 def evaluar_recomendacion(deficit_vector, descripcion):
     print(f"\n  Caso de prueba: {descripcion}")
-    print(f"  Déficit buscado: Cal={deficit_vector[0]} | Prot={deficit_vector[1]}g | Carb={deficit_vector[2]}g | Gras={deficit_vector[3]}g")
-    
+    print(
+        f"  Déficit buscado: Cal={deficit_vector[0]} | Prot={deficit_vector[1]}g | Carb={deficit_vector[2]}g | Gras={deficit_vector[3]}g"
+    )
+
     entrada_scaled = scaler.transform([deficit_vector])
-    
+
     distancias, indices = knn.kneighbors(entrada_scaled, n_neighbors=3)
-    
+
     print("  Resultados principales recomendados:")
     for i, idx in enumerate(indices[0]):
         row = df.iloc[idx]
         similitud = round((1 - distancias[0][i]) * 100, 1)
         nombre = row["alimento"][:40] + "..." if len(row["alimento"]) > 40 else row["alimento"]
-        print(f"   {i+1}. {nombre:<40} (Similitud: {similitud}%)")
-        print(f"      Cal: {row['calorias_100g']} | Pro: {row['proteina_100g']}g | Ca: {row['carbohindratos_100g']}g | Gr: {row['grasas_100g']}g")
+        print(f"   {i + 1}. {nombre:<40} (Similitud: {similitud}%)")
+        print(
+            f"      Cal: {row['calorias_100g']} | Pro: {row['proteina_100g']}g | Ca: {row['carbohindratos_100g']}g | Gr: {row['grasas_100g']}g"
+        )
+
 
 evaluar_recomendacion([150, 30, 0, 5], "Cliente necesita PURA proteína baja en calorías y sin carbos.")
 evaluar_recomendacion([350, 5, 60, 2], "Cliente necesita ENERGÍA/CARBOS para antes de entrenar.")
@@ -142,12 +145,7 @@ print("\n" + "═" * 65)
 print("  FASE 6: DEPLOYMENT")
 print("═" * 65)
 
-objeto_exportable = {
-    "modelo_knn": knn,
-    "scaler": scaler,
-    "df_alimentos": df,
-    "version": "1.0_MINSA2017"
-}
+objeto_exportable = {"modelo_knn": knn, "scaler": scaler, "df_alimentos": df, "version": "1.0_MINSA2017"}
 
 joblib.dump(objeto_exportable, OUTPUT_PATH)
 size_mb = os.path.getsize(OUTPUT_PATH) / (1024 * 1024)

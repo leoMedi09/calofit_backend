@@ -6,6 +6,7 @@ Genera rutinas personalizadas basadas en:
   - Lesiones en medical_conditions
   - Zonas objetivo y tiempo disponible
 """
+
 from __future__ import annotations
 
 import re
@@ -23,8 +24,8 @@ _LESIONES_SUSTITUCION: Dict[str, Dict[str, Any]] = {
         "grupos_restringidos": ["Piernas"],
         "sustituir": {
             "sentadilla": ("extensiones_cuadriceps_maquina", "Extensiones de Cuádriceps (sin impacto)"),
-            "prensa":     ("extensiones_cuadriceps_maquina", "Extensiones de Cuádriceps (sin impacto)"),
-            "default":    ("curl_femoral_maquina",           "Curl Femoral en Máquina (bajo impacto)"),
+            "prensa": ("extensiones_cuadriceps_maquina", "Extensiones de Cuádriceps (sin impacto)"),
+            "default": ("curl_femoral_maquina", "Curl Femoral en Máquina (bajo impacto)"),
         },
         "justificacion": "lesión de rodilla — se sustituyeron ejercicios de alto impacto por variantes de máquina sin compresión articular",
     },
@@ -32,9 +33,9 @@ _LESIONES_SUSTITUCION: Dict[str, Dict[str, Any]] = {
         "keywords": ["espalda", "lumbar", "hernia", "discopatía", "lumbalgia", "ciática"],
         "grupos_restringidos": ["Espalda", "Piernas"],
         "sustituir": {
-            "peso muerto": ("face_pull",    "Face Pull (sin carga lumbar)"),
-            "remo":        ("remo_en_polea_baja", "Remo Polea (sin inclinación libre)"),
-            "default":     ("dead_bug",     "Dead Bug (fortalece core sin comprimir columna)"),
+            "peso muerto": ("face_pull", "Face Pull (sin carga lumbar)"),
+            "remo": ("remo_en_polea_baja", "Remo Polea (sin inclinación libre)"),
+            "default": ("dead_bug", "Dead Bug (fortalece core sin comprimir columna)"),
         },
         "justificacion": "lesión de espalda/lumbar — se sustituyeron cargas libres por variantes de máquina o ejercicios de estabilización",
     },
@@ -42,9 +43,9 @@ _LESIONES_SUSTITUCION: Dict[str, Dict[str, Any]] = {
         "keywords": ["hombro", "manguito rotador", "supraespinoso", "infraespinoso", "luxación"],
         "grupos_restringidos": ["Hombros", "Pecho"],
         "sustituir": {
-            "press": ("face_pull",           "Face Pull (rehabilitación manguito rotador)"),
-            "vuelo": ("pajaros_inclinado",   "Pájaros con peso ligero — solo si sin dolor"),
-            "default": ("face_pull",         "Face Pull (movilidad y fuerza sin impacto)"),
+            "press": ("face_pull", "Face Pull (rehabilitación manguito rotador)"),
+            "vuelo": ("pajaros_inclinado", "Pájaros con peso ligero — solo si sin dolor"),
+            "default": ("face_pull", "Face Pull (movilidad y fuerza sin impacto)"),
         },
         "justificacion": "lesión de hombro — se eliminaron ejercicios de press y se priorizó la rehabilitación del manguito rotador",
     },
@@ -52,12 +53,12 @@ _LESIONES_SUSTITUCION: Dict[str, Dict[str, Any]] = {
         "keywords": ["codo", "epicóndilo", "codo de tenista", "codo de golfista", "tendinitis codo"],
         "grupos_restringidos": ["Bíceps", "Tríceps"],
         "sustituir": {
-            "curl de biceps":   ("isometria_antebrazo", "Isometría de antebrazo (sin carga)"),
+            "curl de biceps": ("isometria_antebrazo", "Isometría de antebrazo (sin carga)"),
             "extension triceps": ("estiramiento_triceps", "Estiramiento de tríceps (sin carga)"),
-            "press":            ("face_pull",  "Face Pull (carga ligera, sin extensión forzada del codo)"),
-            "fondos":           ("face_pull",  "Face Pull (isométrico suave)"),
-            "jalon":            ("face_pull",  "Face Pull (isométrico suave)"),
-            "default":          ("face_pull",  "Face Pull (isométrico suave)"),
+            "press": ("face_pull", "Face Pull (carga ligera, sin extensión forzada del codo)"),
+            "fondos": ("face_pull", "Face Pull (isométrico suave)"),
+            "jalon": ("face_pull", "Face Pull (isométrico suave)"),
+            "default": ("face_pull", "Face Pull (isométrico suave)"),
         },
         "justificacion": "lesión de codo — se eliminaron ejercicios de flexo-extensión bajo carga (curl, extensión, press, fondos, jalón) y se sugieren alternativas isométricas o sin carga",
     },
@@ -65,43 +66,52 @@ _LESIONES_SUSTITUCION: Dict[str, Dict[str, Any]] = {
 
 
 _NOMBRES_RUTINA: Dict[str, List[str]] = {
-    "Piernas":         ["Piernas de Acero", "Tormenta de Cuádriceps", "Rey de Sentadillas", "Leyenda del Tren Inferior"],
-    "Pecho":           ["Pecho Explosivo", "Escudo de Titanio", "Pectorales de Campeón", "Fuerza de Impacto"],
-    "Espalda":         ["Espalda Invencible", "Alas de Águila", "Columna de Fuego", "Fortaleza Posterior"],
-    "Hombros":         ["Hombros de Titán", "Montaña de Deltoides", "Brazos al Cielo", "Cannonball Shoulders"],
-    "Bíceps":          ["Brazos de Titán", "Curls de Hierro", "Bíceps Supremo", "Fuerza en Flexión"],
-    "Tríceps":         ["Tríceps de Élite", "Empuje Mortal", "Brazos de Acero", "Triple Amenaza"],
-    "Core":            ["Núcleo de Acero", "Core Blindado", "Centro de Poder", "Abdomen Indestructible"],
-    "Glúteos":         ["Glúteos de Fuego", "Power Booty", "Activación Total", "Caderas Explosivas"],
-    "Cardio":          ["Cardio Infernal", "Quema Máxima", "Resistencia Extrema", "Turbo Cardio"],
+    "Piernas": ["Piernas de Acero", "Tormenta de Cuádriceps", "Rey de Sentadillas", "Leyenda del Tren Inferior"],
+    "Pecho": ["Pecho Explosivo", "Escudo de Titanio", "Pectorales de Campeón", "Fuerza de Impacto"],
+    "Espalda": ["Espalda Invencible", "Alas de Águila", "Columna de Fuego", "Fortaleza Posterior"],
+    "Hombros": ["Hombros de Titán", "Montaña de Deltoides", "Brazos al Cielo", "Cannonball Shoulders"],
+    "Bíceps": ["Brazos de Titán", "Curls de Hierro", "Bíceps Supremo", "Fuerza en Flexión"],
+    "Tríceps": ["Tríceps de Élite", "Empuje Mortal", "Brazos de Acero", "Triple Amenaza"],
+    "Core": ["Núcleo de Acero", "Core Blindado", "Centro de Poder", "Abdomen Indestructible"],
+    "Glúteos": ["Glúteos de Fuego", "Power Booty", "Activación Total", "Caderas Explosivas"],
+    "Cardio": ["Cardio Infernal", "Quema Máxima", "Resistencia Extrema", "Turbo Cardio"],
     "Cuerpo Completo": ["Bestia Total", "Full Body Extremo", "Guerrero Completo", "Máquina Humana"],
 }
 
 
 _CONFIG_PERFIL: Dict[str, Dict[str, Any]] = {
     "PERFIL_A": {
-        "series": 4, "reps": 10, "descanso_seg": 60,
-        "intensidad": "Alta", "nivel_filtro": ["Avanzado", "Intermedio", "Principiante"],
+        "series": 4,
+        "reps": 10,
+        "descanso_seg": 60,
+        "intensidad": "Alta",
+        "nivel_filtro": ["Avanzado", "Intermedio", "Principiante"],
     },
     "PERFIL_B": {
-        "series": 3, "reps": 12, "descanso_seg": 90,
-        "intensidad": "Media", "nivel_filtro": ["Intermedio", "Principiante"],
+        "series": 3,
+        "reps": 12,
+        "descanso_seg": 90,
+        "intensidad": "Media",
+        "nivel_filtro": ["Intermedio", "Principiante"],
     },
     "PERFIL_C": {
-        "series": 3, "reps": 15, "descanso_seg": 120,
-        "intensidad": "Baja-Media", "nivel_filtro": ["Principiante"],
+        "series": 3,
+        "reps": 15,
+        "descanso_seg": 120,
+        "intensidad": "Baja-Media",
+        "nivel_filtro": ["Principiante"],
     },
 }
 
 _WORKOUT_TYPE_TO_ZONES: Dict[str, List[str]] = {
-    "fuerza":    ["Pecho", "Espalda", "Hombros", "Piernas"],
-    "cardio":    ["Cardio"],
-    "hiit":      ["Cardio", "Core", "Piernas"],
+    "fuerza": ["Pecho", "Espalda", "Hombros", "Piernas"],
+    "cardio": ["Cardio"],
+    "hiit": ["Cardio", "Core", "Piernas"],
     "funcional": ["Cardio", "Core", "Piernas"],
-    "yoga":      ["Core", "Glúteos", "Piernas"],
-    "pilates":   ["Core", "Glúteos", "Piernas"],
-    "mixto":     ["Pecho", "Espalda", "Cardio", "Core"],
-    "strength":  ["Pecho", "Espalda", "Hombros", "Piernas"],
+    "yoga": ["Core", "Glúteos", "Piernas"],
+    "pilates": ["Core", "Glúteos", "Piernas"],
+    "mixto": ["Pecho", "Espalda", "Cardio", "Core"],
+    "strength": ["Pecho", "Espalda", "Hombros", "Piernas"],
 }
 
 
@@ -135,28 +145,64 @@ def _detectar_lesiones(medical_conditions: List[str]) -> List[str]:
 
 _ESTADO_RECUPERADO_STEMS = (
     "recuper",
-    "sanad", "sane", "sano ya", "ya sano", "ya sana",
-    "curad", "ya cure", "ya curé",
-    "sin dolor", "sin molestia", "no tengo dolor", "no tengo molestia",
-    "ningun dolor", "ningún dolor", "ninguna molestia",
-    "no me duele", "ya no duele", "ya no me duele",
-    "desaparecio", "desaparec",
-    "ya paso", "ya pasó", "ya pase", "ya pasé",
-    "estoy bien", "me siento bien", "entren normal", "entreno normal",
+    "sanad",
+    "sane",
+    "sano ya",
+    "ya sano",
+    "ya sana",
+    "curad",
+    "ya cure",
+    "ya curé",
+    "sin dolor",
+    "sin molestia",
+    "no tengo dolor",
+    "no tengo molestia",
+    "ningun dolor",
+    "ningún dolor",
+    "ninguna molestia",
+    "no me duele",
+    "ya no duele",
+    "ya no me duele",
+    "desaparecio",
+    "desaparec",
+    "ya paso",
+    "ya pasó",
+    "ya pase",
+    "ya pasé",
+    "estoy bien",
+    "me siento bien",
+    "entren normal",
+    "entreno normal",
     "sin problema",
 )
 _ESTADO_ACTIVO_STEMS = (
-    "duele", "dolor", "molesta", "molestia", "inflamad",
-    "lesion", "lesión", "lastimad", "me lastime", "me lastimé",
+    "duele",
+    "dolor",
+    "molesta",
+    "molestia",
+    "inflamad",
+    "lesion",
+    "lesión",
+    "lastimad",
+    "me lastime",
+    "me lastimé",
 )
 _INDICADORES_TODAS_LAS_ZONAS = (
-    "ambas", "ambos", "las dos", "los dos", "ninguna de las dos",
-    "ninguno de los dos", "todas", "todos",
+    "ambas",
+    "ambos",
+    "las dos",
+    "los dos",
+    "ninguna de las dos",
+    "ninguno de los dos",
+    "todas",
+    "todos",
 )
 
 
 def filtrar_lesiones_activas(
-    lesiones_candidatas: List[str], historial: List[dict] | None, mensaje_actual: str,
+    lesiones_candidatas: List[str],
+    historial: List[dict] | None,
+    mensaje_actual: str,
 ) -> List[str]:
     """De las lesiones detectadas (por perfil o mensaje), descarta las que el
     usuario indicó como recuperadas. Procesa TODAS las zonas en una sola
@@ -166,9 +212,7 @@ def filtrar_lesiones_activas(
     turno "recuperara" también la rodilla, que nunca se mencionó ahí."""
     if not lesiones_candidatas:
         return []
-    turnos = [
-        str(h.get("content", "")) for h in (historial or []) if h.get("role") == "user"
-    ]
+    turnos = [str(h.get("content", "")) for h in (historial or []) if h.get("role") == "user"]
     turnos.append(mensaje_actual or "")
 
     estados: dict[str, str] = {}
@@ -177,8 +221,7 @@ def filtrar_lesiones_activas(
     for turno in turnos:
         t = turno.lower()
         zonas_en_turno = [
-            clave for clave in lesiones_candidatas
-            if any(kw in t for kw in _LESIONES_SUSTITUCION[clave]["keywords"])
+            clave for clave in lesiones_candidatas if any(kw in t for kw in _LESIONES_SUSTITUCION[clave]["keywords"])
         ]
         vistas.update(zonas_en_turno)
 
@@ -221,7 +264,7 @@ def _sustituir_ejercicio(
     Busca la clave de sustitución que mejor coincide con el nombre del ejercicio.
     """
     sustit = _LESIONES_SUSTITUCION[lesion]["sustituir"]
-    just   = _LESIONES_SUSTITUCION[lesion]["justificacion"]
+    just = _LESIONES_SUSTITUCION[lesion]["justificacion"]
     nombre_lower = ejercicio_nombre.lower()
 
     for patron, (nuevo_id, nuevo_nombre) in sustit.items():
@@ -235,10 +278,10 @@ def _sustituir_ejercicio(
 _TIPOS_EXCLUIDOS_BASE: List[str] = ["Strongman", "Cardio Ligero"]
 
 _TIPOS_EXCLUIDOS_POR_WORKOUT: Dict[str, List[str]] = {
-    "fuerza":    ["Cardio", "Metabólico/HIIT"],
-    "strength":  ["Cardio", "Metabólico/HIIT"],
-    "cardio":    ["Halterofilia", "Powerlifting"],
-    "hiit":      ["Powerlifting"],
+    "fuerza": ["Cardio", "Metabólico/HIIT"],
+    "strength": ["Cardio", "Metabólico/HIIT"],
+    "cardio": ["Halterofilia", "Powerlifting"],
+    "hiit": ["Powerlifting"],
     "funcional": ["Powerlifting"],
 }
 
@@ -256,16 +299,17 @@ def _consultar_ejercicios(
 
     todos_excluidos = list(_TIPOS_EXCLUIDOS_BASE) + list(tipos_excluidos or [])
 
-    placeholders_zonas   = ", ".join(f":z{i}" for i in range(len(zonas)))
+    placeholders_zonas = ", ".join(f":z{i}" for i in range(len(zonas)))
     placeholders_niveles = ", ".join(f":n{i}" for i in range(len(nivel_filtro)))
-    placeholders_excl    = ", ".join(f":x{i}" for i in range(len(todos_excluidos)))
+    placeholders_excl = ", ".join(f":x{i}" for i in range(len(todos_excluidos)))
 
     params = {f"z{i}": z for i, z in enumerate(zonas)}
     params.update({f"n{i}": nv for i, nv in enumerate(nivel_filtro)})
-    params.update({f"x{i}": t  for i, t  in enumerate(todos_excluidos)})
+    params.update({f"x{i}": t for i, t in enumerate(todos_excluidos)})
     params["lim"] = n
 
-    rows = db.execute(_sql(f"""
+    rows = db.execute(
+        _sql(f"""
         SELECT id, nombre, musculo_principal, tipo, nivel, met, tecnica, tipo_metrica, grupo_padre
         FROM ejercicios
         WHERE grupo_padre IN ({placeholders_zonas})
@@ -277,13 +321,20 @@ def _consultar_ejercicios(
           )
         ORDER BY RANDOM()
         LIMIT :lim
-    """), params).fetchall()
+    """),
+        params,
+    ).fetchall()
 
     return [
         {
-            "id": r[0], "nombre": r[1], "musculo_principal": r[2],
-            "tipo": r[3], "nivel": r[4], "met": r[5],
-            "instrucciones": r[6] or "", "tipo_metrica": r[7] or "peso_reps",
+            "id": r[0],
+            "nombre": r[1],
+            "musculo_principal": r[2],
+            "tipo": r[3],
+            "nivel": r[4],
+            "met": r[5],
+            "instrucciones": r[6] or "",
+            "tipo_metrica": r[7] or "peso_reps",
             "grupo_padre": r[8],
         }
         for r in rows
@@ -338,12 +389,12 @@ async def generar_rutina_inteligente(
     lesiones_activas = _detectar_lesiones(conditions)
     grupos_bloqueados = _grupos_restringidos(lesiones_activas)
 
-    zonas_seguras    = [z for z in zonas_objetivo if z not in grupos_bloqueados]
+    zonas_seguras = [z for z in zonas_objetivo if z not in grupos_bloqueados]
     zonas_restringidas = [z for z in zonas_objetivo if z in grupos_bloqueados]
 
     n_ejercicios = _ejercicios_por_tiempo(tiempo_min, cfg["series"], cfg["reps"], cfg["descanso_seg"])
 
-    _wt_primera  = (perfil_obj.workout_type or "").strip().lower().split()[0] if perfil_obj.workout_type else ""
+    _wt_primera = (perfil_obj.workout_type or "").strip().lower().split()[0] if perfil_obj.workout_type else ""
     _tipos_extra = _TIPOS_EXCLUIDOS_POR_WORKOUT.get(_wt_primera, [])
 
     if zonas_seguras:
@@ -354,7 +405,9 @@ async def generar_rutina_inteligente(
                 _consultar_ejercicios([zona], cfg["nivel_filtro"], n_por_zona, db, tipos_excluidos=_tipos_extra)
             )
     else:
-        ejercicios_raw = _consultar_ejercicios(["Core"], cfg["nivel_filtro"], n_ejercicios, db, tipos_excluidos=_tipos_extra)
+        ejercicios_raw = _consultar_ejercicios(
+            ["Core"], cfg["nivel_filtro"], n_ejercicios, db, tipos_excluidos=_tipos_extra
+        )
 
     advertencias = []
     sustituciones_aplicadas = []
@@ -363,47 +416,53 @@ async def generar_rutina_inteligente(
         for lesion in lesiones_activas:
             if zona in _LESIONES_SUSTITUCION[lesion]["grupos_restringidos"]:
                 just = _LESIONES_SUSTITUCION[lesion]["justificacion"]
-                nuevo_id, nuevo_nombre = list(
-                    _LESIONES_SUSTITUCION[lesion]["sustituir"].values()
-                )[-1]
-                row = db.execute(_sql(
-                    "SELECT id, nombre, musculo_principal, tipo, nivel, met, tecnica, tipo_metrica, grupo_padre "
-                    "FROM ejercicios WHERE id = :eid LIMIT 1"
-                ), {"eid": nuevo_id}).fetchone()
+                nuevo_id, nuevo_nombre = list(_LESIONES_SUSTITUCION[lesion]["sustituir"].values())[-1]
+                row = db.execute(
+                    _sql(
+                        "SELECT id, nombre, musculo_principal, tipo, nivel, met, tecnica, tipo_metrica, grupo_padre "
+                        "FROM ejercicios WHERE id = :eid LIMIT 1"
+                    ),
+                    {"eid": nuevo_id},
+                ).fetchone()
 
                 if row:
-                    sustituciones_aplicadas.append({
-                        "id": row[0], "nombre": row[1], "musculo_principal": row[2],
-                        "tipo": row[3], "nivel": row[4], "met": row[5],
-                        "instrucciones": row[6] or "", "tipo_metrica": row[7] or "peso_reps",
-                        "grupo_padre": row[8], "es_sustitucion": True,
-                    })
+                    sustituciones_aplicadas.append(
+                        {
+                            "id": row[0],
+                            "nombre": row[1],
+                            "musculo_principal": row[2],
+                            "tipo": row[3],
+                            "nivel": row[4],
+                            "met": row[5],
+                            "instrucciones": row[6] or "",
+                            "tipo_metrica": row[7] or "peso_reps",
+                            "grupo_padre": row[8],
+                            "es_sustitucion": True,
+                        }
+                    )
                 advertencias.append(
-                    f"⚠ Zona '{zona}' restringida por {just}. "
-                    f"Se añadió '{nuevo_nombre}' como alternativa segura."
+                    f"⚠ Zona '{zona}' restringida por {just}. Se añadió '{nuevo_nombre}' como alternativa segura."
                 )
                 break
 
     ejercicios_final = ejercicios_raw[:n_ejercicios] + sustituciones_aplicadas
 
-    seg_por_ejercicio = (
-        cfg["series"] * (cfg["reps"] * 3 + cfg["descanso_seg"]) + 30
-    )
+    seg_por_ejercicio = cfg["series"] * (cfg["reps"] * 3 + cfg["descanso_seg"]) + 30
     tiempo_estimado = round(len(ejercicios_final) * seg_por_ejercicio / 60)
 
     return {
-        "nombre_rutina":        _nombre_rutina(zonas_objetivo, perfil_str, lesiones_activas),
-        "perfil":               perfil_str,
-        "confianza_perfil":     round(confianza, 1),
-        "ejercicios":           ejercicios_final,
-        "series":               cfg["series"],
-        "reps":                 cfg["reps"],
-        "descanso_seg":         cfg["descanso_seg"],
-        "intensidad":           cfg["intensidad"],
-        "lesiones_detectadas":  lesiones_activas,
-        "zonas_solicitadas":    zonas_objetivo,
-        "zonas_seguras":        zonas_seguras,
-        "zonas_restringidas":   zonas_restringidas,
-        "advertencias":         advertencias,
-        "tiempo_estimado_min":  tiempo_estimado,
+        "nombre_rutina": _nombre_rutina(zonas_objetivo, perfil_str, lesiones_activas),
+        "perfil": perfil_str,
+        "confianza_perfil": round(confianza, 1),
+        "ejercicios": ejercicios_final,
+        "series": cfg["series"],
+        "reps": cfg["reps"],
+        "descanso_seg": cfg["descanso_seg"],
+        "intensidad": cfg["intensidad"],
+        "lesiones_detectadas": lesiones_activas,
+        "zonas_solicitadas": zonas_objetivo,
+        "zonas_seguras": zonas_seguras,
+        "zonas_restringidas": zonas_restringidas,
+        "advertencias": advertencias,
+        "tiempo_estimado_min": tiempo_estimado,
     }

@@ -2,11 +2,13 @@ from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ForeignKey
 from sqlalchemy.sql import func
 from app.core.database import Base
 
+
 class AuditoriaAdmin(Base):
     """
     Tabla para registrar eventos administrativos (logs).
     Ejemplo: Creación de personal, cambio de contraseñas, reseteo de accesos.
     """
+
     __tablename__ = "auditoria_admin"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -15,7 +17,7 @@ class AuditoriaAdmin(Base):
     descripcion = Column(Text, nullable=False)
     tabla_afectada = Column(String(50), nullable=True)
     registro_id = Column(Integer, nullable=True)
-    
+
     fecha_evento = Column(TIMESTAMP, nullable=False, server_default=func.now())
     ip_origen = Column(String(45), nullable=True)
 

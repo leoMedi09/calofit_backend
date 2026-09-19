@@ -13,9 +13,9 @@ class ClientCreate(BaseModel):
     weight: float = Field(..., gt=0, description="Peso en kilogramos")
     height: float = Field(..., ge=100, le=230, description="Altura en centímetros")
     gender: str = Field(..., pattern="^[MF]$", description="Género: M (Masculino) o F (Femenino)")
-    
+
     medical_conditions: List[str] = Field(default=[], description="Lista de condiciones médicas")
-    
+
     activity_level: Optional[str] = Field(default="Sedentario", description="Nivel de actividad física")
     goal: Optional[str] = Field(default="Mantener peso", description="Objetivo de salud")
     workout_type: Optional[str] = Field(default=None, description="Tipo de entrenamiento preferido (para ML)")
@@ -38,10 +38,10 @@ class ClientResponse(BaseModel):
     birth_date: Optional[date]
     weight: float
     height: float
-    gender: Optional[str] = 'M'
-    activity_level: Optional[str] = 'Sedentario'
-    goal: Optional[str] = 'Mantener peso'
-    workout_type: Optional[str] = 'Cardio'
+    gender: Optional[str] = "M"
+    activity_level: Optional[str] = "Sedentario"
+    goal: Optional[str] = "Mantener peso"
+    workout_type: Optional[str] = "Cardio"
     session_duration: Optional[float] = 1.0
     medical_conditions: List[str] = []
     assigned_coach_id: Optional[int]
@@ -52,6 +52,7 @@ class ClientResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
 
 class ClientUpdate(BaseModel):
     first_name: Optional[str] = None
@@ -75,18 +76,22 @@ class ClientUpdate(BaseModel):
 
 class AdminCreateClient(BaseModel):
     """Schema simplificado para que el Admin cree un usuario: solo email + contraseña"""
+
     email: EmailStr
     password: str = Field(..., min_length=6)
     flutter_uid: str = Field(..., description="Firebase UID generado por el Admin al crear el usuario en Firebase")
     assigned_nutri_id: Optional[int] = None
     assigned_coach_id: Optional[int] = None
 
+
 class ClientExpressCreate(BaseModel):
     """Schema para la creación B2B de un paciente solo usando DNI y Correo."""
+
     email: EmailStr
     dni: str = Field(..., min_length=7, max_length=15, description="El DNI será usado como clave temporal")
     assigned_nutri_id: Optional[int] = None
     assigned_coach_id: Optional[int] = None
+
 
 class ChangePassword(BaseModel):
     new_password: str = Field(..., min_length=6)
@@ -95,6 +100,7 @@ class ChangePassword(BaseModel):
 
 class StrategicGuideUpdate(BaseModel):
     """Para que el nutri guíe a la IA desde el expediente"""
+
     ai_strategic_focus: Optional[str] = None
     recommended_foods: Optional[List[str]] = None
     forbidden_foods: Optional[List[str]] = None
@@ -104,20 +110,24 @@ class StrategicGuideUpdate(BaseModel):
     workout_type: Optional[str] = None
     session_duration: Optional[float] = None
 
+
 class ResetPasswordRequest(BaseModel):
     """Para cuando el usuario ingresa su email para recibir el código"""
+
     email: EmailStr
+
 
 class ResetPasswordVerify(BaseModel):
     """Para cuando el usuario ingresa el código de 6 dígitos y su nueva clave"""
+
     email: EmailStr
     code: str = Field(..., min_length=6, max_length=6)
     new_password: str = Field(..., min_length=6)
     confirm_password: str = Field(..., min_length=6)
 
-    @field_validator('confirm_password')
+    @field_validator("confirm_password")
     @classmethod
     def passwords_match_reset(cls, v, info):
-        if 'new_password' in info.data and v != info.data['new_password']:
-            raise ValueError('Las contraseñas no coinciden')
+        if "new_password" in info.data and v != info.data["new_password"]:
+            raise ValueError("Las contraseñas no coinciden")
         return v

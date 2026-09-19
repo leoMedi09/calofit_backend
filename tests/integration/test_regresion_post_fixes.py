@@ -7,6 +7,7 @@ Los Casos A-G (filtros vs. registros normales, sin mock de Groq) se movieron
 a tests/external/test_filtros_no_rompen_registros_normales.py — dependen de
 la API real y están excluidos de la corrida por defecto.
 """
+
 import json
 
 import pytest
@@ -42,22 +43,45 @@ def plan_hoy():
 
 @pytest.mark.integration
 class TestConsistenciaMatematica:
-
     @pytest.mark.asyncio
     async def test_progreso_calorias_igual_a_suma_de_comida_registros(self, db, sample_client, plan_hoy):
         async def mock_groq(prompt, max_tokens=800, temp=0.7, model=None):
             if "extrae todos los alimentos" in prompt.lower():
-                return json.dumps({"alimentos": [
-                    {"nombre": "Pollo a la plancha", "es_real": True, "cantidad": 1,
-                     "porcion_g": 150, "kcal": 250, "prot_g": 40, "carb_g": 0, "grasa_g": 9},
-                    {"nombre": "Arroz blanco", "es_real": True, "cantidad": 1,
-                     "porcion_g": 150, "kcal": 195, "prot_g": 4, "carb_g": 42, "grasa_g": 0.5},
-                ]})
+                return json.dumps(
+                    {
+                        "alimentos": [
+                            {
+                                "nombre": "Pollo a la plancha",
+                                "es_real": True,
+                                "cantidad": 1,
+                                "porcion_g": 150,
+                                "kcal": 250,
+                                "prot_g": 40,
+                                "carb_g": 0,
+                                "grasa_g": 9,
+                            },
+                            {
+                                "nombre": "Arroz blanco",
+                                "es_real": True,
+                                "cantidad": 1,
+                                "porcion_g": 150,
+                                "kcal": 195,
+                                "prot_g": 4,
+                                "carb_g": 42,
+                                "grasa_g": 0.5,
+                            },
+                        ]
+                    }
+                )
             return json.dumps({"alimentos": []})
 
         with patch.object(ia_engine, "_llamar_groq", new=mock_groq):
             resultado = await registrar_comida_llm(
-                "Comí pollo a la plancha con arroz blanco", sample_client, plan_hoy, db, ia_engine,
+                "Comí pollo a la plancha con arroz blanco",
+                sample_client,
+                plan_hoy,
+                db,
+                ia_engine,
             )
         assert resultado["success"] is True
 
@@ -73,15 +97,31 @@ class TestConsistenciaMatematica:
     async def test_cantidad_multiplica_macros_correctamente(self, db, sample_client, plan_hoy):
         async def mock_groq(prompt, max_tokens=800, temp=0.7, model=None):
             if "extrae todos los alimentos" in prompt.lower():
-                return json.dumps({"alimentos": [
-                    {"nombre": "Huevo", "es_real": True, "cantidad": 3,
-                     "porcion_g": 50, "kcal": 70, "prot_g": 6, "carb_g": 0.5, "grasa_g": 5},
-                ]})
+                return json.dumps(
+                    {
+                        "alimentos": [
+                            {
+                                "nombre": "Huevo",
+                                "es_real": True,
+                                "cantidad": 3,
+                                "porcion_g": 50,
+                                "kcal": 70,
+                                "prot_g": 6,
+                                "carb_g": 0.5,
+                                "grasa_g": 5,
+                            },
+                        ]
+                    }
+                )
             return json.dumps({"alimentos": []})
 
         with patch.object(ia_engine, "_llamar_groq", new=mock_groq):
             resultado = await registrar_comida_llm(
-                "Comí tres huevos", sample_client, plan_hoy, db, ia_engine,
+                "Comí tres huevos",
+                sample_client,
+                plan_hoy,
+                db,
+                ia_engine,
             )
         assert resultado["success"] is True
 
@@ -98,7 +138,6 @@ class TestConsistenciaMatematica:
 
 @pytest.mark.integration
 class TestAislamientoCache:
-
     @pytest.mark.asyncio
     async def test_macro_cache_es_global_no_aislado_por_usuario(self, db, sample_client, sample_user):
         """Documenta el comportamiento REAL de _macro_cache: la key es solo
@@ -110,9 +149,16 @@ class TestAislamientoCache:
         comportamiento actual para que quede documentado, no asumido."""
         from app.services.llm_registro import cache_macros, _buscar_en_cache
 
-        cache_macros("Yogur griego marca X", {
-            "nombre": "Yogur griego marca X", "kcal": 999, "prot_g": 50, "carb_g": 1, "grasa_g": 1,
-        })
+        cache_macros(
+            "Yogur griego marca X",
+            {
+                "nombre": "Yogur griego marca X",
+                "kcal": 999,
+                "prot_g": 50,
+                "carb_g": 1,
+                "grasa_g": 1,
+            },
+        )
 
         encontrado = _buscar_en_cache("Comí un yogur griego marca x")
         if encontrado and abs(encontrado.get("kcal", 0) - 999) < 1:
@@ -138,18 +184,38 @@ class TestAislamientoCache:
         async def mock_groq(prompt, max_tokens=800, temp=0.7, model=None):
             if "extrae todos los alimentos" in prompt.lower():
                 llamadas["n"] += 1
-                return json.dumps({"alimentos": [
-                    {"nombre": "Quinua con leche", "es_real": True, "cantidad": 1,
-                     "porcion_g": 200, "kcal": 220, "prot_g": 8, "carb_g": 35, "grasa_g": 4},
-                ]})
+                return json.dumps(
+                    {
+                        "alimentos": [
+                            {
+                                "nombre": "Quinua con leche",
+                                "es_real": True,
+                                "cantidad": 1,
+                                "porcion_g": 200,
+                                "kcal": 220,
+                                "prot_g": 8,
+                                "carb_g": 35,
+                                "grasa_g": 4,
+                            },
+                        ]
+                    }
+                )
             return json.dumps({"alimentos": []})
 
         with patch.object(ia_engine, "_llamar_groq", new=mock_groq):
             r1 = await registrar_comida_llm(
-                "Comí quinua con leche", sample_client, plan_hoy, db, ia_engine,
+                "Comí quinua con leche",
+                sample_client,
+                plan_hoy,
+                db,
+                ia_engine,
             )
             r2 = await registrar_comida_llm(
-                "Comí quinua con leche", sample_client, plan_hoy, db, ia_engine,
+                "Comí quinua con leche",
+                sample_client,
+                plan_hoy,
+                db,
+                ia_engine,
             )
         assert r1["datos"]["calorias"] == r2["datos"]["calorias"], (
             f"La misma comida dio kcal distintas en la 2da llamada: "

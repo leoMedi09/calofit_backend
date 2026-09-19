@@ -1,6 +1,7 @@
 """
 Tests para CacheManager — caché inteligente de alimentos.
 """
+
 import pytest
 from datetime import datetime, timedelta, timezone
 from app.services.nutrition.food.resolver.cache_manager import CacheManager
@@ -64,7 +65,7 @@ class TestCacheManager:
     def test_invalidar_cache(self, cache, sample_client, macros_arroz):
         """Invalidar entrada elimina del caché."""
         cache.guardar_en_cache("tomate", sample_client.id, macros_arroz, "BD")
-        
+
         ok = cache.invalidar_cache("tomate", sample_client.id)
         assert ok is True
 
@@ -92,7 +93,7 @@ class TestCacheManager:
     def test_cache_diferente_por_usuario(self, cache, sample_client, macros_arroz, db):
         """El caché es por usuario — otro usuario no ve el mismo caché."""
         from app.models import Client
-        
+
         otro_client = Client(
             first_name="Otro",
             last_name_paternal="Test",

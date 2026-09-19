@@ -8,6 +8,7 @@ Uso:
     docker exec calofit_backend python scripts/verificar_coherencia_platos_llm.py
     docker exec calofit_backend python scripts/verificar_coherencia_platos_llm.py --fix-report
 """
+
 from __future__ import annotations
 
 import re
@@ -22,25 +23,77 @@ from sqlalchemy.orm import sessionmaker
 
 try:
     from app.core.config import settings
+
     DATABASE_URL = settings.DATABASE_URL
 except Exception:
     DATABASE_URL = "postgresql://postgres:leomeflo09@localhost:5432/BD_Calofit"
 
-_IGNORADOS: frozenset[str] = frozenset({
-    "con", "sin", "del", "los", "las", "una", "unos", "unas",
-    "horno", "plancha", "parrilla", "vapor", "frito", "cocido", "asado",
-    "ligera", "ligero", "saludable", "natural", "fresco", "fresca",
-    "estilo", "tipo", "especial", "peruano", "peruana", "casero", "casera",
-    "salsa", "estofado", "guiso", "sudado", "saltado",
-    "ensalada", "tostada", "tortilla", "sandwich", "sandwi",
-    "ceviche", "cebiche", "tiradito", "causa", "crema", "sopa",
-    "batido", "licuado", "smoothi",
-    "verduras", "frutas", "fruta",
-    "aguacate",
-    "tallarines", "fideos", "espagueti", "fettuccine",
-    "porcion", "controlada", "rellena", "relleno",
-    "canchita", "serrana", "serrano",
-})
+_IGNORADOS: frozenset[str] = frozenset(
+    {
+        "con",
+        "sin",
+        "del",
+        "los",
+        "las",
+        "una",
+        "unos",
+        "unas",
+        "horno",
+        "plancha",
+        "parrilla",
+        "vapor",
+        "frito",
+        "cocido",
+        "asado",
+        "ligera",
+        "ligero",
+        "saludable",
+        "natural",
+        "fresco",
+        "fresca",
+        "estilo",
+        "tipo",
+        "especial",
+        "peruano",
+        "peruana",
+        "casero",
+        "casera",
+        "salsa",
+        "estofado",
+        "guiso",
+        "sudado",
+        "saltado",
+        "ensalada",
+        "tostada",
+        "tortilla",
+        "sandwich",
+        "sandwi",
+        "ceviche",
+        "cebiche",
+        "tiradito",
+        "causa",
+        "crema",
+        "sopa",
+        "batido",
+        "licuado",
+        "smoothi",
+        "verduras",
+        "frutas",
+        "fruta",
+        "aguacate",
+        "tallarines",
+        "fideos",
+        "espagueti",
+        "fettuccine",
+        "porcion",
+        "controlada",
+        "rellena",
+        "relleno",
+        "canchita",
+        "serrana",
+        "serrano",
+    }
+)
 
 
 def _norm(texto: str) -> str:
@@ -56,9 +109,9 @@ def main() -> None:
     Session = sessionmaker(bind=engine)
 
     with Session() as db:
-        platos = db.execute(text(
-            "SELECT id, nombre, nombre_normalizado FROM platos WHERE origen = 'llm' ORDER BY id"
-        )).fetchall()
+        platos = db.execute(
+            text("SELECT id, nombre, nombre_normalizado FROM platos WHERE origen = 'llm' ORDER BY id")
+        ).fetchall()
 
         print(f"\nAuditando {len(platos)} platos con origen='llm'...\n")
 
@@ -67,24 +120,29 @@ def main() -> None:
         for plato_id, nombre, nombre_norm in platos:
             nombre_norm = _norm(nombre or "")
 
-            ings = db.execute(text(
-                "SELECT a.nombre, a.nombre_normalizado "
-                "FROM plato_ingredientes pi "
-                "JOIN alimentos a ON a.id = pi.alimento_id "
-                "WHERE pi.plato_id = :pid"
-            ), {"pid": plato_id}).fetchall()
+            ings = db.execute(
+                text(
+                    "SELECT a.nombre, a.nombre_normalizado "
+                    "FROM plato_ingredientes pi "
+                    "JOIN alimentos a ON a.id = pi.alimento_id "
+                    "WHERE pi.plato_id = :pid"
+                ),
+                {"pid": plato_id},
+            ).fetchall()
 
             if not ings:
-                inconsistentes.append({
-                    "id": plato_id, "nombre": nombre,
-                    "tokens_ausentes": ["SIN INGREDIENTES"],
-                    "ingredientes": [],
-                })
+                inconsistentes.append(
+                    {
+                        "id": plato_id,
+                        "nombre": nombre,
+                        "tokens_ausentes": ["SIN INGREDIENTES"],
+                        "ingredientes": [],
+                    }
+                )
                 continue
 
             tokens_nombre = [
-                t for t in (nombre_norm or "").split()
-                if len(t) >= 5 and t not in _IGNORADOS and not t.isdigit()
+                t for t in (nombre_norm or "").split() if len(t) >= 5 and t not in _IGNORADOS and not t.isdigit()
             ]
             if len(tokens_nombre) < 2:
                 continue
@@ -95,21 +153,20 @@ def main() -> None:
                     if len(tok) >= 4:
                         ings_tokens.add(tok)
 
-            ausentes = [
-                t for t in tokens_nombre
-                if not any(t in ing_tok or ing_tok in t for ing_tok in ings_tokens)
-            ]
+            ausentes = [t for t in tokens_nombre if not any(t in ing_tok or ing_tok in t for ing_tok in ings_tokens)]
 
             ratio_ausentes = len(ausentes) / len(tokens_nombre)
             if ratio_ausentes >= 0.4:
-                inconsistentes.append({
-                    "id": plato_id,
-                    "nombre": nombre,
-                    "tokens_ausentes": ausentes,
-                    "tokens_nombre": tokens_nombre,
-                    "ingredientes": [n for n, _ in ings],
-                    "ratio": ratio_ausentes,
-                })
+                inconsistentes.append(
+                    {
+                        "id": plato_id,
+                        "nombre": nombre,
+                        "tokens_ausentes": ausentes,
+                        "tokens_nombre": tokens_nombre,
+                        "ingredientes": [n for n, _ in ings],
+                        "ratio": ratio_ausentes,
+                    }
+                )
 
         if not inconsistentes:
             print("✅ Todos los platos LLM pasan el check de coherencia nombre↔ingredientes.\n")

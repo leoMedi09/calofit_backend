@@ -5,6 +5,7 @@ crea los registros Plato + PlatoIngrediente y genera los pasos de preparación.
 Activado desde asistente_registro_comida.py (Capa 1.5) cuando un plato no existe
 en el catálogo local y la consulta parece un plato completo (≥2 palabras).
 """
+
 from __future__ import annotations
 
 import difflib
@@ -17,9 +18,11 @@ from typing import List, Optional
 def _sufijos_con_compat(a: str, b: str) -> bool:
     """Guard 'con X': rechaza el match si los modificadores después de 'con' no comparten
     ninguna palabra. Evita que 'tortilla de huevo con pan' → 'Tortilla de Huevo con Espinacas'."""
+
     def _suf(s: str) -> list[str]:
         idx = s.rfind(" con ")
-        return s[idx + 5:].split() if idx >= 0 else []
+        return s[idx + 5 :].split() if idx >= 0 else []
+
     s1, s2 = _suf(a), _suf(b)
     if not s1 or not s2:
         return True
@@ -50,6 +53,7 @@ def _sanitizar_nombre_plato(nombre: str) -> str:
     limpio = _RE_PREFIJO_VERBAL.sub("", (nombre or "").strip()).strip()
     return limpio if len(limpio) >= 3 else nombre.strip()
 
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -60,109 +64,261 @@ from app.services.nutricional_result import validar_macros_atwater
 logger = get_logger("plato_constructor")
 
 
-_NO_FOOD_TOKENS: frozenset[str] = frozenset({
-    "hierro", "acero", "aluminio", "cobre", "plomo", "oro", "plata",
-    "titanio", "zinc", "niquelado", "cemento", "ladrillo", "concreto",
-    "yeso", "plastico", "vidrio", "tornillo", "tuerca", "alambre",
-    "cable", "pintura", "veneno", "gasolina", "petroleo", "solvente",
-    "detergente", "lejia", "cloro", "jabon",
-})
+_NO_FOOD_TOKENS: frozenset[str] = frozenset(
+    {
+        "hierro",
+        "acero",
+        "aluminio",
+        "cobre",
+        "plomo",
+        "oro",
+        "plata",
+        "titanio",
+        "zinc",
+        "niquelado",
+        "cemento",
+        "ladrillo",
+        "concreto",
+        "yeso",
+        "plastico",
+        "vidrio",
+        "tornillo",
+        "tuerca",
+        "alambre",
+        "cable",
+        "pintura",
+        "veneno",
+        "gasolina",
+        "petroleo",
+        "solvente",
+        "detergente",
+        "lejia",
+        "cloro",
+        "jabon",
+    }
+)
 
 _RANGOS_CALORICOS: dict = {
-    "desayuno":    (300,  500),
-    "almuerzo":    (600,  900),
-    "cena":        (300,  550),
-    "cualquiera":  (150, 1000),
-    "snack":       ( 80,  300),
-    "merienda":    ( 80,  300),
-    "cebiche":          (150,  450),
-    "tiradito":         (150,  400),
-    "causa ferreñafana":(400,  650),
-    "arroz con pato":   (700, 1000),
-    "jalea":            (500,  900),
-    "chaufa":           (350,  750),
-    "sopa":             (100,  400),
-    "ensalada":         ( 80,  500),
-    "anticucho":        (200,  500),
-    "mazamorra":        (150,  400),
-    "picarones":        (250,  550),
-    "apanado":          (400,  900),
-    "milanesa":         (400,  900),
+    "desayuno": (300, 500),
+    "almuerzo": (600, 900),
+    "cena": (300, 550),
+    "cualquiera": (150, 1000),
+    "snack": (80, 300),
+    "merienda": (80, 300),
+    "cebiche": (150, 450),
+    "tiradito": (150, 400),
+    "causa ferreñafana": (400, 650),
+    "arroz con pato": (700, 1000),
+    "jalea": (500, 900),
+    "chaufa": (350, 750),
+    "sopa": (100, 400),
+    "ensalada": (80, 500),
+    "anticucho": (200, 500),
+    "mazamorra": (150, 400),
+    "picarones": (250, 550),
+    "apanado": (400, 900),
+    "milanesa": (400, 900),
 }
 
 _CONFLICTOS_SEMANTICOS: list[tuple[set[str], frozenset[str]]] = [
-    ({"cebiche", "ceviche"},
-     frozenset({"palta", "aguacate", "zanahoria", "tomate", "jengibre", "ketchup",
-                "salsa de tomate", "mayonesa", "crema de leche", "mostaza",
-                "aceite de oliva", "aceite vegetal", "aceite", "mantequilla",
-                "crema", "queso", "leche", "yogurt"})),
-    ({"tostada", "pan tostado", "sandwich", "sandw"},
-     frozenset({"arroz blanco", "papa cocida", "papa sancochada"})),
-    ({"sopa", "crema de", "caldo"},
-     frozenset({"mayonesa", "jamonada", "aceitunas", "jamon"})),
-    ({"torta", "queque", "bizcocho", "mousse", "flan"},
-     frozenset({"ajo", "cebolla", "comino", "oregano"})),
-    ({"cebiche", "ceviche", "tiradito"},
-     frozenset({"palta", "aguacate", "zanahoria", "tomate",
-                "pescado blanco cocido", "salmon cocido", "trucha cocida",
-                "sancochado", "sancochada"})),
-    ({"cebiche", "ceviche", "tiradito"},
-     frozenset({"frito", "rebozado", "empanizado", "apanado",
-                "horneado", "a la plancha con aceite"})),
-    ({"sudado", "aguadito", "chilcano"},
-     frozenset({"pescado blanco frito", "pescado frito", "apanado", "frito",
-                "rebozado", "empanizado", "chicharron de pescado"})),
-    ({"al horno", "a la parrilla", "horneado", "parrillada"},
-     frozenset({"sancochado", "sancochada", "hervido", "hervida"})),
-    ({"causa ferreñafana", "causa ferrenafana"},
-     frozenset({"mayonesa", "queso fresco", "queso", "crema de leche",
-                "leche evaporada", "mantequilla", "pescado blanco fresco",
-                "pescado blanco cocido"})),
-    ({"jalea"},
-     frozenset({"pescado blanco fresco", "pescado blanco cocido",
-                "calamar crudo", "langostino crudo"})),
-    ({"chaufa", "arroz chaufa"},
-     frozenset({"perejil", "cilantro", "albahaca", "aceite de oliva",
-                "mantequilla", "crema de leche"})),
-    ({"apanado", "apanada", "empanizado", "empanizada", "milanesa", "rebozado", "rebozada"},
-     frozenset({"cebolla", "ajo", "perejil", "cilantro", "albahaca",
-                "palta", "aguacate", "tomate", "zanahoria", "pimiento", "pepino",
-                "lechuga", "espinaca", "brocoli", "brócoli", "champiñon", "champiñones",
-                "arroz", "papa cocida", "papa sancochada", "fideos",
-                "queso", "crema de leche", "leche evaporada", "yogurt", "mantequilla"})),
-    ({"cebiche de camaron", "cebiche de langostino", "cebiche mixto"},
-     frozenset({"queso", "crema de leche", "papa cocida", "zanahoria cocida",
-                "choclo cocido", "cancha tostada"})),
-    ({"ensalada"},
-     frozenset({"salchipapa", "papa rellena", "hot dog", "hamburguesa"})),
+    (
+        {"cebiche", "ceviche"},
+        frozenset(
+            {
+                "palta",
+                "aguacate",
+                "zanahoria",
+                "tomate",
+                "jengibre",
+                "ketchup",
+                "salsa de tomate",
+                "mayonesa",
+                "crema de leche",
+                "mostaza",
+                "aceite de oliva",
+                "aceite vegetal",
+                "aceite",
+                "mantequilla",
+                "crema",
+                "queso",
+                "leche",
+                "yogurt",
+            }
+        ),
+    ),
+    ({"tostada", "pan tostado", "sandwich", "sandw"}, frozenset({"arroz blanco", "papa cocida", "papa sancochada"})),
+    ({"sopa", "crema de", "caldo"}, frozenset({"mayonesa", "jamonada", "aceitunas", "jamon"})),
+    ({"torta", "queque", "bizcocho", "mousse", "flan"}, frozenset({"ajo", "cebolla", "comino", "oregano"})),
+    (
+        {"cebiche", "ceviche", "tiradito"},
+        frozenset(
+            {
+                "palta",
+                "aguacate",
+                "zanahoria",
+                "tomate",
+                "pescado blanco cocido",
+                "salmon cocido",
+                "trucha cocida",
+                "sancochado",
+                "sancochada",
+            }
+        ),
+    ),
+    (
+        {"cebiche", "ceviche", "tiradito"},
+        frozenset({"frito", "rebozado", "empanizado", "apanado", "horneado", "a la plancha con aceite"}),
+    ),
+    (
+        {"sudado", "aguadito", "chilcano"},
+        frozenset(
+            {
+                "pescado blanco frito",
+                "pescado frito",
+                "apanado",
+                "frito",
+                "rebozado",
+                "empanizado",
+                "chicharron de pescado",
+            }
+        ),
+    ),
+    (
+        {"al horno", "a la parrilla", "horneado", "parrillada"},
+        frozenset({"sancochado", "sancochada", "hervido", "hervida"}),
+    ),
+    (
+        {"causa ferreñafana", "causa ferrenafana"},
+        frozenset(
+            {
+                "mayonesa",
+                "queso fresco",
+                "queso",
+                "crema de leche",
+                "leche evaporada",
+                "mantequilla",
+                "pescado blanco fresco",
+                "pescado blanco cocido",
+            }
+        ),
+    ),
+    ({"jalea"}, frozenset({"pescado blanco fresco", "pescado blanco cocido", "calamar crudo", "langostino crudo"})),
+    (
+        {"chaufa", "arroz chaufa"},
+        frozenset({"perejil", "cilantro", "albahaca", "aceite de oliva", "mantequilla", "crema de leche"}),
+    ),
+    (
+        {"apanado", "apanada", "empanizado", "empanizada", "milanesa", "rebozado", "rebozada"},
+        frozenset(
+            {
+                "cebolla",
+                "ajo",
+                "perejil",
+                "cilantro",
+                "albahaca",
+                "palta",
+                "aguacate",
+                "tomate",
+                "zanahoria",
+                "pimiento",
+                "pepino",
+                "lechuga",
+                "espinaca",
+                "brocoli",
+                "brócoli",
+                "champiñon",
+                "champiñones",
+                "arroz",
+                "papa cocida",
+                "papa sancochada",
+                "fideos",
+                "queso",
+                "crema de leche",
+                "leche evaporada",
+                "yogurt",
+                "mantequilla",
+            }
+        ),
+    ),
+    (
+        {"cebiche de camaron", "cebiche de langostino", "cebiche mixto"},
+        frozenset({"queso", "crema de leche", "papa cocida", "zanahoria cocida", "choclo cocido", "cancha tostada"}),
+    ),
+    ({"ensalada"}, frozenset({"salchipapa", "papa rellena", "hot dog", "hamburguesa"})),
 ]
 
 
 _INCOMPATIBILIDADES_INGREDIENTES: list[tuple[frozenset[str], frozenset[str]]] = [
     (
         frozenset({"leche en polvo", "leche descremada en polvo", "leche entera en polvo"}),
-        frozenset({
-            "pollo", "pechuga", "muslo", "pescado", "res", "cerdo", "chancho",
-            "carne", "lomo", "bistec", "camaron", "langostino", "calamar",
-            "pulpo", "atun", "salmon", "caballa", "lisa", "mero", "tollo",
-            "pavo", "pato", "mariscos", "anchoveta", "bonito", "trucha",
-        }),
+        frozenset(
+            {
+                "pollo",
+                "pechuga",
+                "muslo",
+                "pescado",
+                "res",
+                "cerdo",
+                "chancho",
+                "carne",
+                "lomo",
+                "bistec",
+                "camaron",
+                "langostino",
+                "calamar",
+                "pulpo",
+                "atun",
+                "salmon",
+                "caballa",
+                "lisa",
+                "mero",
+                "tollo",
+                "pavo",
+                "pato",
+                "mariscos",
+                "anchoveta",
+                "bonito",
+                "trucha",
+            }
+        ),
     ),
     (
         frozenset({"yogurt", "yogur"}),
-        frozenset({
-            "pescado", "camaron", "langostino", "calamar", "pulpo",
-            "atun", "salmon", "caballa", "lisa", "mero", "tollo",
-            "anchoveta", "bonito", "trucha", "salpreso",
-        }),
+        frozenset(
+            {
+                "pescado",
+                "camaron",
+                "langostino",
+                "calamar",
+                "pulpo",
+                "atun",
+                "salmon",
+                "caballa",
+                "lisa",
+                "mero",
+                "tollo",
+                "anchoveta",
+                "bonito",
+                "trucha",
+                "salpreso",
+            }
+        ),
     ),
     (
         frozenset({"pescado blanco fresco", "pescado fresco"}),
-        frozenset({
-            "leche", "leche evaporada", "leche fresca",
-            "queso", "queso fresco", "yogurt", "yogur", "mantequilla",
-            "leche en polvo",
-        }),
+        frozenset(
+            {
+                "leche",
+                "leche evaporada",
+                "leche fresca",
+                "queso",
+                "queso fresco",
+                "yogurt",
+                "yogur",
+                "mantequilla",
+                "leche en polvo",
+            }
+        ),
     ),
 ]
 
@@ -188,21 +344,13 @@ def _validar_compatibilidad_ingredientes(
     ings_norms = [_norm(alim.nombre) for alim, _ in resueltos]
 
     for grupo_a, grupo_b in _INCOMPATIBILIDADES_INGREDIENTES:
-        match_a = [
-            ing for ing in ings_norms
-            if any(k in ing for k in grupo_a)
-        ]
+        match_a = [ing for ing in ings_norms if any(k in ing for k in grupo_a)]
         if not match_a:
             continue
-        match_b = [
-            ing for ing in ings_norms
-            if any(k in ing for k in grupo_b)
-        ]
+        match_b = [ing for ing in ings_norms if any(k in ing for k in grupo_b)]
         if not match_b:
             continue
-        return False, (
-            f"incompatibilidad culinaria: '{match_a[0]}' con '{match_b[0]}'"
-        )
+        return False, (f"incompatibilidad culinaria: '{match_a[0]}' con '{match_b[0]}'")
 
     return True, ""
 
@@ -211,9 +359,21 @@ _PLANTILLAS_PLATOS: dict[str, dict] = {
     "ceviche_cebiche": {
         "keywords_plato": ["ceviche", "cebiche"],
         "ingredientes_base": [
-            "pescado", "caballa", "lisa", "mero", "tollo", "toyo",
-            "merluza", "cabrilla", "ojo de uva", "jurel", "bonito",
-            "camaron", "langostino", "pulpo", "calamar",
+            "pescado",
+            "caballa",
+            "lisa",
+            "mero",
+            "tollo",
+            "toyo",
+            "merluza",
+            "cabrilla",
+            "ojo de uva",
+            "jurel",
+            "bonito",
+            "camaron",
+            "langostino",
+            "pulpo",
+            "calamar",
         ],
         "prohibidos": ["queso", "crema", "leche", "mayonesa", "mantequilla", "yogurt"],
     },
@@ -247,25 +407,68 @@ _PLANTILLAS_PLATOS: dict[str, dict] = {
 
 _PLATOS_ESENCIALES: dict[str, dict] = {
     "ceviche": {
-        "obligatorios": ["pescado", "limon", "cebolla", "lisa", "caballa",
-                         "mero", "tollo", "toyo", "merluza", "cabrilla",
-                         "ojo de uva", "jurel", "camaron", "langostino", "pulpo"],
+        "obligatorios": [
+            "pescado",
+            "limon",
+            "cebolla",
+            "lisa",
+            "caballa",
+            "mero",
+            "tollo",
+            "toyo",
+            "merluza",
+            "cabrilla",
+            "ojo de uva",
+            "jurel",
+            "camaron",
+            "langostino",
+            "pulpo",
+        ],
         "obligatorio_todos": [
-            ("pescado", "lisa", "caballa", "mero", "tollo", "toyo",
-             "merluza", "cabrilla", "ojo de uva", "jurel",
-             "camaron", "langostino", "pulpo", "calamar", "anchoveta", "bonito",
-             "trucha", "salmon", "atun"),
+            (
+                "pescado",
+                "lisa",
+                "caballa",
+                "mero",
+                "tollo",
+                "toyo",
+                "merluza",
+                "cabrilla",
+                "ojo de uva",
+                "jurel",
+                "camaron",
+                "langostino",
+                "pulpo",
+                "calamar",
+                "anchoveta",
+                "bonito",
+                "trucha",
+                "salmon",
+                "atun",
+            ),
             ("limon", "lima", "citrico"),
             ("cebolla",),
         ],
-        "prohibidos": ["aceite", "mantequilla", "crema", "mayonesa", "leche",
-                       "queso", "yogurt", "ketchup", "mostaza"],
+        "prohibidos": ["aceite", "mantequilla", "crema", "mayonesa", "leche", "queso", "yogurt", "ketchup", "mostaza"],
     },
     "tiradito": {
         "obligatorio_todos": [
-            ("pescado", "lisa", "caballa", "mero", "lenguado", "trucha",
-             "tollo", "toyo", "merluza", "cabrilla", "ojo de uva",
-             "salmon", "atun", "bonito"),
+            (
+                "pescado",
+                "lisa",
+                "caballa",
+                "mero",
+                "lenguado",
+                "trucha",
+                "tollo",
+                "toyo",
+                "merluza",
+                "cabrilla",
+                "ojo de uva",
+                "salmon",
+                "atun",
+                "bonito",
+            ),
             ("limon", "lima"),
         ],
         "prohibidos": ["aceite", "mantequilla", "crema", "mayonesa"],
@@ -312,9 +515,20 @@ _PLATOS_ESENCIALES: dict[str, dict] = {
             ("huevo",),
             ("harina", "pan rallado", "pan molido", "galleta molida"),
         ],
-        "prohibidos": ["cebolla", "ajo", "perejil", "cilantro", "albahaca",
-                       "tomate", "palta", "zanahoria", "lechuga", "espinaca",
-                       "arroz", "fideos"],
+        "prohibidos": [
+            "cebolla",
+            "ajo",
+            "perejil",
+            "cilantro",
+            "albahaca",
+            "tomate",
+            "palta",
+            "zanahoria",
+            "lechuga",
+            "espinaca",
+            "arroz",
+            "fideos",
+        ],
     },
     "milanesa": {
         "obligatorio_todos": [
@@ -328,16 +542,25 @@ _PLATOS_ESENCIALES: dict[str, dict] = {
             ("pollo", "pechuga", "muslo"),
             ("huevo",),
         ],
-        "prohibidos": ["pescado", "res", "cerdo", "cebolla", "ajo",
-                       "perejil", "cilantro", "tomate", "palta", "zanahoria"],
+        "prohibidos": [
+            "pescado",
+            "res",
+            "cerdo",
+            "cebolla",
+            "ajo",
+            "perejil",
+            "cilantro",
+            "tomate",
+            "palta",
+            "zanahoria",
+        ],
     },
     "pescado apanado": {
         "obligatorio_todos": [
             ("pescado", "filete", "pescado blanco"),
             ("huevo",),
         ],
-        "prohibidos": ["cebolla", "ajo", "perejil", "cilantro", "albahaca",
-                       "tomate", "palta", "zanahoria"],
+        "prohibidos": ["cebolla", "ajo", "perejil", "cilantro", "albahaca", "tomate", "palta", "zanahoria"],
     },
 }
 
@@ -366,20 +589,14 @@ def _validar_ingredientes_esenciales(
             continue
 
         for grupo in reglas.get("obligatorio_todos", []):
-            if not any(
-                any(req in ing_n for req in grupo)
-                for ing_n in ings_norms
-            ):
+            if not any(any(req in ing_n for req in grupo) for ing_n in ings_norms):
                 return False, (
-                    f"falta ingrediente esencial para '{tipo}' — "
-                    f"se requiere al menos uno de: {', '.join(grupo[:4])}"
+                    f"falta ingrediente esencial para '{tipo}' — se requiere al menos uno de: {', '.join(grupo[:4])}"
                 )
 
         for prohibido in reglas.get("prohibidos", []):
             if any(prohibido in ing_n for ing_n in ings_norms):
-                return False, (
-                    f"ingrediente prohibido '{prohibido}' en plato tipo '{tipo}'"
-                )
+                return False, (f"ingrediente prohibido '{prohibido}' en plato tipo '{tipo}'")
 
     return True, ""
 
@@ -400,7 +617,7 @@ def auditar_platos_esenciales(session) -> list[dict]:
         nombre_n = _norm(p.nombre or "")
         ingredientes = []
         try:
-            for pi in (p.ingredientes or []):
+            for pi in p.ingredientes or []:
                 if pi.alimento:
                     ingredientes.append(_norm(pi.alimento.nombre or ""))
         except Exception:
@@ -412,31 +629,33 @@ def auditar_platos_esenciales(session) -> list[dict]:
 
             faltantes = []
             for grupo in reglas.get("obligatorio_todos", []):
-                if not any(
-                    any(req in ing for req in grupo)
-                    for ing in ingredientes
-                ):
+                if not any(any(req in ing for req in grupo) for ing in ingredientes):
                     faltantes.append(f"grupo({', '.join(grupo[:3])})")
 
             prohibidos_encontrados = [
-                bad for bad in reglas.get("prohibidos", [])
-                if any(bad in ing for ing in ingredientes)
+                bad for bad in reglas.get("prohibidos", []) if any(bad in ing for ing in ingredientes)
             ]
 
             if faltantes or prohibidos_encontrados:
                 logger.warning(
                     "[Auditoría] Plato id=%s '%s' — faltantes=%s  prohibidos=%s",
-                    p.id, p.nombre, faltantes, prohibidos_encontrados,
+                    p.id,
+                    p.nombre,
+                    faltantes,
+                    prohibidos_encontrados,
                 )
-                resultados.append({
-                    "plato_id": p.id,
-                    "nombre": p.nombre,
-                    "faltantes": faltantes,
-                    "prohibidos": prohibidos_encontrados,
-                    "ingredientes_actuales": ingredientes[:8],
-                })
+                resultados.append(
+                    {
+                        "plato_id": p.id,
+                        "nombre": p.nombre,
+                        "faltantes": faltantes,
+                        "prohibidos": prohibidos_encontrados,
+                        "ingredientes_actuales": ingredientes[:8],
+                    }
+                )
 
     return resultados
+
 
 def validar_semantica_plato(
     nombre_plato: str,
@@ -460,52 +679,45 @@ def validar_semantica_plato(
         for prohibido in plantilla.get("prohibidos", []):
             proh_n = _norm(prohibido)
             if any(proh_n in ing for ing in ings_n):
-                return False, (
-                    f"ingrediente prohibido '{prohibido}' en plato '{nombre_plato}'"
-                )
+                return False, (f"ingrediente prohibido '{prohibido}' en plato '{nombre_plato}'")
 
         base_list = plantilla.get("ingredientes_base", [])
         if base_list:
             base_norms = [_norm(b) for b in base_list]
-            if not any(
-                any(b in ing or ing in b for b in base_norms)
-                for ing in ings_n
-            ):
+            if not any(any(b in ing or ing in b for b in base_norms) for ing in ings_n):
                 return False, (
-                    f"falta ingrediente base en '{nombre_plato}' "
-                    f"(esperado uno de: {', '.join(base_list[:4])})"
+                    f"falta ingrediente base en '{nombre_plato}' (esperado uno de: {', '.join(base_list[:4])})"
                 )
 
     return True, ""
 
 
 _PROTEINAS_REQUERIDAS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
-    (("pollo",),                         ("pollo", "pechuga", "muslo")),
-    (("gallina",),                       ("gallina", "pollo", "pechuga", "muslo")),
-    (("pato",),                          ("pato",)),
-    (("pavo", "pavita"),                 ("pavo", "pavita")),
-    (("bistec", "carne de res", "lomo saltado"),
-                                         ("lomo", "res", "carne", "vacuno")),
-    (("cerdo", "chancho"),               ("cerdo", "chancho", "tocino")),
-    (("cabrito",),                       ("cabrito", "cordero")),
-    (("langostino",),                    ("langostino", "camaron")),
-    (("pulpo",),                         ("pulpo",)),
-    (("atun",),                          ("atun",)),
-    (("salmon",),                        ("salmon",)),
-    (("trucha",),                        ("trucha",)),
-    (("caballa",),                       ("caballa",)),
-    (("merluza",),                       ("merluza",)),
-    (("tollo",),                         ("tollo", "toyo")),
-    (("toyo",),                          ("toyo", "tollo")),
-    (("mero",),                          ("mero",)),
-    (("lisa",),                          ("lisa",)),
-    (("camaron",),                       ("camaron", "langostino")),
-    (("vacuno",),                        ("vacuno", "res", "carne", "lomo")),
-    (("arroz",),                         ("arroz",)),
-    (("quinua",),                        ("quinua",)),
-    (("avena",),                         ("avena",)),
-    (("lentejas", "lenteja"),            ("lenteja", "lentejas")),
-    (("garbanzo",),                      ("garbanzo",)),
+    (("pollo",), ("pollo", "pechuga", "muslo")),
+    (("gallina",), ("gallina", "pollo", "pechuga", "muslo")),
+    (("pato",), ("pato",)),
+    (("pavo", "pavita"), ("pavo", "pavita")),
+    (("bistec", "carne de res", "lomo saltado"), ("lomo", "res", "carne", "vacuno")),
+    (("cerdo", "chancho"), ("cerdo", "chancho", "tocino")),
+    (("cabrito",), ("cabrito", "cordero")),
+    (("langostino",), ("langostino", "camaron")),
+    (("pulpo",), ("pulpo",)),
+    (("atun",), ("atun",)),
+    (("salmon",), ("salmon",)),
+    (("trucha",), ("trucha",)),
+    (("caballa",), ("caballa",)),
+    (("merluza",), ("merluza",)),
+    (("tollo",), ("tollo", "toyo")),
+    (("toyo",), ("toyo", "tollo")),
+    (("mero",), ("mero",)),
+    (("lisa",), ("lisa",)),
+    (("camaron",), ("camaron", "langostino")),
+    (("vacuno",), ("vacuno", "res", "carne", "lomo")),
+    (("arroz",), ("arroz",)),
+    (("quinua",), ("quinua",)),
+    (("avena",), ("avena",)),
+    (("lentejas", "lenteja"), ("lenteja", "lentejas")),
+    (("garbanzo",), ("garbanzo",)),
 ]
 
 
@@ -521,10 +733,7 @@ def _verificar_proteina_requerida(
     for kws_nombre, kws_alimento in _PROTEINAS_REQUERIDAS:
         if not any(kw in nombre_plato_norm for kw in kws_nombre):
             continue
-        if not any(
-            any(ka in ing_n for ka in kws_alimento)
-            for ing_n in ings_norms
-        ):
+        if not any(any(ka in ing_n for ka in kws_alimento) for ing_n in ings_norms):
             return False, (
                 f"proteína '{kws_nombre[0]}' requerida por nombre "
                 f"no encontrada en ingredientes resueltos "
@@ -534,51 +743,51 @@ def _verificar_proteina_requerida(
 
 
 _COHERENCIA_NOMBRE_INGREDIENTES: list[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]] = [
-    (("pescado",),
-     ("pescado", "atun", "salmon", "trucha", "caballa", "lisa", "mero",
-      "tollo", "anchoveta", "bonito", "merluza", "tilapia", "lenguado",
-      "bacalao", "salpreso"),
-     ("pollo", "pechuga", "pavo", "pato", "res", "lomo", "cerdo", "chancho")),
-    (("pollo",),
-     ("pollo", "pechuga", "muslo", "pollo entero"),
-     ("pescado", "atun", "salmon", "pato", "pavo", "res", "lomo", "cerdo")),
-    (("pato",),
-     ("pato",),
-     ("pollo", "pechuga", "pescado", "pavo", "res", "cerdo")),
-    (("pavo", "pavita"),
-     ("pavo", "pavita"),
-     ("pollo", "pechuga", "pescado", "pato", "res", "cerdo")),
-    (("huevo",),
-     ("huevo",),
-     ()),
-    (("cerdo", "chancho"),
-     ("cerdo", "chancho", "tocino", "chicharron"),
-     ("pollo", "pescado", "pato", "res", "lomo")),
+    (
+        ("pescado",),
+        (
+            "pescado",
+            "atun",
+            "salmon",
+            "trucha",
+            "caballa",
+            "lisa",
+            "mero",
+            "tollo",
+            "anchoveta",
+            "bonito",
+            "merluza",
+            "tilapia",
+            "lenguado",
+            "bacalao",
+            "salpreso",
+        ),
+        ("pollo", "pechuga", "pavo", "pato", "res", "lomo", "cerdo", "chancho"),
+    ),
+    (
+        ("pollo",),
+        ("pollo", "pechuga", "muslo", "pollo entero"),
+        ("pescado", "atun", "salmon", "pato", "pavo", "res", "lomo", "cerdo"),
+    ),
+    (("pato",), ("pato",), ("pollo", "pechuga", "pescado", "pavo", "res", "cerdo")),
+    (("pavo", "pavita"), ("pavo", "pavita"), ("pollo", "pechuga", "pescado", "pato", "res", "cerdo")),
+    (("huevo",), ("huevo",), ()),
+    (("cerdo", "chancho"), ("cerdo", "chancho", "tocino", "chicharron"), ("pollo", "pescado", "pato", "res", "lomo")),
 ]
 
 
 _CONSISTENCIA_FINAL_REGLAS: list[tuple[frozenset, tuple, tuple]] = [
-    (frozenset({"lisa"}),
-     ("lisa",),
-     ("pollo", "pechuga", "res", "vacuno", "cerdo", "chancho")),
-    (frozenset({"res", "vacuno"}),
-     ("res", "vacuno", "lomo", "carne"),
-     ("pollo", "pechuga", "pescado", "atun", "salmon", "pato", "cerdo")),
-    (frozenset({"atun"}),
-     ("atun",),
-     ("pollo", "pechuga", "res", "vacuno", "cerdo", "pato")),
-    (frozenset({"salmon"}),
-     ("salmon",),
-     ("pollo", "pechuga", "res", "vacuno", "cerdo", "pato")),
-    (frozenset({"trucha"}),
-     ("trucha",),
-     ("pollo", "pechuga", "res", "vacuno", "cerdo", "pato")),
-    (frozenset({"caballa"}),
-     ("caballa",),
-     ("pollo", "pechuga", "res", "vacuno", "cerdo", "pato")),
-    (frozenset({"camaron"}),
-     ("camaron", "langostino"),
-     ("pollo", "pechuga", "res", "vacuno", "cerdo")),
+    (frozenset({"lisa"}), ("lisa",), ("pollo", "pechuga", "res", "vacuno", "cerdo", "chancho")),
+    (
+        frozenset({"res", "vacuno"}),
+        ("res", "vacuno", "lomo", "carne"),
+        ("pollo", "pechuga", "pescado", "atun", "salmon", "pato", "cerdo"),
+    ),
+    (frozenset({"atun"}), ("atun",), ("pollo", "pechuga", "res", "vacuno", "cerdo", "pato")),
+    (frozenset({"salmon"}), ("salmon",), ("pollo", "pechuga", "res", "vacuno", "cerdo", "pato")),
+    (frozenset({"trucha"}), ("trucha",), ("pollo", "pechuga", "res", "vacuno", "cerdo", "pato")),
+    (frozenset({"caballa"}), ("caballa",), ("pollo", "pechuga", "res", "vacuno", "cerdo", "pato")),
+    (frozenset({"camaron"}), ("camaron", "langostino"), ("pollo", "pechuga", "res", "vacuno", "cerdo")),
 ]
 
 
@@ -614,10 +823,7 @@ def _validar_consistencia_final(
         matched_kw = next(iter(matched))
 
         if kws_requeridos:
-            tiene = any(
-                any(kr in ing_n for kr in kws_requeridos)
-                for ing_n in ings_norms
-            )
+            tiene = any(any(kr in ing_n for kr in kws_requeridos) for ing_n in ings_norms)
             if not tiene:
                 return False, (
                     f"nombre contiene palabra '{matched_kw}' pero ningún ingrediente "
@@ -626,9 +832,7 @@ def _validar_consistencia_final(
 
         for prohibido in kws_prohibidos:
             if any(prohibido in ing_n for ing_n in ings_norms):
-                return False, (
-                    f"nombre='{matched_kw}' pero ingrediente '{prohibido}' es incompatible"
-                )
+                return False, (f"nombre='{matched_kw}' pero ingrediente '{prohibido}' es incompatible")
 
     return True, ""
 
@@ -650,7 +854,7 @@ def _limpiar_nombre_segun_resueltos(nombre_plato: str, resueltos: list[tuple]) -
     if not resueltos:
         return nombre_plato
 
-    partes = re.split(r'\s+con\s+', nombre_plato, flags=re.IGNORECASE)
+    partes = re.split(r"\s+con\s+", nombre_plato, flags=re.IGNORECASE)
     if len(partes) == 1:
         return nombre_plato
 
@@ -676,7 +880,8 @@ def _limpiar_nombre_segun_resueltos(nombre_plato: str, resueltos: list[tuple]) -
     if partes_rechazadas:
         logger.debug(
             "Nombre '%s': eliminados sufijos no resueltos → %s",
-            nombre_plato, partes_rechazadas,
+            nombre_plato,
+            partes_rechazadas,
         )
 
     if partes_validas:
@@ -684,51 +889,118 @@ def _limpiar_nombre_segun_resueltos(nombre_plato: str, resueltos: list[tuple]) -
     return base
 
 
-_PALABRAS_IGNORADAS_NOMBRE = frozenset({
-    "con", "sin", "del", "los", "las", "una", "unos", "unas",
-    "horno", "plancha", "parrilla", "vapor", "frito", "frita", "cocido", "cocida", "asado", "asada",
-    "horneado", "horneada",
-    "apanado", "apanada",
-    "empanizado", "empanizada",
-    "rebozado", "rebozada",
-    "ahumado", "ahumada",
-    "gratinado", "gratinada",
-    "sancochado", "sancochada",
-    "caramelizado",
-    "agridulce",
-    "crujiente",
-    "dorado", "dorada",
-    "salteado", "salteada",
-    "ligera", "ligero", "saludable", "natural", "fresco", "fresca",
-    "estilo", "tipo", "especial", "peruano", "peruana", "casero", "casera",
-    "salsa", "estofado", "guiso", "sudado", "saltado",
-    "ensalada", "tostada", "tortilla", "sandwich", "sandwi",
-    "ceviche", "cebiche", "tiradito", "causa", "crema", "sopa",
-    "batido", "licuado", "smoothi",
-    "verduras", "frutas", "fruta",
-    "aguacate",
-    "tallarines", "fideos", "espagueti", "fettuccine",
-    "porcion", "porcion", "controlada", "rellena", "relleno",
-    "chuleta",
-    "filete",
-    "bistec",
-    "lomo",
-    "canchita", "serrana", "serrano", "norteno", "criollo", "criolla",
-    "chaufa",
-    "anticucho",
-    "anticuchos",
-    "mazamorra",
-    "picarones",
-    "empanada",
-    "empanadas",
-    "alfajor",
-    "alfajores",
-    "pepian",
-    "chicharron",
-    "morado",
-    "morada",
-    "gallina",
-})
+_PALABRAS_IGNORADAS_NOMBRE = frozenset(
+    {
+        "con",
+        "sin",
+        "del",
+        "los",
+        "las",
+        "una",
+        "unos",
+        "unas",
+        "horno",
+        "plancha",
+        "parrilla",
+        "vapor",
+        "frito",
+        "frita",
+        "cocido",
+        "cocida",
+        "asado",
+        "asada",
+        "horneado",
+        "horneada",
+        "apanado",
+        "apanada",
+        "empanizado",
+        "empanizada",
+        "rebozado",
+        "rebozada",
+        "ahumado",
+        "ahumada",
+        "gratinado",
+        "gratinada",
+        "sancochado",
+        "sancochada",
+        "caramelizado",
+        "agridulce",
+        "crujiente",
+        "dorado",
+        "dorada",
+        "salteado",
+        "salteada",
+        "ligera",
+        "ligero",
+        "saludable",
+        "natural",
+        "fresco",
+        "fresca",
+        "estilo",
+        "tipo",
+        "especial",
+        "peruano",
+        "peruana",
+        "casero",
+        "casera",
+        "salsa",
+        "estofado",
+        "guiso",
+        "sudado",
+        "saltado",
+        "ensalada",
+        "tostada",
+        "tortilla",
+        "sandwich",
+        "sandwi",
+        "ceviche",
+        "cebiche",
+        "tiradito",
+        "causa",
+        "crema",
+        "sopa",
+        "batido",
+        "licuado",
+        "smoothi",
+        "verduras",
+        "frutas",
+        "fruta",
+        "aguacate",
+        "tallarines",
+        "fideos",
+        "espagueti",
+        "fettuccine",
+        "porcion",
+        "porcion",
+        "controlada",
+        "rellena",
+        "relleno",
+        "chuleta",
+        "filete",
+        "bistec",
+        "lomo",
+        "canchita",
+        "serrana",
+        "serrano",
+        "norteno",
+        "criollo",
+        "criolla",
+        "chaufa",
+        "anticucho",
+        "anticuchos",
+        "mazamorra",
+        "picarones",
+        "empanada",
+        "empanadas",
+        "alfajor",
+        "alfajores",
+        "pepian",
+        "chicharron",
+        "morado",
+        "morada",
+        "gallina",
+    }
+)
 
 
 def _validar_ingredientes_en_nombre(
@@ -754,19 +1026,13 @@ def _validar_ingredientes_en_nombre(
                 ings_tokens.add(tok)
 
     tokens_nombre = [
-        t for t in nombre_norm.split()
-        if len(t) >= 5
-        and t not in _PALABRAS_IGNORADAS_NOMBRE
-        and not t.isdigit()
+        t for t in nombre_norm.split() if len(t) >= 5 and t not in _PALABRAS_IGNORADAS_NOMBRE and not t.isdigit()
     ]
 
     if len(tokens_nombre) < 2:
         return True, ""
 
-    ausentes = [
-        t for t in tokens_nombre
-        if not any(t in ing_tok or ing_tok in t for ing_tok in ings_tokens)
-    ]
+    ausentes = [t for t in tokens_nombre if not any(t in ing_tok or ing_tok in t for ing_tok in ings_tokens)]
 
     if len(ausentes) >= len(tokens_nombre) * 0.4:
         return False, (
@@ -779,15 +1045,15 @@ def _validar_ingredientes_en_nombre(
 
 
 _TIPOS_CULINARIOS_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
-    ("crudo_marino",    ("ceviche", "cebiche", "tiradito", "leche de tigre")),
-    ("crudo_general",   ("sashimi", "carpaccio", "tartare", "tartár")),
-    ("ensalada",        ("ensalada",)),
-    ("sopa",            ("sopa", "caldo", "chupe", "aguadito", "crema de", "consomé")),
-    ("guiso",           ("guiso", "estofado", "adobo", "pepián", "seco de")),
+    ("crudo_marino", ("ceviche", "cebiche", "tiradito", "leche de tigre")),
+    ("crudo_general", ("sashimi", "carpaccio", "tartare", "tartár")),
+    ("ensalada", ("ensalada",)),
+    ("sopa", ("sopa", "caldo", "chupe", "aguadito", "crema de", "consomé")),
+    ("guiso", ("guiso", "estofado", "adobo", "pepián", "seco de")),
     ("cocido_caliente", ("saltado", "al horno", "horneado", "a la parrilla", "frito")),
-    ("tostada",         ("tostada", "pan tostado", "tostado de pan")),
-    ("batido",          ("batido", "smoothie", "licuado", "jugo de", "bebida de")),
-    ("snack",           ("snack", "fruta", "colacion", "bocado")),
+    ("tostada", ("tostada", "pan tostado", "tostado de pan")),
+    ("batido", ("batido", "smoothie", "licuado", "jugo de", "bebida de")),
+    ("snack", ("snack", "fruta", "colacion", "bocado")),
 ]
 
 
@@ -803,25 +1069,38 @@ def _inferir_tipo_culinario(nombre_norm: str) -> str:
 
 
 _REGLAS_COHERENCIA_CULINARIA: list[tuple[str, tuple[str, ...], str]] = [
-    ("crudo_marino",
-     ("frito", "cocido", "sancochado", "horneado", "a la parrilla",
-      "hervido", "asado", "rebozado", "empanizado"),
-     "plato crudo marino no puede tener ingredientes cocidos/fritos"),
-    ("ensalada",
-     ("papa frita", "salchipapa", "chicharron de cerdo", "hot dog"),
-     "ensalada con componentes de fritura industrial incompatibles"),
-    ("sopa",
-     ("mayonesa", "crema agria"),
-     "sopa con emulsiones frías incompatibles"),
-    ("tostada",
-     ("leche en polvo", "leche descremada polvo", "leche evaporada",
-      "leche fresca", "leche entera", "leche",
-      "arroz blanco", "arroz cocido", "pasta cocida", "fideos"),
-     "tostada no puede contener leche líquida/polvo ni carbohidratos pesados"),
-    ("batido",
-     ("pan integral", "pan tostado", "arroz", "pasta", "fideos",
-      "papa", "yuca", "camote"),
-     "batido/licuado no puede contener bases sólidas como pan, arroz o pasta"),
+    (
+        "crudo_marino",
+        ("frito", "cocido", "sancochado", "horneado", "a la parrilla", "hervido", "asado", "rebozado", "empanizado"),
+        "plato crudo marino no puede tener ingredientes cocidos/fritos",
+    ),
+    (
+        "ensalada",
+        ("papa frita", "salchipapa", "chicharron de cerdo", "hot dog"),
+        "ensalada con componentes de fritura industrial incompatibles",
+    ),
+    ("sopa", ("mayonesa", "crema agria"), "sopa con emulsiones frías incompatibles"),
+    (
+        "tostada",
+        (
+            "leche en polvo",
+            "leche descremada polvo",
+            "leche evaporada",
+            "leche fresca",
+            "leche entera",
+            "leche",
+            "arroz blanco",
+            "arroz cocido",
+            "pasta cocida",
+            "fideos",
+        ),
+        "tostada no puede contener leche líquida/polvo ni carbohidratos pesados",
+    ),
+    (
+        "batido",
+        ("pan integral", "pan tostado", "arroz", "pasta", "fideos", "papa", "yuca", "camote"),
+        "batido/licuado no puede contener bases sólidas como pan, arroz o pasta",
+    ),
 ]
 
 
@@ -853,26 +1132,22 @@ def _validar_coherencia_culinaria(
         if tipo != tipo_regla:
             continue
         for prohibido in prohibidos:
-            conflicto = next(
-                (ing_n for ing_n in ings_norms if prohibido in ing_n), None
-            )
+            conflicto = next((ing_n for ing_n in ings_norms if prohibido in ing_n), None)
             if conflicto:
-                return False, (
-                    f"{motivo} — ingrediente conflictivo: '{conflicto}'"
-                )
+                return False, (f"{motivo} — ingrediente conflictivo: '{conflicto}'")
 
     return True, ""
 
 
 _VERBOS_ESPERADOS_POR_TIPO: dict[str, set[str]] = {
-    "crudo_marino":    {"mezclar", "marinar", "macerar", "exprimir", "agregar", "revolver"},
-    "sopa":            {"hervir", "cocinar", "agregar", "calentar", "colar", "sofreir"},
-    "guiso":           {"saltear", "freir", "guisar", "sofreir", "cocinar", "agregar"},
+    "crudo_marino": {"mezclar", "marinar", "macerar", "exprimir", "agregar", "revolver"},
+    "sopa": {"hervir", "cocinar", "agregar", "calentar", "colar", "sofreir"},
+    "guiso": {"saltear", "freir", "guisar", "sofreir", "cocinar", "agregar"},
     "cocido_caliente": {"saltear", "freir", "hornear", "hervir", "cocinar", "calentar"},
 }
 
 _VERBOS_INCOMPATIBLES_POR_TIPO: dict[str, set[str]] = {
-    "crudo_marino":  {"freir", "hornear", "hervir", "saltear", "cocinar a fuego"},
+    "crudo_marino": {"freir", "hornear", "hervir", "saltear", "cocinar a fuego"},
     "crudo_general": {"freir", "hornear", "hervir", "saltear"},
 }
 
@@ -898,9 +1173,10 @@ def _validar_preparacion_vs_tipo(nombre_norm: str, preparacion: list[str]) -> No
     for verbo in incompatibles:
         if verbo in texto_prep:
             logger.warning(
-                "[prep_culinaria] '%s' (tipo=%s): verbo incompatible '%s' en preparación — "
-                "revisar LLM de preparacion",
-                nombre_norm, tipo, verbo,
+                "[prep_culinaria] '%s' (tipo=%s): verbo incompatible '%s' en preparación — revisar LLM de preparacion",
+                nombre_norm,
+                tipo,
+                verbo,
             )
             return
 
@@ -908,16 +1184,20 @@ def _validar_preparacion_vs_tipo(nombre_norm: str, preparacion: list[str]) -> No
     if esperados and not any(v in texto_prep for v in esperados):
         logger.debug(
             "[prep_culinaria] '%s' (tipo=%s): preparación sin verbos esperados %s",
-            nombre_norm, tipo, sorted(esperados),
+            nombre_norm,
+            tipo,
+            sorted(esperados),
         )
 
 
 def _token_en_texto(token: str, texto: str) -> bool:
     """Verifica que `token` aparezca como palabra completa en `texto` (no substring)."""
-    return bool(re.search(
-        r'(?<![a-záéíóúüñ])' + re.escape(token) + r'(?![a-záéíóúüñ])',
-        texto,
-    ))
+    return bool(
+        re.search(
+            r"(?<![a-záéíóúüñ])" + re.escape(token) + r"(?![a-záéíóúüñ])",
+            texto,
+        )
+    )
 
 
 def _validar_coherencia_nombre_ingredientes(
@@ -943,10 +1223,7 @@ def _validar_coherencia_nombre_ingredientes(
             continue
 
         if kws_requeridos:
-            tiene_requerido = any(
-                any(kr in ing_n for kr in kws_requeridos)
-                for ing_n in ings_norms
-            )
+            tiene_requerido = any(any(kr in ing_n for kr in kws_requeridos) for ing_n in ings_norms)
             if not tiene_requerido:
                 return False, (
                     f"nombre contiene '{kws_nombre[0]}' pero ningún ingrediente "
@@ -957,8 +1234,7 @@ def _validar_coherencia_nombre_ingredientes(
             for prohibido in kws_prohibidos:
                 if any(_token_en_texto(prohibido, ing_n) for ing_n in ings_norms):
                     return False, (
-                        f"nombre='{kws_nombre[0]}' pero ingrediente '{prohibido}' "
-                        f"es incompatible — proteínas cruzadas"
+                        f"nombre='{kws_nombre[0]}' pero ingrediente '{prohibido}' es incompatible — proteínas cruzadas"
                     )
 
     return True, ""
@@ -995,7 +1271,9 @@ def _autocorregir_gramajes(
         if gramos > _MAX_GRAMOS_ING:
             logger.warning(
                 "Hard cap gramaje: '%s' %.0fg → %.0fg (máx por ingrediente)",
-                alim.nombre, gramos, _MAX_GRAMOS_ING,
+                alim.nombre,
+                gramos,
+                _MAX_GRAMOS_ING,
             )
             gramos = _MAX_GRAMOS_ING
         capped.append((alim, gramos))
@@ -1010,14 +1288,24 @@ def _autocorregir_gramajes(
     if kcal_actual > max_kcal:
         factor = max_kcal / kcal_actual
         corregidos = [(alim, _redondear_a_5g(gramos * factor)) for alim, gramos in resueltos]
-        logger.info("Autocorrección gramajes: %.0f→%.0f kcal (límite %s)", kcal_actual, _calcular_kcal_resueltos(corregidos), max_kcal)
+        logger.info(
+            "Autocorrección gramajes: %.0f→%.0f kcal (límite %s)",
+            kcal_actual,
+            _calcular_kcal_resueltos(corregidos),
+            max_kcal,
+        )
         return corregidos
 
     if kcal_actual < min_kcal and len(resueltos) > 0:
         factor = min_kcal / kcal_actual
         if factor <= 2.5:
             corregidos = [(alim, _redondear_a_5g(gramos * factor)) for alim, gramos in resueltos]
-            logger.info("Autocorrección gramajes: %.0f→%.0f kcal (mínimo %s)", kcal_actual, _calcular_kcal_resueltos(corregidos), min_kcal)
+            logger.info(
+                "Autocorrección gramajes: %.0f→%.0f kcal (mínimo %s)",
+                kcal_actual,
+                _calcular_kcal_resueltos(corregidos),
+                min_kcal,
+            )
             return corregidos
 
     return resueltos
@@ -1039,23 +1327,40 @@ def _filtrar_coherencia_semantica(
             continue
         antes = len(filtrados)
         filtrados = [
-            ing for ing in filtrados
-            if not any(
-                prohibido in ing.get("nombre_es", "").lower()
-                for prohibido in ingredientes_prohibidos
-            )
+            ing
+            for ing in filtrados
+            if not any(prohibido in ing.get("nombre_es", "").lower() for prohibido in ingredientes_prohibidos)
         ]
         eliminados = antes - len(filtrados)
         if eliminados:
-            logger.info("Coherencia semántica: %d ingrediente(s) incompatibles eliminados de '%s'", eliminados, nombre_plato)
+            logger.info(
+                "Coherencia semántica: %d ingrediente(s) incompatibles eliminados de '%s'", eliminados, nombre_plato
+            )
 
     return filtrados
 
 
-_PLATO_STOPWORDS: frozenset[str] = frozenset({
-    "con", "de", "en", "al", "a", "la", "el", "del", "las", "los",
-    "y", "e", "sin", "para", "sobre", "tipo", "estilo",
-})
+_PLATO_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "con",
+        "de",
+        "en",
+        "al",
+        "a",
+        "la",
+        "el",
+        "del",
+        "las",
+        "los",
+        "y",
+        "e",
+        "sin",
+        "para",
+        "sobre",
+        "tipo",
+        "estilo",
+    }
+)
 
 
 def _detectar_ingrediente_principal(
@@ -1072,10 +1377,7 @@ def _detectar_ingrediente_principal(
     Returns:
         nombre_es del ingrediente principal, o None si no hay overlap claro.
     """
-    palabras = [
-        w for w in nombre_plato_norm.split()
-        if w not in _PLATO_STOPWORDS and len(w) >= 4
-    ]
+    palabras = [w for w in nombre_plato_norm.split() if w not in _PLATO_STOPWORDS and len(w) >= 4]
     if not palabras:
         return None
     for item in ingredientes_raw:
@@ -1104,8 +1406,9 @@ async def _descomponer_plato_llm(nombre_plato: str) -> List[dict]:
     """
     try:
         from app.services.ia_service import ia_engine
+
         prompt = (
-            f"Eres chef nutricionista peruano. Descompón el plato \"{nombre_plato}\" "
+            f'Eres chef nutricionista peruano. Descompón el plato "{nombre_plato}" '
             f"en sus ingredientes principales.\n"
             f"IMPORTANTE: Si el nombre NO corresponde a un plato o alimento REAL que existe "
             f"en la gastronomía (ej. ingredientes ficticios, mitológicos o imaginarios), "
@@ -1181,8 +1484,7 @@ async def _descomponer_plato_llm(nombre_plato: str) -> List[dict]:
             return []
         items = json.loads(m.group(0))
         parsed = [
-            {"nombre_es": str(it.get("nombre_es", "")).strip(),
-             "gramos": max(1, int(it.get("gramos", 50)))}
+            {"nombre_es": str(it.get("nombre_es", "")).strip(), "gramos": max(1, int(it.get("gramos", 50)))}
             for it in items
             if it.get("nombre_es") and str(it.get("nombre_es", "")).strip()
         ]
@@ -1190,58 +1492,88 @@ async def _descomponer_plato_llm(nombre_plato: str) -> List[dict]:
         _nombre_n = _norm(nombre_plato)
 
         _PLATOS_SIMPLES_KEYWORDS = (
-            "ensalada", "fruta", "yogur", "yogurt", "batido", "snack",
-            "manzana", "platano", "naranja", "mandarina",
+            "ensalada",
+            "fruta",
+            "yogur",
+            "yogurt",
+            "batido",
+            "snack",
+            "manzana",
+            "platano",
+            "naranja",
+            "mandarina",
         )
         if any(kw in _nombre_n for kw in _PLATOS_SIMPLES_KEYWORDS):
-            _RELLENOS_GENERICOS = frozenset({
-                "aceite de oliva", "aceite vegetal", "aceite", "sal comun", "sal",
-                "especias", "condimento", "pimienta", "oregano", "comino",
-                "ajo", "cebolla",
-            })
-            _reales = [
-                p for p in parsed
-                if not any(r in _norm(p["nombre_es"]) for r in _RELLENOS_GENERICOS)
-            ]
+            _RELLENOS_GENERICOS = frozenset(
+                {
+                    "aceite de oliva",
+                    "aceite vegetal",
+                    "aceite",
+                    "sal comun",
+                    "sal",
+                    "especias",
+                    "condimento",
+                    "pimienta",
+                    "oregano",
+                    "comino",
+                    "ajo",
+                    "cebolla",
+                }
+            )
+            _reales = [p for p in parsed if not any(r in _norm(p["nombre_es"]) for r in _RELLENOS_GENERICOS)]
             if len(_reales) >= 2:
                 if len(_reales) < len(parsed):
                     logger.debug(
                         "Plato simple '%s': eliminados %d ingredientes de relleno",
-                        nombre_plato, len(parsed) - len(_reales),
+                        nombre_plato,
+                        len(parsed) - len(_reales),
                     )
                 parsed = _reales
 
         if "tostada" in _nombre_n or "pan tostado" in _nombre_n:
-            _PROHIBIDOS_TOSTADA = frozenset({
-                "leche", "leche en polvo", "leche descremada", "leche fresca",
-                "leche evaporada", "leche entera",
-                "arroz", "pasta cocida", "fideos",
-            })
+            _PROHIBIDOS_TOSTADA = frozenset(
+                {
+                    "leche",
+                    "leche en polvo",
+                    "leche descremada",
+                    "leche fresca",
+                    "leche evaporada",
+                    "leche entera",
+                    "arroz",
+                    "pasta cocida",
+                    "fideos",
+                }
+            )
             _antes = len(parsed)
-            parsed = [
-                p for p in parsed
-                if not any(pr in _norm(p["nombre_es"]) for pr in _PROHIBIDOS_TOSTADA)
-            ]
+            parsed = [p for p in parsed if not any(pr in _norm(p["nombre_es"]) for pr in _PROHIBIDOS_TOSTADA)]
             if len(parsed) < _antes:
                 logger.warning(
                     "Tostada '%s': eliminados %d ingredientes incompatibles (leche/arroz/pasta)",
-                    nombre_plato, _antes - len(parsed),
+                    nombre_plato,
+                    _antes - len(parsed),
                 )
 
         if any(kw in _nombre_n for kw in ("batido", "licuado", "smoothie", "jugo de")):
-            _PROHIBIDOS_BATIDO = frozenset({
-                "pan integral", "pan tostado", "pan", "arroz", "pasta",
-                "fideos", "papa", "yuca", "camote",
-            })
+            _PROHIBIDOS_BATIDO = frozenset(
+                {
+                    "pan integral",
+                    "pan tostado",
+                    "pan",
+                    "arroz",
+                    "pasta",
+                    "fideos",
+                    "papa",
+                    "yuca",
+                    "camote",
+                }
+            )
             _antes = len(parsed)
-            parsed = [
-                p for p in parsed
-                if not any(pr in _norm(p["nombre_es"]) for pr in _PROHIBIDOS_BATIDO)
-            ]
+            parsed = [p for p in parsed if not any(pr in _norm(p["nombre_es"]) for pr in _PROHIBIDOS_BATIDO)]
             if len(parsed) < _antes:
                 logger.warning(
                     "Batido '%s': eliminados %d ingredientes sólidos incompatibles",
-                    nombre_plato, _antes - len(parsed),
+                    nombre_plato,
+                    _antes - len(parsed),
                 )
 
         return parsed
@@ -1250,9 +1582,7 @@ async def _descomponer_plato_llm(nombre_plato: str) -> List[dict]:
         return []
 
 
-async def _generar_preparacion_llm(
-    nombre_plato: str, nombres_ingredientes: List[str]
-) -> Optional[list]:
+async def _generar_preparacion_llm(nombre_plato: str, nombres_ingredientes: List[str]) -> Optional[list]:
     """
     Genera pasos de preparación como array JSON de strings.
     REGLA CRÍTICA: La preparación SOLO puede mencionar los ingredientes de la
@@ -1261,9 +1591,10 @@ async def _generar_preparacion_llm(
     """
     try:
         from app.services.ia_service import ia_engine
-        lista_numerada = "\n".join(f"  {i+1}. {ing}" for i, ing in enumerate(nombres_ingredientes))
+
+        lista_numerada = "\n".join(f"  {i + 1}. {ing}" for i, ing in enumerate(nombres_ingredientes))
         prompt = (
-            f"Genera los pasos de preparación del plato \"{nombre_plato}\".\n"
+            f'Genera los pasos de preparación del plato "{nombre_plato}".\n'
             f"\n"
             f"LISTA DE INGREDIENTES DISPONIBLES (SOLO ESTOS, ninguno más):\n"
             f"{lista_numerada}\n"
@@ -1297,27 +1628,54 @@ async def _generar_preparacion_llm(
                 if len(tok) >= 4:
                     _ings_norm_set.add(tok)
 
-        _PREP_STOPWORDS = frozenset({
-            "agua", "sal", "calor", "fuego", "temperatura", "minutos",
-            "plato", "tazon", "bowl", "sarten", "olla", "taza", "cuchara",
-            "mezcla", "agrega", "cocina", "sirve", "coloca", "corta", "pela",
-            "calienta", "hierve", "sofrie", "saltea", "hornea", "bate", "lava",
-            "pica", "ralla", "escurre", "sazona", "prueba", "revuelve",
-        })
+        _PREP_STOPWORDS = frozenset(
+            {
+                "agua",
+                "sal",
+                "calor",
+                "fuego",
+                "temperatura",
+                "minutos",
+                "plato",
+                "tazon",
+                "bowl",
+                "sarten",
+                "olla",
+                "taza",
+                "cuchara",
+                "mezcla",
+                "agrega",
+                "cocina",
+                "sirve",
+                "coloca",
+                "corta",
+                "pela",
+                "calienta",
+                "hierve",
+                "sofrie",
+                "saltea",
+                "hornea",
+                "bate",
+                "lava",
+                "pica",
+                "ralla",
+                "escurre",
+                "sazona",
+                "prueba",
+                "revuelve",
+            }
+        )
         texto_prep = " ".join(pasos_limpios).lower()
         texto_prep_norm = _norm(texto_prep)
-        tokens_prep = [
-            t for t in texto_prep_norm.split()
-            if len(t) >= 5 and t not in _PREP_STOPWORDS
-        ]
+        tokens_prep = [t for t in texto_prep_norm.split() if len(t) >= 5 and t not in _PREP_STOPWORDS]
         _tokens_sin_cobertura = [
-            t for t in tokens_prep
-            if not any(t in ing_tok or ing_tok in t for ing_tok in _ings_norm_set)
+            t for t in tokens_prep if not any(t in ing_tok or ing_tok in t for ing_tok in _ings_norm_set)
         ]
         if len(_tokens_sin_cobertura) > 3:
             logger.warning(
                 "[prep_alucinacion] '%s': preparación menciona tokens sin cobertura en ings: %s",
-                nombre_plato, _tokens_sin_cobertura[:5],
+                nombre_plato,
+                _tokens_sin_cobertura[:5],
             )
 
         return pasos_limpios
@@ -1332,9 +1690,12 @@ def _verificar_trinidad_nutricional(plato: Plato) -> None:
         macros = plato.calcular_macros()
         logger.info(
             "[Trinidad] Plato '%s' (id=%s): kcal=%s prot=%s carb=%s gras=%s",
-            plato.nombre, plato.id,
-            macros["calorias"], macros["proteinas_g"],
-            macros["carbohidratos_g"], macros["grasas_g"],
+            plato.nombre,
+            plato.id,
+            macros["calorias"],
+            macros["proteinas_g"],
+            macros["carbohidratos_g"],
+            macros["grasas_g"],
         )
     except Exception as e:
         logger.error("[Trinidad] Error verificando plato id=%s: %s", getattr(plato, "id", "?"), e)
@@ -1353,11 +1714,10 @@ def _loguear_resultado_nutricional(
             confidence_score,
             validar_plato_nutricional,
         )
+
         fuentes = [getattr(alim, "fuente", None) or "bd" for alim, _ in resueltos]
         macros = plato.calcular_macros()
-        advertencias = validar_plato_nutricional(
-            nombre_display, macros["calorias"], macros["proteinas_g"], tipo_plato
-        )
+        advertencias = validar_plato_nutricional(nombre_display, macros["calorias"], macros["proteinas_g"], tipo_plato)
         confianza = confidence_score(fuentes)
         resultado = ResultadoNutricional(
             estado="ok" if not advertencias else "incompleto",
@@ -1376,7 +1736,9 @@ def _loguear_resultado_nutricional(
         else:
             logger.info(
                 "[ResultadoNutricional] %s → kcal=%.0f confianza=%.2f",
-                nombre_display, resultado.kcal, resultado.confianza,
+                nombre_display,
+                resultado.kcal,
+                resultado.confianza,
             )
     except Exception as e:
         logger.error("[ResultadoNutricional] Error: %s", e)
@@ -1440,8 +1802,7 @@ async def crear_plato_dinamico(
             tipo_plato = "picarones"
         elif "anticucho" in nombre_norm:
             tipo_plato = "anticucho"
-        elif any(kw in nombre_norm for kw in ("apanado", "apanada", "empanizado",
-                                               "milanesa", "rebozado")):
+        elif any(kw in nombre_norm for kw in ("apanado", "apanada", "empanizado", "milanesa", "rebozado")):
             tipo_plato = "almuerzo"
 
     _tokens = set(nombre_norm.split())
@@ -1451,12 +1812,7 @@ async def crear_plato_dinamico(
         return None
 
     _first_word = nombre_norm.split()[0]
-    existing = (
-        db.query(Plato)
-        .filter(Plato.nombre_normalizado.like(f"{_first_word}%"))
-        .limit(40)
-        .all()
-    )
+    existing = db.query(Plato).filter(Plato.nombre_normalizado.like(f"{_first_word}%")).limit(40).all()
     for p in existing:
         _pnn = p.nombre_normalizado or ""
         sim = difflib.SequenceMatcher(None, nombre_norm, _pnn).ratio()
@@ -1484,13 +1840,14 @@ async def crear_plato_dinamico(
             _partes = nombre_ing_es.split()
             if len(_partes) >= 2:
                 _nombre_simple = " ".join(_partes[:-1])
-                _norm_simple   = _norm(_nombre_simple)
+                _norm_simple = _norm(_nombre_simple)
                 if len(_norm_simple) >= 4:
                     alim = await _buscar_o_crear_alimento_async(db, _norm_simple, _nombre_simple)
                     if alim:
                         logger.info(
                             "Ingrediente '%s' → simplificado a '%s'",
-                            nombre_ing_es, _nombre_simple,
+                            nombre_ing_es,
+                            _nombre_simple,
                         )
 
         if alim:
@@ -1505,7 +1862,8 @@ async def crear_plato_dinamico(
             logger.error(
                 "Ingrediente principal '%s' no resuelto para '%s' — construcción abortada "
                 "(evita devolver kcal incorrectas por omisión silenciosa)",
-                _nombre_ing_principal, nombre_plato,
+                _nombre_ing_principal,
+                nombre_plato,
             )
             return None
 
@@ -1516,7 +1874,8 @@ async def crear_plato_dinamico(
     if all(g < 10 for _, g in resueltos):
         logger.warning(
             "Plato '%s' rechazado: todos los ingredientes tienen gramaje traza (<10g): %s",
-            nombre_plato, [(alim.nombre, g) for alim, g in resueltos],
+            nombre_plato,
+            [(alim.nombre, g) for alim, g in resueltos],
         )
         return None
 
@@ -1524,7 +1883,8 @@ async def crear_plato_dinamico(
     if _peso_total < 50:
         logger.warning(
             "Plato '%s' rechazado: peso total %.0fg < mínimo 50g",
-            nombre_plato, _peso_total,
+            nombre_plato,
+            _peso_total,
         )
         return None
 
@@ -1532,7 +1892,8 @@ async def crear_plato_dinamico(
     if not _ok_compat:
         logger.warning(
             "Plato '%s' rechazado por incompatibilidad de ingredientes: %s",
-            nombre_plato, _motivo_compat,
+            nombre_plato,
+            _motivo_compat,
         )
         return None
 
@@ -1540,30 +1901,28 @@ async def crear_plato_dinamico(
     if not _ok_coh:
         logger.warning(
             "Plato '%s' rechazado: incoherencia nombre↔ingredientes — %s",
-            nombre_plato, _motivo_coh,
+            nombre_plato,
+            _motivo_coh,
         )
         return None
 
     _ok_prot, _motivo_prot = _verificar_proteina_requerida(nombre_norm, resueltos)
     if not _ok_prot:
-        logger.warning(
-            "Plato '%s' rechazado por proteína faltante: %s", nombre_plato, _motivo_prot
-        )
+        logger.warning("Plato '%s' rechazado por proteína faltante: %s", nombre_plato, _motivo_prot)
         return None
 
     _ings_resueltos_nombres = [alim.nombre for alim, _ in resueltos]
     _ok_sem, _motivo_sem = validar_semantica_plato(nombre_plato, _ings_resueltos_nombres)
     if not _ok_sem:
-        logger.warning(
-            "Plato '%s' rechazado por semántica: %s", nombre_plato, _motivo_sem
-        )
+        logger.warning("Plato '%s' rechazado por semántica: %s", nombre_plato, _motivo_sem)
         return None
 
     _ok_esen, _motivo_esen = _validar_ingredientes_esenciales(nombre_norm, resueltos)
     if not _ok_esen:
         logger.warning(
             "Plato '%s' rechazado — ingredientes esenciales: %s",
-            nombre_plato, _motivo_esen,
+            nombre_plato,
+            _motivo_esen,
         )
         return None
 
@@ -1571,7 +1930,8 @@ async def crear_plato_dinamico(
     if not _ok_cf:
         logger.warning(
             "Plato '%s' rechazado — consistencia final: %s",
-            nombre_plato, _motivo_cf,
+            nombre_plato,
+            _motivo_cf,
         )
         return None
 
@@ -1579,7 +1939,8 @@ async def crear_plato_dinamico(
     if not _ok_cul:
         logger.warning(
             "Plato '%s' rechazado — incoherencia culinaria: %s",
-            nombre_plato, _motivo_cul,
+            nombre_plato,
+            _motivo_cul,
         )
         return None
 
@@ -1587,7 +1948,8 @@ async def crear_plato_dinamico(
     if not _ok_ien:
         logger.warning(
             "Plato '%s' rechazado — nombre menciona ingredientes no resueltos: %s",
-            nombre_plato, _motivo_ien,
+            nombre_plato,
+            _motivo_ien,
         )
         return None
 
@@ -1614,9 +1976,7 @@ async def crear_plato_dinamico(
 
     _ok_atw, _motivo_atw = validar_macros_atwater(_kcal_total, _prot_t, _carb_t, _gras_t)
     if not _ok_atw:
-        logger.warning(
-            "Plato '%s' rechazado: %s", nombre_plato, _motivo_atw
-        )
+        logger.warning("Plato '%s' rechazado: %s", nombre_plato, _motivo_atw)
         return None
 
     nombre_plato = _limpiar_nombre_segun_resueltos(nombre_plato, resueltos)
@@ -1634,12 +1994,14 @@ async def crear_plato_dinamico(
         db.flush()
 
         for orden, (alim, gramos) in enumerate(resueltos):
-            db.add(PlatoIngrediente(
-                plato_id=plato.id,
-                alimento_id=alim.id,
-                gramos=float(_redondear_a_5g(gramos)),
-                orden=orden,
-            ))
+            db.add(
+                PlatoIngrediente(
+                    plato_id=plato.id,
+                    alimento_id=alim.id,
+                    gramos=float(_redondear_a_5g(gramos)),
+                    orden=orden,
+                )
+            )
 
         db.flush()
 
@@ -1654,7 +2016,9 @@ async def crear_plato_dinamico(
 
         logger.info(
             "Plato '%s' creado (id=%s, %d ingredientes)",
-            nombre_display, plato.id, len(resueltos),
+            nombre_display,
+            plato.id,
+            len(resueltos),
         )
         _verificar_trinidad_nutricional(plato)
         _loguear_resultado_nutricional(plato, resueltos, tipo_plato, nombre_display)
@@ -1662,12 +2026,11 @@ async def crear_plato_dinamico(
 
     except IntegrityError:
         db.rollback()
-        existente = db.query(Plato).filter(
-            Plato.nombre_normalizado == nombre_norm[:255]
-        ).first()
+        existente = db.query(Plato).filter(Plato.nombre_normalizado == nombre_norm[:255]).first()
         logger.info(
             "Race condition en plato '%s' — devolviendo existente id=%s",
-            nombre_plato, existente.id if existente else None,
+            nombre_plato,
+            existente.id if existente else None,
         )
         return existente
 

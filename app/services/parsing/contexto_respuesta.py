@@ -2,6 +2,7 @@
 Heurísticas ligeras sobre el mensaje del usuario (dominio comida vs ejercicio).
 Usado por ``detectar_modo_funcion`` cuando no hay clasificación por LLM.
 """
+
 from __future__ import annotations
 
 from typing import Literal, Optional

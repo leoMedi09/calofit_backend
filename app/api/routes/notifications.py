@@ -21,7 +21,7 @@ class NotificacionesPrefRequest(BaseModel):
 async def registrar_fcm_token(
     payload: FcmTokenRequest,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
     """
     Registra (o actualiza) el token FCM del dispositivo del cliente autenticado,
@@ -41,7 +41,7 @@ async def registrar_fcm_token(
 async def actualizar_preferencia_notificaciones(
     payload: NotificacionesPrefRequest,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
     """
     Activa o desactiva los recordatorios diarios push para el cliente autenticado.

@@ -1,6 +1,7 @@
 """
 Schemas Pydantic para caché de alimentos, platos, rutinas y alimentos sin resolver.
 """
+
 from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field
@@ -8,16 +9,16 @@ from pydantic import BaseModel, Field
 
 class AppCacheAlimentosCreate(BaseModel):
     food_normalized: str
-    user_id:         Optional[int] = None
-    alimento_id:     Optional[int] = None
-    source:          Optional[str] = None
-    raw_response:    Optional[str] = None
-    expires_at:      Optional[datetime] = None
+    user_id: Optional[int] = None
+    alimento_id: Optional[int] = None
+    source: Optional[str] = None
+    raw_response: Optional[str] = None
+    expires_at: Optional[datetime] = None
 
 
 class AppCacheAlimentosResponse(AppCacheAlimentosCreate):
-    id:         int
-    hit_count:  int = 1
+    id: int
+    hit_count: int = 1
     created_at: datetime
 
     class Config:
@@ -26,15 +27,15 @@ class AppCacheAlimentosResponse(AppCacheAlimentosCreate):
 
 class AppCachePlatosCreate(BaseModel):
     plato_normalized: str
-    user_id:          Optional[int] = None
-    plato_id:         Optional[int] = None
-    source:           Optional[str] = None
-    expires_at:       Optional[datetime] = None
+    user_id: Optional[int] = None
+    plato_id: Optional[int] = None
+    source: Optional[str] = None
+    expires_at: Optional[datetime] = None
 
 
 class AppCachePlatosResponse(AppCachePlatosCreate):
-    id:         int
-    hit_count:  int = 1
+    id: int
+    hit_count: int = 1
     created_at: datetime
 
     class Config:
@@ -42,25 +43,25 @@ class AppCachePlatosResponse(AppCachePlatosCreate):
 
 
 class AlimentoSinResolverCreate(BaseModel):
-    nombre_original:    str
+    nombre_original: str
     nombre_normalizado: Optional[str] = None
-    user_id:            Optional[int] = None
-    reporter_id:        Optional[int] = None
-    mensaje_contexto:   Optional[str] = None
+    user_id: Optional[int] = None
+    reporter_id: Optional[int] = None
+    mensaje_contexto: Optional[str] = None
 
 
 class AlimentoSinResolverValidar(BaseModel):
-    estado:           str = "validado"
-    notas:            Optional[str] = None
+    estado: str = "validado"
+    notas: Optional[str] = None
     fecha_resolucion: Optional[datetime] = None
 
 
 class AlimentoSinResolverResponse(AlimentoSinResolverCreate):
-    id:               int
-    intentos:         int = 1
-    estado:           str
-    notas:            Optional[str] = None
-    fecha_reporte:    datetime
+    id: int
+    intentos: int = 1
+    estado: str
+    notas: Optional[str] = None
+    fecha_reporte: datetime
     fecha_resolucion: Optional[datetime] = None
 
     class Config:

@@ -190,7 +190,11 @@ METS_EXTRA: Dict[str, float] = {
 }
 
 METS_GYM: Dict[str, float] = {
-    **METS_CARDIO, **METS_FUERZA, **METS_FUNCIONAL, **METS_DEPORTES, **METS_EXTRA,
+    **METS_CARDIO,
+    **METS_FUERZA,
+    **METS_FUNCIONAL,
+    **METS_DEPORTES,
+    **METS_EXTRA,
 }
 
 

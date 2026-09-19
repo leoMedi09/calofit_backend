@@ -4,6 +4,7 @@ Registro auditado de cada evento de ingesta.
 `comida_registros` es la fuente de verdad por evento.
 `progreso_calorias` es derivado: recalcular_progreso_diario() lo mantiene sincronizado.
 """
+
 from __future__ import annotations
 
 from sqlalchemy import Column, Date, Float, ForeignKey, Integer, String, TIMESTAMP

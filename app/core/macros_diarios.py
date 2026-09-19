@@ -7,6 +7,7 @@ Macros — fuentes unificadas (Problema 1).
 2) ``macros_desde_calorias_pct_clasico``: reparto % sobre un total kcal
    (CalculadorDietaAutomatica, ``parsear_macros_de_texto`` cuando solo hay kcal).
 """
+
 from __future__ import annotations
 
 from typing import Dict, Optional

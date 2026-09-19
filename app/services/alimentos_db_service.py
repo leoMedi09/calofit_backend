@@ -80,27 +80,14 @@ class AlimentosDBService:
         n = _norm(nombre)
         if not n:
             return None
-        a = (
-            self.db.query(Alimento)
-            .filter(Alimento.nombre_normalizado == n)
-            .first()
-        )
+        a = self.db.query(Alimento).filter(Alimento.nombre_normalizado == n).first()
         if a:
             return int(a.id)
-        al = (
-            self.db.query(AlimentoAlias)
-            .filter(AlimentoAlias.alias_normalizado == n)
-            .first()
-        )
+        al = self.db.query(AlimentoAlias).filter(AlimentoAlias.alias_normalizado == n).first()
         if al:
             return int(al.alimento_id)
         like = f"{n}%"
-        a2 = (
-            self.db.query(Alimento)
-            .filter(Alimento.nombre_normalizado.like(like))
-            .order_by(Alimento.id.asc())
-            .first()
-        )
+        a2 = self.db.query(Alimento).filter(Alimento.nombre_normalizado.like(like)).order_by(Alimento.id.asc()).first()
         return int(a2.id) if a2 else None
 
     def _resolver_alimento_id_lata(self, nombre: str) -> Optional[int]:
@@ -231,11 +218,7 @@ class AlimentosDBService:
             aid = self._resolver_alimento_id_lata(name) if is_lata else self.resolver_alimento_id(name)
             if not aid:
                 return None
-            g_un = (
-                self._gramos_unidad_o_default_lata(aid, unit)
-                if is_lata
-                else self.gramos_por_unidad(aid, unit)
-            )
+            g_un = self._gramos_unidad_o_default_lata(aid, unit) if is_lata else self.gramos_por_unidad(aid, unit)
             if not g_un:
                 return None
             return self.macros_por_gramos(aid, n * g_un)
@@ -249,11 +232,7 @@ class AlimentosDBService:
             aid = self._resolver_alimento_id_lata(name) if is_lata else self.resolver_alimento_id(name)
             if not aid:
                 return None
-            g_un = (
-                self._gramos_unidad_o_default_lata(aid, unit)
-                if is_lata
-                else self.gramos_por_unidad(aid, unit)
-            )
+            g_un = self._gramos_unidad_o_default_lata(aid, unit) if is_lata else self.gramos_por_unidad(aid, unit)
             if not g_un:
                 return None
             return self.macros_por_gramos(aid, qty * g_un)
@@ -281,6 +260,3 @@ class AlimentosDBService:
             if por:
                 out.append(por)
         return out
-
-
-

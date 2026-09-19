@@ -2,11 +2,13 @@ import re
 from datetime import datetime, date, timedelta, timezone
 from typing import Any, Dict, Optional, Sequence
 
+
 def get_peru_now() -> datetime:
     """Retorna la fecha y hora actual en zona horaria de Perú (UTC-5)"""
     utc_now = datetime.now(timezone.utc)
     peru_time = utc_now - timedelta(hours=5)
     return peru_time
+
 
 def get_peru_date() -> date:
     """Retorna la fecha actual en Perú"""
@@ -26,10 +28,14 @@ def inferir_momento_dia_peru() -> str:
       22–04 → snack
     """
     hora = get_peru_now().hour
-    if  5 <= hora <=  9: return "desayuno"
-    if 10 <= hora <= 14: return "almuerzo"
-    if 15 <= hora <= 17: return "merienda"
-    if 18 <= hora <= 21: return "cena"
+    if 5 <= hora <= 9:
+        return "desayuno"
+    if 10 <= hora <= 14:
+        return "almuerzo"
+    if 15 <= hora <= 17:
+        return "merienda"
+    if 18 <= hora <= 21:
+        return "cena"
     return "snack"
 
 
@@ -48,45 +54,47 @@ def parsear_macros_de_texto(
     (opcional ``objetivo_plato`` para % ganar/perder/mantener).
     """
     from app.core.macros_diarios import macros_desde_calorias_pct_clasico
+
     if not macros_str or not macros_str.strip():
         return None
     s = macros_str.strip()
 
     cal = (
-        re.search(r'Cal(?:or[ií]as?)?:\s*([\d.,]+)', s, re.IGNORECASE) or
-        re.search(r'([\d.,]+)\s*kcal', s, re.IGNORECASE) or
-        re.search(r'([\d.,]+)\s*cal\b', s, re.IGNORECASE)
+        re.search(r"Cal(?:or[ií]as?)?:\s*([\d.,]+)", s, re.IGNORECASE)
+        or re.search(r"([\d.,]+)\s*kcal", s, re.IGNORECASE)
+        or re.search(r"([\d.,]+)\s*cal\b", s, re.IGNORECASE)
     )
 
     p = (
-        re.search(r'P(?:rot(?:eína?s?)?)?\s*:\s*([\d.,]+)', s, re.IGNORECASE)
+        re.search(r"P(?:rot(?:eína?s?)?)?\s*:\s*([\d.,]+)", s, re.IGNORECASE)
         or re.search(r"(?<![A-Za-z0-9])P\s+([\d.,]+)\s*g\b", s, re.IGNORECASE)
-        or re.search(r'([\d.,]+)\s*g\s*(?:de\s+)?prot(?:eína?s?)?', s, re.IGNORECASE)
-        or re.search(r'prot(?:eína?s?)?\s*[:\-]\s*([\d.,]+)', s, re.IGNORECASE)
-        or re.search(r'prot(?:eína?s?)?\s+([\d.,]+)\s*g', s, re.IGNORECASE)
+        or re.search(r"([\d.,]+)\s*g\s*(?:de\s+)?prot(?:eína?s?)?", s, re.IGNORECASE)
+        or re.search(r"prot(?:eína?s?)?\s*[:\-]\s*([\d.,]+)", s, re.IGNORECASE)
+        or re.search(r"prot(?:eína?s?)?\s+([\d.,]+)\s*g", s, re.IGNORECASE)
     )
 
     c = (
-        re.search(r'C(?:arb(?:ohidrat[eo]s?)?)?\s*:\s*([\d.,]+)', s, re.IGNORECASE) or
-        re.search(r'([\d.,]+)\s*g\s*(?:de\s+)?carb(?:ohidrat[eo]s?)?', s, re.IGNORECASE) or
-        re.search(r'carb(?:ohidrat[eo]s?)?\s*[:\-]\s*([\d.,]+)', s, re.IGNORECASE) or
-        re.search(r'carb(?:ohidrat[eo]s?)?\s+([\d.,]+)\s*g', s, re.IGNORECASE)
+        re.search(r"C(?:arb(?:ohidrat[eo]s?)?)?\s*:\s*([\d.,]+)", s, re.IGNORECASE)
+        or re.search(r"([\d.,]+)\s*g\s*(?:de\s+)?carb(?:ohidrat[eo]s?)?", s, re.IGNORECASE)
+        or re.search(r"carb(?:ohidrat[eo]s?)?\s*[:\-]\s*([\d.,]+)", s, re.IGNORECASE)
+        or re.search(r"carb(?:ohidrat[eo]s?)?\s+([\d.,]+)\s*g", s, re.IGNORECASE)
     )
 
     g = (
-        re.search(r'G(?:ras(?:as?)?)?\s*:\s*([\d.,]+)', s, re.IGNORECASE) or
-        re.search(r'([\d.,]+)\s*g\s*(?:de\s+)?gras(?:as?)?', s, re.IGNORECASE) or
-        re.search(r'gras(?:as?)?\s*[:\-]\s*([\d.,]+)', s, re.IGNORECASE) or
-        re.search(r'gras(?:as?)?\s+([\d.,]+)\s*g', s, re.IGNORECASE)
+        re.search(r"G(?:ras(?:as?)?)?\s*:\s*([\d.,]+)", s, re.IGNORECASE)
+        or re.search(r"([\d.,]+)\s*g\s*(?:de\s+)?gras(?:as?)?", s, re.IGNORECASE)
+        or re.search(r"gras(?:as?)?\s*[:\-]\s*([\d.,]+)", s, re.IGNORECASE)
+        or re.search(r"gras(?:as?)?\s+([\d.,]+)\s*g", s, re.IGNORECASE)
     )
 
     try:
+
         def to_float(m):
             if m is None:
                 return 0.0
-            return float(m.group(1).replace(',', '.'))
+            return float(m.group(1).replace(",", "."))
 
-        cal_val  = to_float(cal)
+        cal_val = to_float(cal)
         prot_val = to_float(p)
         carb_val = to_float(c)
         gras_val = to_float(g)
@@ -105,10 +113,10 @@ def parsear_macros_de_texto(
             cal_val = round(atwater, 1)
 
         return {
-            "proteinas_g":    prot_val,
+            "proteinas_g": prot_val,
             "carbohidratos_g": carb_val,
-            "grasas_g":       gras_val,
-            "calorias":       cal_val,
+            "grasas_g": gras_val,
+            "calorias": cal_val,
         }
     except (ValueError, AttributeError):
         return None
@@ -116,16 +124,67 @@ def parsear_macros_de_texto(
 
 _PALABRAS_FUENTE_PROTEINA = frozenset(
     (
-        "pollo", "pechuga", "muslo", "pavo", "pato", "huevo", "huevos",
-        "carne", "res", "ternera", "cerdo", "chancho", "chicharron", "chicharrón",
-        "lomo", "bistec", "brocheta",
-        "pescado", "pez", "trucha", "tilapia", "corvina", "chita", "caballa",
-        "atún", "atun", "marisc", "langost", "camar", "pulpo", "calamar",
-        "queso", "requesón", "requeson", "yogurt", "yoghurt", "leche", "suero",
-        "lenteja", "lentejas", "garbanzo", "garbanzos", "frejol", "frejoles",
-        "poroto", "porotos", "arveja", "arvejas", "haba", "habas",
-        "quinua", "quinoa", "soya", "tofu", "sibayo",
-        "tocino", "jamón", "jamon", "tocineta", "sardina", "caballa",
+        "pollo",
+        "pechuga",
+        "muslo",
+        "pavo",
+        "pato",
+        "huevo",
+        "huevos",
+        "carne",
+        "res",
+        "ternera",
+        "cerdo",
+        "chancho",
+        "chicharron",
+        "chicharrón",
+        "lomo",
+        "bistec",
+        "brocheta",
+        "pescado",
+        "pez",
+        "trucha",
+        "tilapia",
+        "corvina",
+        "chita",
+        "caballa",
+        "atún",
+        "atun",
+        "marisc",
+        "langost",
+        "camar",
+        "pulpo",
+        "calamar",
+        "queso",
+        "requesón",
+        "requeson",
+        "yogurt",
+        "yoghurt",
+        "leche",
+        "suero",
+        "lenteja",
+        "lentejas",
+        "garbanzo",
+        "garbanzos",
+        "frejol",
+        "frejoles",
+        "poroto",
+        "porotos",
+        "arveja",
+        "arvejas",
+        "haba",
+        "habas",
+        "quinua",
+        "quinoa",
+        "soya",
+        "tofu",
+        "sibayo",
+        "tocino",
+        "jamón",
+        "jamon",
+        "tocineta",
+        "sardina",
+        "caballa",
     )
 )
 
@@ -186,30 +245,30 @@ def calcular_metabolismo_basal(cliente) -> float:
     Calcula la Tasa Metabólica Basal usando la fórmula de Harris-Benedict revisada (Mifflin-St Jeor es otra opción, pero Harris-Benedict es la estándar en el proyecto).
     """
     from datetime import date
+
     if cliente.birth_date:
         today = date.today()
-        edad = today.year - cliente.birth_date.year - ((today.month, today.day) < (cliente.birth_date.month, cliente.birth_date.day))
+        edad = (
+            today.year
+            - cliente.birth_date.year
+            - ((today.month, today.day) < (cliente.birth_date.month, cliente.birth_date.day))
+        )
     else:
         edad = 30
-    
-    genero = getattr(cliente, 'gender', 'M')
+
+    genero = getattr(cliente, "gender", "M")
     peso = cliente.weight or 75
     estatura = cliente.height or 170
-    
-    if genero == 'M':
+
+    if genero == "M":
         tmb = 88.362 + (13.397 * peso) + (4.799 * estatura) - (5.677 * edad)
     else:
         tmb = 447.593 + (9.247 * peso) + (3.098 * estatura) - (4.330 * edad)
-    
-    nivel_map = {
-        "Sedentario": 1.20,
-        "Ligero": 1.375,
-        "Moderado": 1.55,
-        "Activo": 1.725,
-        "Muy activo": 1.90
-    }
-    factor = nivel_map.get(getattr(cliente, 'activity_level', 'Sedentario'), 1.20)
+
+    nivel_map = {"Sedentario": 1.20, "Ligero": 1.375, "Moderado": 1.55, "Activo": 1.725, "Muy activo": 1.90}
+    factor = nivel_map.get(getattr(cliente, "activity_level", "Sedentario"), 1.20)
     return tmb * factor
+
 
 def obtener_macros_desglosados(
     calorias: float,
@@ -227,9 +286,7 @@ def obtener_macros_desglosados(
 
     m = macros_desde_calorias_peso_objetivo(calorias, objetivo, peso_kg)
     cal = m["calorias_totales"]
-    pct = porcentajes_aprox_desde_gramos(
-        cal, m["proteinas_g"], m["carbohidratos_g"], m["grasas_g"]
-    )
+    pct = porcentajes_aprox_desde_gramos(cal, m["proteinas_g"], m["carbohidratos_g"], m["grasas_g"])
     return {
         "calorias": int(round(cal)),
         "proteinas_g": m["proteinas_g"],

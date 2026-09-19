@@ -2,6 +2,7 @@
 Modelo de ejercicios en PostgreSQL.
 Incluye MET para cálculo de calorías quemadas (fórmula METs).
 """
+
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text
 from sqlalchemy.sql import func
 from app.core.database import Base

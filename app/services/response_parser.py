@@ -63,9 +63,7 @@ _RE_LINEA_PARECE_INGREDIENTE = re.compile(
     r"\(\s*\d+[\d.,]*\s*kcal|kcal\s*\)|\bprote[íi]n)"
 )
 
-_RE_LINEA_MACROS = re.compile(
-    r"(?i)\b(?:P|C|G|Cal)\s*:\s*[\d.,]+(?:\s*(?:g|kcal))?\b"
-)
+_RE_LINEA_MACROS = re.compile(r"(?i)\b(?:P|C|G|Cal)\s*:\s*[\d.,]+(?:\s*(?:g|kcal))?\b")
 
 
 def _es_linea_macros(linea: str) -> bool:
@@ -77,6 +75,7 @@ def _es_linea_macros(linea: str) -> bool:
     return bool(_RE_LINEA_MACROS.search(t)) and (
         " | " in t or t.count(":") >= 2 or t.lower().startswith(("p:", "c:", "g:", "cal:"))
     )
+
 
 def _split_ingredientes_inline(linea: str) -> List[str]:
     """
@@ -94,6 +93,7 @@ def _split_ingredientes_inline(linea: str) -> List[str]:
     if len(parts) >= 2:
         return [p.strip() for p in parts if p.strip()]
     return [t]
+
 
 def _split_nombre_y_ingredientes_inline_en_header(nombre_raw: str) -> tuple[str, List[str]]:
     """
@@ -224,55 +224,52 @@ def parsear_respuesta_para_frontend(
     Motor de parsing ultra-robusto (v11.0 - Protocolo Fallo Cero).
     Prioriza etiquetas blindadas [CALOFIT_XXX] y usa fallback elástico si no existen.
     """
-    resultado = {
-        "intent": "CHAT",
-        "texto_conversacional": "",
-        "secciones": [],
-        "advertencia_nutricional": None
-    }
+    resultado = {"intent": "CHAT", "texto_conversacional": "", "secciones": [], "advertencia_nutricional": None}
 
-    if not texto_principal: return resultado
+    if not texto_principal:
+        return resultado
 
-    texto_principal = re.sub(r'\[\s*(/?CALOFIT_[A-Z_]+)(?:\s*:\s*([A-Z_]+))?\s*\]', 
-                             lambda m: f"[{m.group(1).upper().strip()}{': ' + m.group(2).upper().strip() if m.group(2) else ''}]", 
-                             texto_principal, flags=re.IGNORECASE)
-    texto_principal = re.sub(r'\[/\s*(CALOFIT_[A-Z_]+)\s*\]', r'[/\1]', texto_principal, flags=re.IGNORECASE)
-    
-    texto_principal = re.sub(r'^\[/CALOFIT_[A-Z_]+\]\s*', '', texto_principal, flags=re.IGNORECASE)
-    intent_match = re.search(r'\[CALOFIT_INTENT:\s*(\w+)\]', texto_principal, re.IGNORECASE)
+    texto_principal = re.sub(
+        r"\[\s*(/?CALOFIT_[A-Z_]+)(?:\s*:\s*([A-Z_]+))?\s*\]",
+        lambda m: f"[{m.group(1).upper().strip()}{': ' + m.group(2).upper().strip() if m.group(2) else ''}]",
+        texto_principal,
+        flags=re.IGNORECASE,
+    )
+    texto_principal = re.sub(r"\[/\s*(CALOFIT_[A-Z_]+)\s*\]", r"[/\1]", texto_principal, flags=re.IGNORECASE)
+
+    texto_principal = re.sub(r"^\[/CALOFIT_[A-Z_]+\]\s*", "", texto_principal, flags=re.IGNORECASE)
+    intent_match = re.search(r"\[CALOFIT_INTENT:\s*(\w+)\]", texto_principal, re.IGNORECASE)
     if intent_match:
         resultado["intent"] = intent_match.group(1).upper()
         texto_principal = texto_principal.replace(intent_match.group(0), "").strip()
 
     resultado["intent_modelo"] = resultado.get("intent") or "CHAT"
-    resultado["intent"] = intent_prioritario_para_parser(
-        resultado["intent_modelo"], modo_funcion
-    )
+    resultado["intent"] = intent_prioritario_para_parser(resultado["intent_modelo"], modo_funcion)
 
-    if re.search(r'\[CALOFIT_HEADER\]', texto_principal, re.IGNORECASE):
-        bloques_raw = re.split(r'(\[CALOFIT_INTENT:.*?\]|\[CALOFIT_HEADER\])', texto_principal, flags=re.IGNORECASE)
-        
+    if re.search(r"\[CALOFIT_HEADER\]", texto_principal, re.IGNORECASE):
+        bloques_raw = re.split(r"(\[CALOFIT_INTENT:.*?\]|\[CALOFIT_HEADER\])", texto_principal, flags=re.IGNORECASE)
+
         bloques_reales = []
-        i = 1 
+        i = 1
         while i < len(bloques_raw):
             etiqueta = bloques_raw[i]
-            contenido = bloques_raw[i+1] if (i+1) < len(bloques_raw) else ""
+            contenido = bloques_raw[i + 1] if (i + 1) < len(bloques_raw) else ""
             bloques_reales.append(etiqueta + contenido)
             i += 2
 
         for bloque in bloques_reales:
-            header  = re.search(r'\[CALOFIT_HEADER\](.*?)\[/CALOFIT_HEADER\]',   bloque, re.DOTALL | re.IGNORECASE)
-            stats   = re.search(r'\[CALOFIT_STATS\](.*?)\[/CALOFIT_STATS\]',     bloque, re.DOTALL | re.IGNORECASE)
-            lista   = re.search(r'\[CALOFIT_LIST\](.*?)\[/CALOFIT_LIST\]',       bloque, re.DOTALL | re.IGNORECASE)
-            action  = re.search(r'\[CALOFIT_ACTION\](.*?)\[/CALOFIT_ACTION\]',   bloque, re.DOTALL | re.IGNORECASE)
-            footer  = re.search(r'\[CALOFIT_FOOTER\](.*?)\[/CALOFIT_FOOTER\]',   bloque, re.DOTALL | re.IGNORECASE)
-            justif  = re.search(r'\[CALOFIT_JUSTIF\](.*?)\[/CALOFIT_JUSTIF\]',   bloque, re.DOTALL | re.IGNORECASE)
+            header = re.search(r"\[CALOFIT_HEADER\](.*?)\[/CALOFIT_HEADER\]", bloque, re.DOTALL | re.IGNORECASE)
+            stats = re.search(r"\[CALOFIT_STATS\](.*?)\[/CALOFIT_STATS\]", bloque, re.DOTALL | re.IGNORECASE)
+            lista = re.search(r"\[CALOFIT_LIST\](.*?)\[/CALOFIT_LIST\]", bloque, re.DOTALL | re.IGNORECASE)
+            action = re.search(r"\[CALOFIT_ACTION\](.*?)\[/CALOFIT_ACTION\]", bloque, re.DOTALL | re.IGNORECASE)
+            footer = re.search(r"\[CALOFIT_FOOTER\](.*?)\[/CALOFIT_FOOTER\]", bloque, re.DOTALL | re.IGNORECASE)
+            justif = re.search(r"\[CALOFIT_JUSTIF\](.*?)\[/CALOFIT_JUSTIF\]", bloque, re.DOTALL | re.IGNORECASE)
 
             if header or lista:
                 bloque_low = bloque.lower()
                 tipo = "comida"
 
-                bloque_intent_match = re.search(r'\[CALOFIT_INTENT:\s*(\w+)\]', bloque, re.IGNORECASE)
+                bloque_intent_match = re.search(r"\[CALOFIT_INTENT:\s*(\w+)\]", bloque, re.IGNORECASE)
                 bloque_intent = bloque_intent_match.group(1).upper() if bloque_intent_match else resultado["intent"]
 
                 if bloque_intent in ["ITEM_WORKOUT", "WORKOUT", "EXERCISE", "POWER"]:
@@ -280,11 +277,35 @@ def parsear_respuesta_para_frontend(
                 elif bloque_intent in ["ITEM_RECIPE", "RECIPE", "FOOD", "MEAL", "LOG"]:
                     tipo = "comida"
                 else:
-                    kw_ejercicio = ["series", "repeticiones", "reps", "sets", "plancha", "sentadillas",
-                                    "flexiones", "abdominales", "cardio", "calentamiento", "rutina",
-                                    "workout", "ejercicio", "burpees", "trote"]
-                    kw_comida = ["ingredientes", "preparación", "preparacion", "cocina", "gramos", "cucharada",
-                                 "recipe", "comida", "plato", "receta"]
+                    kw_ejercicio = [
+                        "series",
+                        "repeticiones",
+                        "reps",
+                        "sets",
+                        "plancha",
+                        "sentadillas",
+                        "flexiones",
+                        "abdominales",
+                        "cardio",
+                        "calentamiento",
+                        "rutina",
+                        "workout",
+                        "ejercicio",
+                        "burpees",
+                        "trote",
+                    ]
+                    kw_comida = [
+                        "ingredientes",
+                        "preparación",
+                        "preparacion",
+                        "cocina",
+                        "gramos",
+                        "cucharada",
+                        "recipe",
+                        "comida",
+                        "plato",
+                        "receta",
+                    ]
 
                     ejercicio_score = sum(1 for kw in kw_ejercicio if kw in bloque_low)
                     comida_score = sum(1 for kw in kw_comida if kw in bloque_low)
@@ -293,21 +314,26 @@ def parsear_respuesta_para_frontend(
                         tipo = "ejercicio"
                     elif comida_score > 0:
                         tipo = "comida"
-                
+
                 if lista:
-                    items_raw = lista.group(1).strip().split('\n')
+                    items_raw = lista.group(1).strip().split("\n")
                 else:
-                    items_raw = re.findall(r'^\s*[-\*•]\s+(.+)$', bloque, re.MULTILINE)
+                    items_raw = re.findall(r"^\s*[-\*•]\s+(.+)$", bloque, re.MULTILINE)
                     if not items_raw:
-                        items_raw = re.findall(r'^\s*(.*?(?:series|reps|repeticiones|minutos|segundos).*)$', bloque, re.IGNORECASE | re.MULTILINE)
+                        items_raw = re.findall(
+                            r"^\s*(.*?(?:series|reps|repeticiones|minutos|segundos).*)$",
+                            bloque,
+                            re.IGNORECASE | re.MULTILINE,
+                        )
 
                 items = []
                 for i in items_raw:
                     linea = i.strip()
-                    if not linea: continue
-                    linea = re.sub(r'^(\s*[-\*•]\s?|\s*\d+[\.\)]\s?)', '', linea).strip()
+                    if not linea:
+                        continue
+                    linea = re.sub(r"^(\s*[-\*•]\s?|\s*\d+[\.\)]\s?)", "", linea).strip()
                     if re.match(
-                        r'^(ingredientes|ejercicios|lista|secciones|componentes)[:\.]?$',
+                        r"^(ingredientes|ejercicios|lista|secciones|componentes)[:\.]?$",
                         linea,
                         re.IGNORECASE,
                     ):
@@ -317,43 +343,56 @@ def parsear_respuesta_para_frontend(
                     items.append(linea)
 
                 if action:
-                    pasos_raw = action.group(1).strip().split('\n')
+                    pasos_raw = action.group(1).strip().split("\n")
                 else:
-                    pasos_raw = re.findall(r'^\s*\d+[\.\)]\s+(.+)$', bloque, re.MULTILINE)
+                    pasos_raw = re.findall(r"^\s*\d+[\.\)]\s+(.+)$", bloque, re.MULTILINE)
                     if not pasos_raw:
-                        pasos_raw = re.findall(r'^\s*(?:T[eé]cnica|Instrucciones|Nota|Tip):\s*(.+)$', bloque, re.IGNORECASE | re.MULTILINE)
+                        pasos_raw = re.findall(
+                            r"^\s*(?:T[eé]cnica|Instrucciones|Nota|Tip):\s*(.+)$", bloque, re.IGNORECASE | re.MULTILINE
+                        )
                         pasos_raw = ["Técnica: " + p for p in pasos_raw] if pasos_raw else []
                     if not pasos_raw:
                         lineas_sueltas = [
-                            ln.strip() for ln in bloque.split('\n')
-                            if ln.strip() 
-                            and not ln.strip().startswith('[')
-                            and not re.match(r'^\s*[-\*•]', ln)
-                            and not re.search(r'(?i)(kcal|calorías|duración|met\b)', ln)
+                            ln.strip()
+                            for ln in bloque.split("\n")
+                            if ln.strip()
+                            and not ln.strip().startswith("[")
+                            and not re.match(r"^\s*[-\*•]", ln)
+                            and not re.search(r"(?i)(kcal|calorías|duración|met\b)", ln)
                         ]
                         if lineas_sueltas:
                             pasos_raw = lineas_sueltas
-                    
-                pasos = [re.sub(r'^(\s*[-\*•]\s?|\s*\d+[\.\)]\s?)', '', p).strip() for p in pasos_raw if p.strip()]
-                
-                verbos_accion = ["sirve", "disfruta", "lleva", "cocina", "mezcla", "hornea", "calienta", "pica", "corta", "agrega", "añade"]
+
+                pasos = [re.sub(r"^(\s*[-\*•]\s?|\s*\d+[\.\)]\s?)", "", p).strip() for p in pasos_raw if p.strip()]
+
+                verbos_accion = [
+                    "sirve",
+                    "disfruta",
+                    "lleva",
+                    "cocina",
+                    "mezcla",
+                    "hornea",
+                    "calienta",
+                    "pica",
+                    "corta",
+                    "agrega",
+                    "añade",
+                ]
                 ingredientes_originales = items[:]
                 items = []
                 for ing in ingredientes_originales:
                     ing_low = ing.lower().strip()
-                    tiene_cantidad = bool(
-                        re.search(r"(?i)\d+[\d.,]*\s*(g|gr|gramos?|ml)\b", ing_low)
-                    )
-                    if (
-                        any(ing_low.startswith(v) for v in verbos_accion)
-                        and len(ing) > 10
-                        and not tiene_cantidad
-                    ):
+                    tiene_cantidad = bool(re.search(r"(?i)\d+[\d.,]*\s*(g|gr|gramos?|ml)\b", ing_low))
+                    if any(ing_low.startswith(v) for v in verbos_accion) and len(ing) > 10 and not tiene_cantidad:
                         pasos.append(ing)
                     else:
                         items.append(ing)
 
-                pasos = [p for p in pasos if not re.match(r'^(preparaci[oó]n|instrucciones|pasos|tecnica)[:\.]?$', p, re.IGNORECASE)]
+                pasos = [
+                    p
+                    for p in pasos
+                    if not re.match(r"^(preparaci[oó]n|instrucciones|pasos|tecnica)[:\.]?$", p, re.IGNORECASE)
+                ]
 
                 items = _expand_items_vineta_inline(items)
                 if tipo == "comida" and items:
@@ -402,11 +441,7 @@ def parsear_respuesta_para_frontend(
 
                 msg_stats = stats.group(1).strip() if stats else ""
                 msg_stats_clean = (
-                    msg_stats.replace("💪", "")
-                    .replace("🌾", "")
-                    .replace("🥑", "")
-                    .replace("🔥", "")
-                    .strip()
+                    msg_stats.replace("💪", "").replace("🌾", "").replace("🥑", "").replace("🔥", "").strip()
                 )
                 msg_stats_clean = re.sub(r"\(Ajustado.*?\)", "", msg_stats_clean).strip()
                 if tipo == "comida":
@@ -422,41 +457,52 @@ def parsear_respuesta_para_frontend(
                     msg_stats_clean = re.sub(r"Calor\w*", "Cal", msg_stats_clean, flags=re.IGNORECASE)
 
                 nombre_raw = header.group(1).strip() if header else "Sugerencia CaloFit"
-                nombre_clean = re.sub(r'^(Opci[oó]n|Option|Plato|Platillo|Rutina|Receta)\s*\d+[:\.]?\s*', '', nombre_raw, flags=re.IGNORECASE).strip()
-                _es_generico = bool(re.match(
-                    r'(?i)^(sugerencia|opci[oó]n|plato|comida|receta|alternativa)\s*\d*\.?\s*(calofit)?$',
-                    nombre_clean.strip()
-                ))
+                nombre_clean = re.sub(
+                    r"^(Opci[oó]n|Option|Plato|Platillo|Rutina|Receta)\s*\d+[:\.]?\s*",
+                    "",
+                    nombre_raw,
+                    flags=re.IGNORECASE,
+                ).strip()
+                _es_generico = bool(
+                    re.match(
+                        r"(?i)^(sugerencia|opci[oó]n|plato|comida|receta|alternativa)\s*\d*\.?\s*(calofit)?$",
+                        nombre_clean.strip(),
+                    )
+                )
                 if _es_generico:
                     _idx_bloque = texto_principal.find(bloque[:40])
                     _texto_previo = texto_principal[:_idx_bloque] if _idx_bloque > 0 else texto_principal
 
                     _plato_rescatado = None
 
-                    _m_corchetes = re.findall(r'\[([A-ZÁÉÍÓÚÑ][^\[\]]{4,80})\]', _texto_previo)
+                    _m_corchetes = re.findall(r"\[([A-ZÁÉÍÓÚÑ][^\[\]]{4,80})\]", _texto_previo)
                     _plato_rescatado = next(
-                        (m for m in reversed(_m_corchetes)
-                         if not re.search(r'CALOFIT|INTENT|RECIPE|INFO|PROGRESS|LOG|POWER|ALERT', m, re.I)),
+                        (
+                            m
+                            for m in reversed(_m_corchetes)
+                            if not re.search(r"CALOFIT|INTENT|RECIPE|INFO|PROGRESS|LOG|POWER|ALERT", m, re.I)
+                        ),
                         None,
                     )
 
                     if not _plato_rescatado:
                         _m_title = re.findall(
-                            r'(?m)^([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+(?:de|con|al?|y|en)\s+)?[A-Za-záéíóúñ]+(?:\s+[A-Za-záéíóúñ]+){0,4})'
-                            r'\s+\d+g\b',
-                            _texto_previo
+                            r"(?m)^([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+(?:de|con|al?|y|en)\s+)?[A-Za-záéíóúñ]+(?:\s+[A-Za-záéíóúñ]+){0,4})"
+                            r"\s+\d+g\b",
+                            _texto_previo,
                         )
                         if _m_title:
                             candidato = _m_title[-1].strip()
-                            if (len(candidato) >= 5
-                                    and not re.search(r'CALOFIT|INTENT|RECIPE|INFO|PROGRESS|LOG|POWER|ALERT', candidato, re.I)):
+                            if len(candidato) >= 5 and not re.search(
+                                r"CALOFIT|INTENT|RECIPE|INFO|PROGRESS|LOG|POWER|ALERT", candidato, re.I
+                            ):
                                 _plato_rescatado = candidato
 
                     if not _plato_rescatado:
-                        _m_bold = re.findall(r'\*\*([A-ZÁÉÍÓÚÑ][^*\n]{5,60})\*\*', _texto_previo)
+                        _m_bold = re.findall(r"\*\*([A-ZÁÉÍÓÚÑ][^*\n]{5,60})\*\*", _texto_previo)
                         if _m_bold:
                             candidato = _m_bold[-1].strip()
-                            if not re.search(r'CALOFIT|INTENT|aquí|hola|opci|suger', candidato, re.I):
+                            if not re.search(r"CALOFIT|INTENT|aquí|hola|opci|suger", candidato, re.I):
                                 _plato_rescatado = candidato
 
                     if _plato_rescatado:
@@ -464,9 +510,7 @@ def parsear_respuesta_para_frontend(
                 nombre_clean = _sin_asteriscos(nombre_clean)
                 header_inline_ings: List[str] = []
                 if tipo == "comida":
-                    nombre_clean, header_inline_ings = _split_nombre_y_ingredientes_inline_en_header(
-                        nombre_clean
-                    )
+                    nombre_clean, header_inline_ings = _split_nombre_y_ingredientes_inline_en_header(nombre_clean)
                     if (not items) and header_inline_ings:
                         items = header_inline_ings
                 if tipo == "comida":
@@ -487,145 +531,161 @@ def parsear_respuesta_para_frontend(
                     "instrucciones": pasos_clean if tipo == "ejercicio" else [],
                     "macros": msg_stats_clean,
                     "gasto_calorico_estimado": msg_stats_clean if tipo == "ejercicio" else "",
-                    "nota": footer.group(1).strip() if footer else ""
+                    "nota": footer.group(1).strip() if footer else "",
                 }
-                
+
                 for campo in ["nombre", "macros", "gasto_calorico_estimado", "nota"]:
                     val = seccion.get(campo, "")
                     if isinstance(val, str):
-                        seccion[campo] = re.sub(r'\[/?CALOFIT_[A-Z_]+.*?\]', '', val, flags=re.IGNORECASE).strip()
-                
+                        seccion[campo] = re.sub(r"\[/?CALOFIT_[A-Z_]+.*?\]", "", val, flags=re.IGNORECASE).strip()
+
                 for lista_campo in ["ingredientes", "ejercicios", "preparacion", "tecnica", "instrucciones"]:
                     lista_val = seccion.get(lista_campo, [])
                     if isinstance(lista_val, list):
-                        seccion[lista_campo] = [re.sub(r'\[/?CALOFIT_[A-Z_]+.*?\]', '', item, flags=re.IGNORECASE).strip() for item in lista_val if item.strip()]
-                
+                        seccion[lista_campo] = [
+                            re.sub(r"\[/?CALOFIT_[A-Z_]+.*?\]", "", item, flags=re.IGNORECASE).strip()
+                            for item in lista_val
+                            if item.strip()
+                        ]
+
                 if not any(s["nombre"] == seccion["nombre"] for s in resultado["secciones"]):
                     resultado["secciones"].append(seccion)
 
-        
         texto_limpio_parts = [bloques_raw[0]]
         k = 1
         while k < len(bloques_raw):
             tag = bloques_raw[k]
-            content = bloques_raw[k+1] if (k+1) < len(bloques_raw) else ""
-            
+            content = bloques_raw[k + 1] if (k + 1) < len(bloques_raw) else ""
+
             if "[CALOFIT_INTENT:" in tag.upper():
-                texto_sucio = re.sub(r'\[/?CALOFIT_[A-Z_]+.*?\]', '', content, flags=re.IGNORECASE)
+                texto_sucio = re.sub(r"\[/?CALOFIT_[A-Z_]+.*?\]", "", content, flags=re.IGNORECASE)
                 texto_limpio_parts.append(texto_sucio)
             elif "[CALOFIT_HEADER]" not in tag.upper():
-                texto_sucio = re.sub(r'\[/?CALOFIT_[A-Z_]+.*?\]', '', content, flags=re.IGNORECASE)
+                texto_sucio = re.sub(r"\[/?CALOFIT_[A-Z_]+.*?\]", "", content, flags=re.IGNORECASE)
                 texto_limpio_parts.append(texto_sucio)
-            
-            k += 2
-            
-        texto_limpio = "".join(texto_limpio_parts)
-        
-        texto_limpio = re.sub(r'([:;.])\s*([-\*•]|\d+\.)\s+', r'\1\n\2 ', texto_limpio)
-        texto_limpio = re.sub(r'\s+([-\*•])\s+', r'\n\1 ', texto_limpio)
-        texto_limpio = re.sub(r'\s+(\d+\.)\s+', r'\n\1 ', texto_limpio) 
 
-        texto_limpio = re.sub(r'^\s*\*\*?(CHAT|ITEM_RECIPE|ITEM_WORKOUT|ASISTENTE|RESPUESTA|INTENT|PLAN_DIET|PLAN_WORKOUT)\*\*?\s*', '', texto_limpio, flags=re.IGNORECASE)
-        
+            k += 2
+
+        texto_limpio = "".join(texto_limpio_parts)
+
+        texto_limpio = re.sub(r"([:;.])\s*([-\*•]|\d+\.)\s+", r"\1\n\2 ", texto_limpio)
+        texto_limpio = re.sub(r"\s+([-\*•])\s+", r"\n\1 ", texto_limpio)
+        texto_limpio = re.sub(r"\s+(\d+\.)\s+", r"\n\1 ", texto_limpio)
+
+        texto_limpio = re.sub(
+            r"^\s*\*\*?(CHAT|ITEM_RECIPE|ITEM_WORKOUT|ASISTENTE|RESPUESTA|INTENT|PLAN_DIET|PLAN_WORKOUT)\*\*?\s*",
+            "",
+            texto_limpio,
+            flags=re.IGNORECASE,
+        )
+
         for seccion in resultado["secciones"]:
             nombre_plato = seccion["nombre"]
-            texto_limpio = re.sub(r'\b' + re.escape(nombre_plato) + r'\b', '', texto_limpio, flags=re.IGNORECASE)
-            texto_limpio = re.sub(r'\b' + re.escape(nombre_plato.upper()) + r'\b', '', texto_limpio)
-        
-        texto_limpio = re.sub(r'\n\s*\n\s*\n+', '\n\n', texto_limpio)
-        texto_limpio = re.sub(r'  +', ' ', texto_limpio)
-        
-        texto_limpio = re.sub(r'\[/?CALOFIT_[A-Z_]+.*?\]', '', texto_limpio, flags=re.IGNORECASE)
-        resultado["texto_conversacional"] = sanear_texto_conversacional_recipe(
-            _sin_asteriscos(texto_limpio.strip())
-        )
+            texto_limpio = re.sub(r"\b" + re.escape(nombre_plato) + r"\b", "", texto_limpio, flags=re.IGNORECASE)
+            texto_limpio = re.sub(r"\b" + re.escape(nombre_plato.upper()) + r"\b", "", texto_limpio)
+
+        texto_limpio = re.sub(r"\n\s*\n\s*\n+", "\n\n", texto_limpio)
+        texto_limpio = re.sub(r"  +", " ", texto_limpio)
+
+        texto_limpio = re.sub(r"\[/?CALOFIT_[A-Z_]+.*?\]", "", texto_limpio, flags=re.IGNORECASE)
+        resultado["texto_conversacional"] = sanear_texto_conversacional_recipe(_sin_asteriscos(texto_limpio.strip()))
         _reparar_todas_las_secciones_comida(resultado)
         return resultado
 
-    t = texto_principal.replace('***', '').strip()
-    lineas = [l.strip() for l in t.split('\n') if l.strip()]
-    
+    t = texto_principal.replace("***", "").strip()
+    lineas = [l.strip() for l in t.split("\n") if l.strip()]
+
     opcion_pattern = re.compile(
-        r'^(?:\*{0,2})?(?:Opci[oó]n|Receta|Rutina|Plato|Opcion|Ejercicio)\s*\d*[:\.\)]\s*(.+?)(?:\*{0,2})?$',
-        re.IGNORECASE
+        r"^(?:\*{0,2})?(?:Opci[oó]n|Receta|Rutina|Plato|Opcion|Ejercicio)\s*\d*[:\.\)]\s*(.+?)(?:\*{0,2})?$",
+        re.IGNORECASE,
     )
     old_start_markers = ["plato:", "rutina:", "receta:", "nombre:", "ejercicio:", "comida:"]
-    
+
     current_section = None
     last_key = None
     intro_lines = []
 
     for l in lineas:
         l_low = l.lower()
-        l_clean = re.sub(r'\*\*', '', l).strip()
-        
+        l_clean = re.sub(r"\*\*", "", l).strip()
+
         is_classic_start = any(l_low.startswith(m) for m in old_start_markers)
         opcion_match = opcion_pattern.match(l_clean)
 
         new_section_nombre = None
         new_section_tipo = "comida"
-        
+
         if is_classic_start:
-            new_section_nombre = l.split(':', 1)[1].strip() if ':' in l else l_clean
+            new_section_nombre = l.split(":", 1)[1].strip() if ":" in l else l_clean
             new_section_tipo = "ejercicio" if "rutina" in l_low or "ejercicio" in l_low else "comida"
         elif opcion_match:
-            new_section_nombre = opcion_match.group(1).strip().strip('*').strip()
-            new_section_tipo = "ejercicio" if any(k in l_low for k in ["rutina", "ejercicio", "entrenamiento"]) else "comida"
-        
+            new_section_nombre = opcion_match.group(1).strip().strip("*").strip()
+            new_section_tipo = (
+                "ejercicio" if any(k in l_low for k in ["rutina", "ejercicio", "entrenamiento"]) else "comida"
+            )
+
         if new_section_nombre:
             if current_section and current_section.get("ingredientes"):
                 resultado["secciones"].append(current_section)
             current_section = {
-                "tipo": new_section_tipo, 
-                "nombre": _sin_asteriscos(new_section_nombre), 
-                "justificacion": "", 
-                "ingredientes": [], 
-                "preparacion": [], 
-                "macros": "", 
-                "nota": ""
+                "tipo": new_section_tipo,
+                "nombre": _sin_asteriscos(new_section_nombre),
+                "justificacion": "",
+                "ingredientes": [],
+                "preparacion": [],
+                "macros": "",
+                "nota": "",
             }
             last_key = "nombre"
             continue
 
         if not current_section:
-            if re.match(r'^[-\*•]\s+', l) and ('g' in l_low or 'cda' in l_low or 'taza' in l_low):
+            if re.match(r"^[-\*•]\s+", l) and ("g" in l_low or "cda" in l_low or "taza" in l_low):
                 current_section = {
-                    "tipo": "comida", 
-                    "nombre": f"Sugerencia {len(resultado['secciones']) + 1}", 
-                    "justificacion": "", 
-                    "ingredientes": [], 
-                    "preparacion": [], 
-                    "macros": "", 
-                    "nota": ""
+                    "tipo": "comida",
+                    "nombre": f"Sugerencia {len(resultado['secciones']) + 1}",
+                    "justificacion": "",
+                    "ingredientes": [],
+                    "preparacion": [],
+                    "macros": "",
+                    "nota": "",
                 }
-            elif re.match(r'^\d+[\.\)]\s+', l) and ('precalienta' in l_low or 'mezcla' in l_low or 'hornea' in l_low):
-                 current_section = {
-                    "tipo": "comida", 
-                    "nombre": f"Sugerencia {len(resultado['secciones']) + 1}", 
-                    "justificacion": "", 
-                    "ingredientes": [], 
-                    "preparacion": [], 
-                    "macros": "", 
-                    "nota": ""
+            elif re.match(r"^\d+[\.\)]\s+", l) and ("precalienta" in l_low or "mezcla" in l_low or "hornea" in l_low):
+                current_section = {
+                    "tipo": "comida",
+                    "nombre": f"Sugerencia {len(resultado['secciones']) + 1}",
+                    "justificacion": "",
+                    "ingredientes": [],
+                    "preparacion": [],
+                    "macros": "",
+                    "nota": "",
                 }
             else:
                 intro_lines.append(l)
                 continue
 
-        if "ingredientes" in l_low or "componentes" in l_low: 
+        if "ingredientes" in l_low or "componentes" in l_low:
             last_key = "ingredientes"
         elif "preparaci" in l_low or "elaboraci" in l_low or "c\u00f3mo preparar" in l_low or "pasos" in l_low:
             last_key = "preparacion"
-        elif "macros" in l_low or "aporte" in l_low or "calorias" in l_low or "kcal" in l_low.replace(' ', '') and ':' in l_low:
+        elif (
+            "macros" in l_low
+            or "aporte" in l_low
+            or "calorias" in l_low
+            or "kcal" in l_low.replace(" ", "")
+            and ":" in l_low
+        ):
             last_key = "macros"
-            if ':' in l:
-                current_section["macros"] = l.split(':', 1)[1].strip()
-        elif "nota" in l_low or "recuerda" in l_low: 
+            if ":" in l:
+                current_section["macros"] = l.split(":", 1)[1].strip()
+        elif "nota" in l_low or "recuerda" in l_low:
             last_key = "nota"
         else:
             if last_key in ["ingredientes", "preparacion"]:
-                item = re.sub(r'^([-\*\+\#•]|\d+[\.#\)\s])\s*', '', l_clean).strip()
-                if item and not re.match(r'^(ingredientes|ejercicios|preparaci[oó]n|lista)[:\.]?$', item, re.IGNORECASE):
+                item = re.sub(r"^([-\*\+\#•]|\d+[\.#\)\s])\s*", "", l_clean).strip()
+                if item and not re.match(
+                    r"^(ingredientes|ejercicios|preparaci[oó]n|lista)[:\.]?$", item, re.IGNORECASE
+                ):
                     current_section[last_key].append(_sin_asteriscos(item))
             elif last_key == "macros":
                 current_section["macros"] = (current_section["macros"] + " " + l_clean).strip()
@@ -634,18 +694,18 @@ def parsear_respuesta_para_frontend(
             elif (
                 current_section["tipo"] == "comida"
                 and _RE_LINEA_PARECE_INGREDIENTE.search(l_clean)
-                and not re.match(r'^\d+[\.\)]\s+', l_clean)
+                and not re.match(r"^\d+[\.\)]\s+", l_clean)
             ):
                 for chunk in _split_ingredientes_inline(l_clean):
                     current_section["ingredientes"].append(_sin_asteriscos(chunk))
                 last_key = "ingredientes"
-            elif re.match(r'^[-\*•]\s+', l) and current_section["tipo"] == "comida":
-                item = re.sub(r'^[-\*•]\s+', '', l).strip()
+            elif re.match(r"^[-\*•]\s+", l) and current_section["tipo"] == "comida":
+                item = re.sub(r"^[-\*•]\s+", "", l).strip()
                 if item:
                     current_section["ingredientes"].append(_sin_asteriscos(item))
                     last_key = "ingredientes"
-            elif re.match(r'^\d+[\.\)]\s+', l):
-                item = re.sub(r'^\d+[\.\)]\s+', '', l).strip()
+            elif re.match(r"^\d+[\.\)]\s+", l):
+                item = re.sub(r"^\d+[\.\)]\s+", "", l).strip()
                 if item:
                     current_section["preparacion"].append(_sin_asteriscos(item))
                     last_key = "preparacion"
@@ -662,13 +722,11 @@ def parsear_respuesta_para_frontend(
             resultado["secciones"].append(current_section)
 
     texto_limpio = "\n".join(intro_lines).strip()
-    
-    texto_limpio = re.sub(r'([:;.])\s*([-\*•]|\d+\.)\s+', r'\1\n\2 ', texto_limpio)
-    texto_limpio = re.sub(r'\s+([-\*•])\s+', r'\n\1 ', texto_limpio)
-    texto_limpio = re.sub(r'\s+(\d+\.)\s+', r'\n\1 ', texto_limpio)
 
-    resultado["texto_conversacional"] = sanear_texto_conversacional_recipe(
-        _sin_asteriscos(texto_limpio.strip())
-    )
+    texto_limpio = re.sub(r"([:;.])\s*([-\*•]|\d+\.)\s+", r"\1\n\2 ", texto_limpio)
+    texto_limpio = re.sub(r"\s+([-\*•])\s+", r"\n\1 ", texto_limpio)
+    texto_limpio = re.sub(r"\s+(\d+\.)\s+", r"\n\1 ", texto_limpio)
+
+    resultado["texto_conversacional"] = sanear_texto_conversacional_recipe(_sin_asteriscos(texto_limpio.strip()))
     _reparar_todas_las_secciones_comida(resultado)
     return resultado

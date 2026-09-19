@@ -3,6 +3,7 @@ Cuatro funciones del asistente cliente (una por conversación lógica):
   recomendar_nutricion | registrar_nutricion | recomendar_ejercicio | registrar_ejercicio
 + otro (saludo, progreso, dudas generales) sin forzar tarjetas estructuradas.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -17,11 +18,26 @@ REGISTRAR_EJERCICIO = "registrar_ejercicio"
 OTRO = "otro"
 
 _VERBOS_IMPERATIVOS_REGISTRO: tuple[str, ...] = (
-    "regístrame", "registrame", "registra que", "registra el", "registra la",
-    "anota que", "anota el", "anota la", "anótame",
-    "guarda que", "guarda el", "guarda la", "guárdame",
-    "ponme", "ponme en", "agrégame", "agregame",
-    "apunta el", "apunta la", "apunta que",
+    "regístrame",
+    "registrame",
+    "registra que",
+    "registra el",
+    "registra la",
+    "anota que",
+    "anota el",
+    "anota la",
+    "anótame",
+    "guarda que",
+    "guarda el",
+    "guarda la",
+    "guárdame",
+    "ponme",
+    "ponme en",
+    "agrégame",
+    "agregame",
+    "apunta el",
+    "apunta la",
+    "apunta que",
 )
 
 RX_CORREGIR_REGISTRO = re.compile(
@@ -172,24 +188,60 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
     fe = sum(1 for x in ej_ctx if x in m)
 
     _VERBOS_LOG = (
-        "desayuné", "desayune", "almorcé", "almorce", "cené", "cene",
-        "comí", "comi ", "tomé ", "tome ", "bebí ", "bebi ",
-        "he desayunado", "he almorzado", "he cenado", "he comido", "he tomado",
-        "acabo de comer", "acabo de tomar", "acabo de beber",
-        "me comi", "me tomé", "me bebí", "me comí",
-        "termine de comer", "terminé de comer",
-        "ya comi", "ya comí", "ya almorcé", "ya desayuné",
-        "me hice un", "me hice una",
-        "me metí", "me meti", "metí", "meti",
-        "me zampé", "me zampe", "zampé", "zampe",
-        "me chupé", "me chupe", "chupé", "chupe",
-        "piqueo", "pique", "piqué", "piqueando",
-        "probé", "probe", "me probé", "me probe",
+        "desayuné",
+        "desayune",
+        "almorcé",
+        "almorce",
+        "cené",
+        "cene",
+        "comí",
+        "comi ",
+        "tomé ",
+        "tome ",
+        "bebí ",
+        "bebi ",
+        "he desayunado",
+        "he almorzado",
+        "he cenado",
+        "he comido",
+        "he tomado",
+        "acabo de comer",
+        "acabo de tomar",
+        "acabo de beber",
+        "me comi",
+        "me tomé",
+        "me bebí",
+        "me comí",
+        "termine de comer",
+        "terminé de comer",
+        "ya comi",
+        "ya comí",
+        "ya almorcé",
+        "ya desayuné",
+        "me hice un",
+        "me hice una",
+        "me metí",
+        "me meti",
+        "metí",
+        "meti",
+        "me zampé",
+        "me zampe",
+        "zampé",
+        "zampe",
+        "me chupé",
+        "me chupe",
+        "chupé",
+        "chupe",
+        "piqueo",
+        "pique",
+        "piqué",
+        "piqueando",
+        "probé",
+        "probe",
+        "me probé",
+        "me probe",
     )
-    _verbos_log_count = sum(
-        1 for v in _VERBOS_LOG
-        if m.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", m)
-    )
+    _verbos_log_count = sum(1 for v in _VERBOS_LOG if m.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", m))
     if _verbos_log_count >= 1 and fc > 0 and "?" not in m:
         return REGISTRAR_NUTRICION
 
@@ -218,44 +270,121 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
     rec_nut = any(
         x in m
         for x in (
-            "qué como", "que como", "qué comer", "que comer",
-            "ideas para comer", "sugerencias de comida",
-            "opciones de almuerzo", "opciones de desayuno", "opciones de cena",
-            "recetas", "receta ", "platos para",
-            "almorzar", "desayunar", "merendar",
-            "para el almuerzo", "para la cena", "para el desayuno", "para la merienda",
-            "qué recomiendas", "que recomiendas", "dame ideas", "dame opciones",
-            "qué me recomiendas", "que me recomiendas",
-            "tengo hambre", "tengo antojo", "qué puedo comer", "que puedo comer",
-            "me recomiendas comer", "me da hambre", "quiero comer algo",
-            "qué me como", "que me como", "qué hay para comer", "que hay para comer",
-            "busco algo para comer", "dame algo de comer",
+            "qué como",
+            "que como",
+            "qué comer",
+            "que comer",
+            "ideas para comer",
+            "sugerencias de comida",
+            "opciones de almuerzo",
+            "opciones de desayuno",
+            "opciones de cena",
+            "recetas",
+            "receta ",
+            "platos para",
+            "almorzar",
+            "desayunar",
+            "merendar",
+            "para el almuerzo",
+            "para la cena",
+            "para el desayuno",
+            "para la merienda",
+            "qué recomiendas",
+            "que recomiendas",
+            "dame ideas",
+            "dame opciones",
+            "qué me recomiendas",
+            "que me recomiendas",
+            "tengo hambre",
+            "tengo antojo",
+            "qué puedo comer",
+            "que puedo comer",
+            "me recomiendas comer",
+            "me da hambre",
+            "quiero comer algo",
+            "qué me como",
+            "que me como",
+            "qué hay para comer",
+            "que hay para comer",
+            "busco algo para comer",
+            "dame algo de comer",
         )
     )
     _EJERCICIO_REGISTRADO = (
-        "hice cardio", "hice pesas", "hice gym", "hice ejercicio",
-        "hice sentadillas", "hice flexiones", "hice abdominales",
-        "hice press", "hice curl", "hice remo", "hice jalon", "hice jalón",
-        "hice dominadas", "hice fondos", "hice burpees", "hice plancha",
-        "hice peso muerto", "hice sentadilla", "hice extensiones",
-        "tiré press", "tire press", "tiré sentadillas",
-        "fui al gym", "fui al gimnasio", "entrené", "entrenei", "entrenei ",
-        "realicé", "realize", "corrí", "corri ", "caminé", "camine ",
-        "nadé", "nade ", "pedalié", "pedalee",
-        "terminé de entrenar", "termine de entrenar",
-        "acabo de entrenar", "acabo de hacer ejercicio",
-        "sali a correr", "salí a correr", "sali a trotar", "salí a trotar",
-        "sali a caminar", "salí a caminar", "sali a entrenar", "salí a entrenar",
-        "correr durante", "trotar durante", "caminar durante",
+        "hice cardio",
+        "hice pesas",
+        "hice gym",
+        "hice ejercicio",
+        "hice sentadillas",
+        "hice flexiones",
+        "hice abdominales",
+        "hice press",
+        "hice curl",
+        "hice remo",
+        "hice jalon",
+        "hice jalón",
+        "hice dominadas",
+        "hice fondos",
+        "hice burpees",
+        "hice plancha",
+        "hice peso muerto",
+        "hice sentadilla",
+        "hice extensiones",
+        "tiré press",
+        "tire press",
+        "tiré sentadillas",
+        "fui al gym",
+        "fui al gimnasio",
+        "entrené",
+        "entrenei",
+        "entrenei ",
+        "realicé",
+        "realize",
+        "corrí",
+        "corri ",
+        "caminé",
+        "camine ",
+        "nadé",
+        "nade ",
+        "pedalié",
+        "pedalee",
+        "terminé de entrenar",
+        "termine de entrenar",
+        "acabo de entrenar",
+        "acabo de hacer ejercicio",
+        "sali a correr",
+        "salí a correr",
+        "sali a trotar",
+        "salí a trotar",
+        "sali a caminar",
+        "salí a caminar",
+        "sali a entrenar",
+        "salí a entrenar",
+        "correr durante",
+        "trotar durante",
+        "caminar durante",
     )
     if any(x in m for x in _EJERCICIO_REGISTRADO) and "?" not in m and fe >= fc and not rec_nut:
         return REGISTRAR_EJERCICIO
     _PERMISO_EJ_SYNC = (
-        "puedo realizar", "puedo trotar", "puedo correr", "puedo nadar",
-        "puedo caminar", "puedo jugar", "puedo bailar", "puedo practicar",
-        "puedo ir a ", "se puede trotar", "se puede correr", "se puede nadar",
-        "es bueno trotar", "es bueno correr", "es bueno nadar", "es bueno caminar",
-        "es malo trotar", "es malo correr",
+        "puedo realizar",
+        "puedo trotar",
+        "puedo correr",
+        "puedo nadar",
+        "puedo caminar",
+        "puedo jugar",
+        "puedo bailar",
+        "puedo practicar",
+        "puedo ir a ",
+        "se puede trotar",
+        "se puede correr",
+        "se puede nadar",
+        "es bueno trotar",
+        "es bueno correr",
+        "es bueno nadar",
+        "es bueno caminar",
+        "es malo trotar",
+        "es malo correr",
     )
     if any(p in m for p in _PERMISO_EJ_SYNC):
         return OTRO
@@ -297,11 +426,22 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
         return OTRO
 
     _RECETA_O_TECNICA = (
-        "como se hace", "como se prepara", "como hacer", "receta de", "como cocinar",
-        "ingredientes de", "preparacion de", "tecnica de", "como realizar",
-        "como ejecutar", "pasos para", "forma correcta", "preparar "
+        "como se hace",
+        "como se prepara",
+        "como hacer",
+        "receta de",
+        "como cocinar",
+        "ingredientes de",
+        "preparacion de",
+        "tecnica de",
+        "como realizar",
+        "como ejecutar",
+        "pasos para",
+        "forma correcta",
+        "preparar ",
     )
     import unicodedata as _ud_rec
+
     _mn_rec = "".join(c for c in _ud_rec.normalize("NFD", m) if _ud_rec.category(c) != "Mn")
     if any(k in _mn_rec for k in _RECETA_O_TECNICA):
         return OTRO
@@ -325,11 +465,58 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
 
     if es_saludo:
         _NO_SALUDO_PURO = (
-            "comer", "cenar", "almorzar", "desayunar", "merendar", "comida", "cena", "almuerzo", "desayuno", "plato", "receta",
-            "ejercicio", "entren", "rutina", "pecho", "espalda", "pierna", "hombro", "cardio", "gym", "gimnasio",
-            "dime", "puedo", "quiero", "sugier", "recomiend", "dame", "verdura", "hacer",
-            "correr", "corrí", "corri", "trotar", "troté", "trote", "caminar", "caminé", "camine",
-            "nadar", "nadé", "nade", "bicicleta", "salí", "sali", "pesa", "pesas", "pesos", "comi", "comí", "tomar", "tome", "tomé"
+            "comer",
+            "cenar",
+            "almorzar",
+            "desayunar",
+            "merendar",
+            "comida",
+            "cena",
+            "almuerzo",
+            "desayuno",
+            "plato",
+            "receta",
+            "ejercicio",
+            "entren",
+            "rutina",
+            "pecho",
+            "espalda",
+            "pierna",
+            "hombro",
+            "cardio",
+            "gym",
+            "gimnasio",
+            "dime",
+            "puedo",
+            "quiero",
+            "sugier",
+            "recomiend",
+            "dame",
+            "verdura",
+            "hacer",
+            "correr",
+            "corrí",
+            "corri",
+            "trotar",
+            "troté",
+            "trote",
+            "caminar",
+            "caminé",
+            "camine",
+            "nadar",
+            "nadé",
+            "nade",
+            "bicicleta",
+            "salí",
+            "sali",
+            "pesa",
+            "pesas",
+            "pesos",
+            "comi",
+            "comí",
+            "tomar",
+            "tome",
+            "tomé",
         )
         if any(k in _m for k in _NO_SALUDO_PURO):
             es_saludo = False
@@ -341,6 +528,7 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
         return REGISTRAR_NUTRICION
 
     import unicodedata as _ud
+
     _mn = "".join(c for c in _ud.normalize("NFD", _m) if _ud.category(c) != "Mn")
     _RX_CALCULO_NUTRICIONAL = re.compile(
         r"\bcuant[oa]s?\b.{0,15}\b(proteina|proteína|calorias|calorías|"
@@ -350,36 +538,73 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
         return OTRO
 
     _MODALES = (
-        "puedo ", "se puede ", "podria ", "podria ",
-        "es bueno ", "es malo ", "es buena ", "es mala ",
-        "seria bueno ", "es recomendable ", "es posible ", "conviene ",
+        "puedo ",
+        "se puede ",
+        "podria ",
+        "podria ",
+        "es bueno ",
+        "es malo ",
+        "es buena ",
+        "es mala ",
+        "seria bueno ",
+        "es recomendable ",
+        "es posible ",
+        "conviene ",
     )
-    _es_pregunta_abierta_que_hacer = bool(re.search(
-        r"\bque\s+(?:\w+\s+){0,2}puedo\s+(hacer|comer|almorzar|cenar|desayunar|merendar)\b", _mn
-    ))
-    if not _es_pregunta_abierta_que_hacer and any(
-        _mn.startswith(p) or f" {p}" in _mn for p in _MODALES
-    ):
+    _es_pregunta_abierta_que_hacer = bool(
+        re.search(r"\bque\s+(?:\w+\s+){0,2}puedo\s+(hacer|comer|almorzar|cenar|desayunar|merendar)\b", _mn)
+    )
+    if not _es_pregunta_abierta_que_hacer and any(_mn.startswith(p) or f" {p}" in _mn for p in _MODALES):
         return OTRO
 
     _RECETA_O_TECNICA = (
-        "como se hace", "como se prepara", "como hacer", "receta de", "como cocinar",
-        "ingredientes de", "preparacion de", "tecnica de", "como realizar",
-        "como ejecutar", "pasos para", "forma correcta", "preparar "
+        "como se hace",
+        "como se prepara",
+        "como hacer",
+        "receta de",
+        "como cocinar",
+        "ingredientes de",
+        "preparacion de",
+        "tecnica de",
+        "como realizar",
+        "como ejecutar",
+        "pasos para",
+        "forma correcta",
+        "preparar ",
     )
     if any(k in _mn for k in _RECETA_O_TECNICA):
         return OTRO
 
     _CONSUMO_CLARO_NORM = (
-        "comi", "desayune", "almorce", "cene", "bebi", "me jale",
-        "me comi", "me tome", "acabo de comer", "acabo de tomar", "acabo de beber",
-        "termine de comer", "he desayunado", "he almorzado", "he cenado",
-        "he comido", "he bebido",
-        "me meti", "meti", "me zampe", "zampe", "chupe", "me chupe", "piqueo", "probe", "tome"
+        "comi",
+        "desayune",
+        "almorce",
+        "cene",
+        "bebi",
+        "me jale",
+        "me comi",
+        "me tome",
+        "acabo de comer",
+        "acabo de tomar",
+        "acabo de beber",
+        "termine de comer",
+        "he desayunado",
+        "he almorzado",
+        "he cenado",
+        "he comido",
+        "he bebido",
+        "me meti",
+        "meti",
+        "me zampe",
+        "zampe",
+        "chupe",
+        "me chupe",
+        "piqueo",
+        "probe",
+        "tome",
     )
     _tiene_consumo = any(
-        _mn.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", _mn)
-        for v in _CONSUMO_CLARO_NORM
+        _mn.startswith(v) or re.search(rf"\b{re.escape(v.strip())}\b", _mn) for v in _CONSUMO_CLARO_NORM
     )
     if _tiene_consumo and "?" not in _m:
         return REGISTRAR_NUTRICION
@@ -393,5 +618,3 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
     except Exception:
         pass
     return detectar_modo_funcion(mensaje, False)
-
-

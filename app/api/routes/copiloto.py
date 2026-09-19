@@ -11,46 +11,40 @@ logger = get_logger("api.copiloto")
 
 router = APIRouter()
 
+
 class CopilotoRequest(BaseModel):
     mensaje: str
     historial: list = None
 
+
 @router.post("/consultar")
 async def consultar_copiloto(
-    request: CopilotoRequest,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    request: CopilotoRequest, db: Session = Depends(get_db), current_user=Depends(get_current_user)
 ):
     """
-    Endpoint único para el Staff (Nutri/Admin). 
+    Endpoint único para el Staff (Nutri/Admin).
     Enruta automáticamente al servicio correspondiente según el rol.
     """
-    user_role = str(current_user.role_name).lower().strip() if hasattr(current_user, 'role_name') else "client"
-    
+    user_role = str(current_user.role_name).lower().strip() if hasattr(current_user, "role_name") else "client"
+
     print(f"🩺 >>> CONSULTA COPILOTO STAFF <<<")
     print(f"🩺 Usuario: {current_user.email} | Rol: {user_role}")
 
     try:
         if user_role == "admin":
-             resultado = await admin_ia_service.consultar(
-                 mensaje=request.mensaje,
-                 db=db,
-                 current_user=current_user,
-                 historial=request.historial
-             )
+            resultado = await admin_ia_service.consultar(
+                mensaje=request.mensaje, db=db, current_user=current_user, historial=request.historial
+            )
         elif user_role in ["nutricionista", "nutritionist", "coach"]:
-             resultado = await nutricionista_ia_service.consultar(
-                 mensaje=request.mensaje,
-                 db=db,
-                 current_user=current_user,
-                 historial=request.historial
-             )
+            resultado = await nutricionista_ia_service.consultar(
+                mensaje=request.mensaje, db=db, current_user=current_user, historial=request.historial
+            )
         else:
             raise HTTPException(
-                status_code=403, 
-                detail=f"Acceso denegado: El rol '{user_role}' no tiene permisos para el Copiloto Staff."
+                status_code=403,
+                detail=f"Acceso denegado: El rol '{user_role}' no tiene permisos para el Copiloto Staff.",
             )
-        
+
         return resultado
 
     except Exception as e:

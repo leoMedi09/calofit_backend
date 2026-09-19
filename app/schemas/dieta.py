@@ -6,26 +6,24 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import date
 
+
 class MacronutrientesRecomendados(BaseModel):
     """Recomendaciones de macronutrientes"""
+
     calorias_diarias: float
     proteinas_g: float
     carbohidratos_g: float
     grasas_g: float
-    
+
     class Config:
         json_schema_extra = {
-            "example": {
-                "calorias_diarias": 2000,
-                "proteinas_g": 150,
-                "carbohidratos_g": 200,
-                "grasas_g": 67
-            }
+            "example": {"calorias_diarias": 2000, "proteinas_g": 150, "carbohidratos_g": 200, "grasas_g": 67}
         }
 
 
 class RecomendacionDietaCompleta(BaseModel):
     """Recomendación completa de dieta automática"""
+
     calorias_diarias: float
     proteinas_g: float
     carbohidratos_g: float
@@ -38,7 +36,7 @@ class RecomendacionDietaCompleta(BaseModel):
     alimentos_a_evitar: List[str]
     frecuencia_comidas: str
     notas: str
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -53,13 +51,14 @@ class RecomendacionDietaCompleta(BaseModel):
                 "alimentos_recomendados": ["Pollo sin piel", "Pescado", "Vegetales verdes"],
                 "alimentos_a_evitar": ["Azúcares refinados", "Frituras"],
                 "frecuencia_comidas": "3 comidas principales + 1-2 meriendas",
-                "notas": "✅ Tu IMC es normal. Mantén hábitos saludables."
+                "notas": "✅ Tu IMC es normal. Mantén hábitos saludables.",
             }
         }
 
 
 class ClientResponseConDieta(BaseModel):
     """Respuesta de cliente con recomendación de dieta automática"""
+
     id: int
     first_name: str
     last_name_paternal: str
@@ -77,7 +76,7 @@ class ClientResponseConDieta(BaseModel):
     profile_picture_url: Optional[str] = None
 
     dieta_recomendada: RecomendacionDietaCompleta
-    
+
     class Config:
         from_attributes = True
         json_schema_extra = {
@@ -107,7 +106,7 @@ class ClientResponseConDieta(BaseModel):
                     "alimentos_recomendados": ["Pollo", "Pescado", "Verduras"],
                     "alimentos_a_evitar": ["Azúcares", "Frituras"],
                     "frecuencia_comidas": "3+2",
-                    "notas": "✅ Normal | 💡 Consulta nutricionista"
-                }
+                    "notas": "✅ Normal | 💡 Consulta nutricionista",
+                },
             }
         }

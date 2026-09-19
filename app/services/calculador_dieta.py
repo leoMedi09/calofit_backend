@@ -15,9 +15,11 @@ from dataclasses import dataclass
 from app.core.macros_diarios import macros_desde_calorias_pct_clasico
 from app.core.objetivo_utils import normalizar_objetivo, DEFICIT, SUPERAVIT
 
+
 @dataclass
 class RecomendacionDieta:
     """Estructura de recomendaciones de dieta automática"""
+
     calorias_diarias: float
     proteinas_g: float
     carbohidratos_g: float
@@ -36,22 +38,22 @@ class CalculadorDietaAutomatica:
     """
     Calcula recomendaciones de dieta de forma automática basándose en métricas biométricas
     """
-    
+
     @staticmethod
     def calcular_imc(peso: float, altura: float) -> tuple[float, str]:
         """
         Calcula el IMC y devuelve la categoría
-        
+
         Args:
             peso: en kilogramos
             altura: en centímetros
-            
+
         Returns:
             (imc: float, categoria: str)
         """
         altura_m = altura / 100
-        imc = peso / (altura_m ** 2)
-        
+        imc = peso / (altura_m**2)
+
         if imc < 18.5:
             categoria = "Bajo peso"
         elif imc < 25:
@@ -64,35 +66,35 @@ class CalculadorDietaAutomatica:
             categoria = "Obesidad grado II"
         else:
             categoria = "Obesidad grado III"
-        
+
         return round(imc, 1), categoria
-    
+
     @staticmethod
     def calcular_gasto_metabolico_basal(peso: float, altura: float, edad: int, genero: str) -> float:
         """
         Calcula GMB usando la fórmula de Harris-Benedict revisada
-        
+
         Args:
             peso: en kg
             altura: en cm
             edad: en años
             genero: 'M' (masculino) o 'F' (femenino)
-            
+
         Returns:
             GMB en calorías
         """
-        if genero.upper() == 'M':
+        if genero.upper() == "M":
             gmb = 88.362 + (13.397 * peso) + (4.799 * altura) - (5.677 * edad)
         else:
             gmb = 447.593 + (9.247 * peso) + (3.098 * altura) - (4.330 * edad)
-        
+
         return round(gmb, 0)
-    
+
     @staticmethod
     def get_factor_actividad(nivel_actividad: str) -> float:
         """
         Obtiene el factor multiplicador según nivel de actividad
-        
+
         Niveles:
         - Sedentario: sin ejercicio
         - Leve: 1-3 días/semana
@@ -100,27 +102,21 @@ class CalculadorDietaAutomatica:
         - Intenso: 6-7 días/semana
         - Muy intenso: entrenamiento profesional
         """
-        factores = {
-            'Sedentario': 1.20,
-            'Ligero': 1.375,
-            'Moderado': 1.55,
-            'Activo': 1.725,
-            'Muy activo': 1.90
-        }
+        factores = {"Sedentario": 1.20, "Ligero": 1.375, "Moderado": 1.55, "Activo": 1.725, "Muy activo": 1.90}
         return factores.get(nivel_actividad, 1.20)
-    
+
     @staticmethod
     def calcular_recomendacion_dieta(
         peso: float,
         altura: float,
         edad: int,
         genero: str,
-        nivel_actividad: str = 'Moderado',
-        objetivo: str = 'Mantener peso'
+        nivel_actividad: str = "Moderado",
+        objetivo: str = "Mantener peso",
     ) -> RecomendacionDieta:
         """
         Calcula recomendación completa de dieta basada en métricas
-        
+
         Args:
             peso: en kg
             altura: en cm
@@ -128,20 +124,18 @@ class CalculadorDietaAutomatica:
             genero: 'M' o 'F'
             nivel_actividad: Sedentario/Leve/Moderado/Intenso/Muy intenso
             objetivo: Perder peso/Mantener peso/Ganar masa
-            
+
         Returns:
             RecomendacionDieta con todos los cálculos
         """
-        
+
         imc, categoria_imc = CalculadorDietaAutomatica.calcular_imc(peso, altura)
-        
-        gmb = CalculadorDietaAutomatica.calcular_gasto_metabolico_basal(
-            peso, altura, edad, genero
-        )
-        
+
+        gmb = CalculadorDietaAutomatica.calcular_gasto_metabolico_basal(peso, altura, edad, genero)
+
         factor_actividad = CalculadorDietaAutomatica.get_factor_actividad(nivel_actividad)
         gasto_calorico_diario = gmb * factor_actividad
-        
+
         _concepto = normalizar_objetivo(objetivo)
         if _concepto == DEFICIT:
             calorias = gasto_calorico_diario * 0.85
@@ -152,26 +146,20 @@ class CalculadorDietaAutomatica:
         else:
             calorias = gasto_calorico_diario
             ajuste_objetivo = "Mantenimiento de peso actual"
-        
+
         m_pct = macros_desde_calorias_pct_clasico(calorias, objetivo)
         proteinas_g = m_pct["proteinas_g"]
         carbohidratos_g = m_pct["carbohidratos_g"]
         grasas_g = m_pct["grasas_g"]
 
-        alimentos_recomendados = CalculadorDietaAutomatica.get_alimentos_recomendados(
-            categoria_imc, objetivo
-        )
-        
-        alimentos_a_evitar = CalculadorDietaAutomatica.get_alimentos_a_evitar(
-            categoria_imc, objetivo
-        )
-        
+        alimentos_recomendados = CalculadorDietaAutomatica.get_alimentos_recomendados(categoria_imc, objetivo)
+
+        alimentos_a_evitar = CalculadorDietaAutomatica.get_alimentos_a_evitar(categoria_imc, objetivo)
+
         frecuencia_comidas = CalculadorDietaAutomatica.get_frecuencia_comidas(objetivo)
-        
-        notas = CalculadorDietaAutomatica.generar_notas(
-            imc, categoria_imc, objetivo, edad
-        )
-        
+
+        notas = CalculadorDietaAutomatica.generar_notas(imc, categoria_imc, objetivo, edad)
+
         return RecomendacionDieta(
             calorias_diarias=round(calorias, 0),
             proteinas_g=round(proteinas_g, 1),
@@ -184,13 +172,13 @@ class CalculadorDietaAutomatica:
             alimentos_recomendados=alimentos_recomendados,
             alimentos_a_evitar=alimentos_a_evitar,
             frecuencia_comidas=frecuencia_comidas,
-            notas=notas
+            notas=notas,
         )
-    
+
     @staticmethod
     def get_alimentos_recomendados(categoria_imc: str, objetivo: str) -> list:
         """Obtiene lista de alimentos recomendados según categoría"""
-        
+
         alimentos_base = [
             "Pollo sin piel",
             "Pescado (salmón, trucha)",
@@ -200,9 +188,9 @@ class CalculadorDietaAutomatica:
             "Frutas bajas en glucemia",
             "Arroz integral",
             "Avena",
-            "Frutos secos (almendras, nueces)"
+            "Frutos secos (almendras, nueces)",
         ]
-        
+
         _concepto_ali = normalizar_objetivo(objetivo)
         if _concepto_ali == SUPERAVIT:
             return alimentos_base + [
@@ -210,7 +198,7 @@ class CalculadorDietaAutomatica:
                 "Productos lácteos enteros",
                 "Plátanos",
                 "Pasta integral",
-                "Aceite de oliva"
+                "Aceite de oliva",
             ]
         elif _concepto_ali == DEFICIT:
             return alimentos_base + [
@@ -218,40 +206,41 @@ class CalculadorDietaAutomatica:
                 "Yogur griego bajo en grasa",
                 "Té verde",
                 "Agua",
-                "Especias (canela, jengibre)"
+                "Especias (canela, jengibre)",
             ]
         else:
-            return alimentos_base + [
-                "Carbohidratos complejos",
-                "Grasas insaturadas",
-                "Variedad de proteínas"
-            ]
-    
+            return alimentos_base + ["Carbohidratos complejos", "Grasas insaturadas", "Variedad de proteínas"]
+
     @staticmethod
     def get_alimentos_a_evitar(categoria_imc: str, objetivo: str) -> list:
         """Obtiene lista de alimentos a evitar según categoría"""
-        
+
         alimentos_evitar = [
             "Azúcares refinados",
             "Bebidas azucaradas",
             "Alimentos ultraprocesados",
             "Grasas trans",
             "Frituras",
-            "Alcohol en exceso"
+            "Alcohol en exceso",
         ]
-        
+
         _concepto_evit = normalizar_objetivo(objetivo)
-        if _concepto_evit == DEFICIT or categoria_imc in ["Sobrepeso", "Obesidad grado I", "Obesidad grado II", "Obesidad grado III"]:
+        if _concepto_evit == DEFICIT or categoria_imc in [
+            "Sobrepeso",
+            "Obesidad grado I",
+            "Obesidad grado II",
+            "Obesidad grado III",
+        ]:
             return alimentos_evitar + [
                 "Productos lácteos enteros",
                 "Carnes grasas",
                 "Productos de panadería",
                 "Chocolate y dulces",
-                "Salsas altas en calorías"
+                "Salsas altas en calorías",
             ]
-        
+
         return alimentos_evitar
-    
+
     @staticmethod
     def get_frecuencia_comidas(objetivo: str) -> str:
         """Recomienda frecuencia de comidas según objetivo"""
@@ -262,13 +251,13 @@ class CalculadorDietaAutomatica:
             return "3 comidas principales + 2 meriendas (controlar tamaño de porciones)"
         else:
             return "3 comidas principales + 1-2 meriendas (flexible)"
-    
+
     @staticmethod
     def generar_notas(imc: float, categoria_imc: str, objetivo: str, edad: int) -> str:
         """Genera notas personalizadas basadas en el perfil"""
-        
+
         notas = []
-        
+
         if categoria_imc == "Bajo peso":
             notas.append("⚠️ Tu IMC indica bajo peso. Consulta con un nutricionista para un plan personalizado.")
         elif categoria_imc == "Peso normal":
@@ -277,18 +266,20 @@ class CalculadorDietaAutomatica:
             notas.append("⚠️ Tu IMC indica sobrepeso. Se recomienda déficit calórico moderado.")
         elif "Obesidad" in categoria_imc:
             notas.append("🚨 Tu IMC indica obesidad. Busca ayuda profesional para un plan personalizado.")
-        
+
         _concepto_nota = normalizar_objetivo(objetivo)
         if _concepto_nota == DEFICIT:
             notas.append("💪 Para perder peso: Come despacio, bebe agua, aumenta actividad física.")
         elif _concepto_nota == SUPERAVIT:
             notas.append("🏋️ Para ganar masa: Come en superávit, entrena con pesas, aumenta proteína.")
-        
+
         if edad > 50:
-            notas.append("📋 Mayor de 50: Aumenta ingesta de calcio y Vit. D. Consulta médico antes de cambios drásticos.")
+            notas.append(
+                "📋 Mayor de 50: Aumenta ingesta de calcio y Vit. D. Consulta médico antes de cambios drásticos."
+            )
         elif edad < 18:
             notas.append("📋 Menor de 18: Necesita más calorías para crecimiento. Nutricionista recomendado.")
-        
+
         notas.append("💡 Esta es una recomendación automática. Consulta un nutricionista para un plan personalizado.")
-        
+
         return " | ".join(notas)

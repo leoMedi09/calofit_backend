@@ -3,6 +3,7 @@ Lógica de ejercicio del asistente (preferencias, detección de payload de rutin
 
 Separado de ``asistente_nutricion.py`` para poder cambiar entrenamiento sin tocar comidas.
 """
+
 from __future__ import annotations
 
 import re
@@ -97,7 +98,10 @@ def rotulo_actividad_desde_mensaje(texto: str) -> str:
         s = m.group(2).strip(" .,;—-")
         if len(s) >= 2:
             return s[:120]
-    m2 = re.search(r"(?i)(?:\b(corrí|corri|trot[ée]|trote|nadé|nade|camin[ée]|camine)\s+)(.+?)(?=\s+\d+\s*min|\s+por|\s+\d+\s*km|$)", t)
+    m2 = re.search(
+        r"(?i)(?:\b(corrí|corri|trot[ée]|trote|nadé|nade|camin[ée]|camine)\s+)(.+?)(?=\s+\d+\s*min|\s+por|\s+\d+\s*km|$)",
+        t,
+    )
     if m2:
         s = m2.group(2).strip(" .,;—-")
         if len(s) >= 2:
@@ -161,9 +165,7 @@ def procesar_secciones_ejercicio(respuesta_estructurada: Dict[str, Any], perfil:
         kcal = round(ejercicios_service.calcular_calorias(met, peso, dur), 1)
         nombre_tarjeta = (sec.get("nombre") or "Entrenamiento").strip()
 
-        stats_line = (
-            f"Cal: {kcal} kcal | Dur: {dur:.0f} min | MET ~{met}"
-        )
+        stats_line = f"Cal: {kcal} kcal | Dur: {dur:.0f} min | MET ~{met}"
         sec["macros"] = stats_line
         sec["gasto_calorico_estimado"] = stats_line
         sec["macros_normalizados"] = {
@@ -191,11 +193,7 @@ def procesar_secciones_ejercicio(respuesta_estructurada: Dict[str, Any], perfil:
 
 def es_payload_ejercicio(payload: Dict[str, Any]) -> bool:
     """True si el payload de tarjeta corresponde a ejercicio (POWER), no a comida."""
-    return bool(
-        "ejercicios" in payload
-        or "gasto_calorico" in payload
-        or "duracion" in payload
-    )
+    return bool("ejercicios" in payload or "gasto_calorico" in payload or "duracion" in payload)
 
 
 def registrar_preferencias_ejercicios(extraccion: Dict[str, Any], perfil: Any, db: Session) -> None:
@@ -214,10 +212,14 @@ def registrar_preferencias_ejercicios(extraccion: Dict[str, Any], perfil: Any, d
 
     for ejercicio in ejercicios_detectados:
         e_low = (ejercicio or "actividad").lower().strip()[:200]
-        pref_existente = db.query(PreferenciaEjercicio).filter(
-            PreferenciaEjercicio.client_id == perfil.id,
-            sql_func.lower(PreferenciaEjercicio.ejercicio) == e_low,
-        ).first()
+        pref_existente = (
+            db.query(PreferenciaEjercicio)
+            .filter(
+                PreferenciaEjercicio.client_id == perfil.id,
+                sql_func.lower(PreferenciaEjercicio.ejercicio) == e_low,
+            )
+            .first()
+        )
 
         if pref_existente:
             pref_existente.frecuencia += 1

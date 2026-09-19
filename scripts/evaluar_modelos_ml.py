@@ -14,6 +14,7 @@ Evaluación de modelos ML de CaloFit — metodología CRISP-DM (Fase 5: Evaluati
 Ejecutar (dentro del contenedor backend):
   docker exec calofit_backend python scripts/evaluar_modelos_ml.py
 """
+
 from __future__ import annotations
 
 import os
@@ -158,10 +159,7 @@ def _vectores_deficit_sinteticos(n: int, seed: int = 42) -> list[list[float]]:
     realistas (mismos límites que aplica obtener_recomendaciones()).
     """
     rng = np.random.default_rng(seed)
-    return [
-        [rng.uniform(50, 900), rng.uniform(0, 60), rng.uniform(0, 120), rng.uniform(0, 40)]
-        for _ in range(n)
-    ]
+    return [[rng.uniform(50, 900), rng.uniform(0, 60), rng.uniform(0, 120), rng.uniform(0, 40)] for _ in range(n)]
 
 
 def _evaluar_diversidad_cobertura(n_consultas: int = 100):
@@ -182,8 +180,8 @@ def _evaluar_diversidad_cobertura(n_consultas: int = 100):
     from sklearn.metrics.pairwise import cosine_distances
 
     features_knn = ["calorias_100g", "proteina_100g", "carbohindratos_100g", "grasas_100g"]
-    df_knn  = ml_recomendador._df
-    scaler  = ml_recomendador._scaler
+    df_knn = ml_recomendador._df
+    scaler = ml_recomendador._scaler
 
     total_catalogo = len(df_knn)
     vistos: set[str] = set()
@@ -215,8 +213,10 @@ def _evaluar_diversidad_cobertura(n_consultas: int = 100):
 
     ratio_unicidad = len(set(todas_recos)) / max(len(todas_recos), 1)
     print(f"  Ratio de unicidad por recomendación: {ratio_unicidad:.1%}")
-    print(f"  ({ratio_unicidad:.0%} de las recomendaciones son distintas entre sesiones — "
-          f"{'alta' if ratio_unicidad >= 0.5 else 'baja'} variedad entre consultas)")
+    print(
+        f"  ({ratio_unicidad:.0%} de las recomendaciones son distintas entre sesiones — "
+        f"{'alta' if ratio_unicidad >= 0.5 else 'baja'} variedad entre consultas)"
+    )
 
     if cobertura >= 0.15:
         print("  ✅ Cobertura razonable — el modelo explora una porción amplia del catálogo.")
@@ -278,11 +278,7 @@ def _evaluar_con_datos_reales():
             except Exception:
                 continue
 
-            registros = (
-                db.query(ProgresoCalorias)
-                .filter(ProgresoCalorias.client_id == cid)
-                .all()
-            )
+            registros = db.query(ProgresoCalorias).filter(ProgresoCalorias.client_id == cid).all()
             for r in registros:
                 rest_kcal = max(plan["calorias_dia"] - (r.calorias_consumidas or 0), 50)
                 rest_prot = max(plan["proteinas_g"] - (r.proteinas_consumidas or 0), 0)

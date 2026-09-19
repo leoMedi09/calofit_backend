@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
 
+
 class PlanDiarioResponse(BaseModel):
     id: int
     dia_numero: int
@@ -16,6 +17,7 @@ class PlanDiarioResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 class PlanNutricionalCreate(BaseModel):
     client_id: int
     genero: int
@@ -24,11 +26,12 @@ class PlanNutricionalCreate(BaseModel):
     talla: float
     nivel_actividad: float = Field(1.2, ge=1.2, le=2.0)
     objetivo: str = Field("mantener", pattern="^(ganar|perder|mantener)$")
-    
+
     proteinas_g: Optional[float] = None
     carbohidratos_g: Optional[float] = None
     grasas_g: Optional[float] = None
     observaciones: Optional[str] = None
+
 
 class PlanNutricionalResponse(BaseModel):
     id: int
@@ -37,15 +40,16 @@ class PlanNutricionalResponse(BaseModel):
     objetivo: str
     fecha_creacion: datetime
     es_contingencia_ia: bool = False
-    
-    detalles_diarios: List[PlanDiarioResponse] 
-    
+
+    detalles_diarios: List[PlanDiarioResponse]
+
     status: str = "draft_ia"
     validated_by_id: Optional[int] = None
     validated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
 
 class TestIARequest(BaseModel):
     genero: str = Field(..., description="Género: 1=Masculino, 2=Femenino")
@@ -55,13 +59,16 @@ class TestIARequest(BaseModel):
     nivel_actividad: float = Field(1.2, description="Nivel de actividad (ej. 1.2=sedentario, 1.55=moderado)")
     objetivo: str = Field("mantener", description="Objetivo: mantener, ganar, perder")
 
+
 class AlertaSaludBase(BaseModel):
     tipo: str = Field(..., description="Tipo: fatiga, lesion, desanimo, otro")
     descripcion: str
     severidad: str = "bajo"
 
+
 class AlertaSaludCreate(AlertaSaludBase):
     pass
+
 
 class AlertaSaludResponse(AlertaSaludBase):
     id: int
@@ -69,13 +76,15 @@ class AlertaSaludResponse(AlertaSaludBase):
     estado: str
     atendido_por_id: Optional[int] = None
     fecha_deteccion: datetime
-    
+
     class Config:
         from_attributes = True
+
 
 class AlertaSaludUpdate(BaseModel):
     estado: str
     atendido_por_id: Optional[int] = None
+
 
 class PlanDiarioUpdate(BaseModel):
     calorias_dia: Optional[float] = None
@@ -83,6 +92,7 @@ class PlanDiarioUpdate(BaseModel):
     carbohidratos_g: Optional[float] = None
     grasas_g: Optional[float] = None
     estado: Optional[str] = "oficial"
+
 
 class PlanNutricionalUpdate(BaseModel):
     objetivo: Optional[str] = None

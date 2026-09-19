@@ -8,6 +8,7 @@ aserción duplicada en test_fix_alimentos_alucinados_y_contenedores.py
 verifica el contenido real de la fila en `comida_registros`, no solo la
 lista devuelta.
 """
+
 import json
 
 import pytest
@@ -21,26 +22,52 @@ from app.models.comida_registro import ComidaRegistro
 
 @pytest.mark.integration
 class TestRegistroPlatoCompuesto:
-
     @pytest.fixture(autouse=True)
     def mock_groq_combo_y_componentes(self):
         """Simula exactamente el comportamiento problemático encontrado en la
         auditoría: el LLM devuelve el plato completo Y sus componentes en la
         misma respuesta JSON."""
+
         async def mock_llamar_groq(prompt, max_tokens=800, temp=0.7, model=None):
             prompt_lower = prompt.lower()
             if "extrae todos los alimentos" in prompt_lower or "responde solo con json" in prompt_lower:
                 if "arroz" in prompt_lower and "lentejas" in prompt_lower:
-                    return json.dumps({
-                        "alimentos": [
-                            {"nombre": "Arroz con lentejas", "es_real": True, "cantidad": 1,
-                             "porcion_g": 350, "kcal": 450, "prot_g": 16, "carb_g": 75, "grasa_g": 6},
-                            {"nombre": "lentejas", "es_real": True, "cantidad": 1,
-                             "porcion_g": 150, "kcal": 200, "prot_g": 12, "carb_g": 30, "grasa_g": 1},
-                            {"nombre": "arroz", "es_real": True, "cantidad": 1,
-                             "porcion_g": 200, "kcal": 260, "prot_g": 4, "carb_g": 56, "grasa_g": 0.5},
-                        ]
-                    })
+                    return json.dumps(
+                        {
+                            "alimentos": [
+                                {
+                                    "nombre": "Arroz con lentejas",
+                                    "es_real": True,
+                                    "cantidad": 1,
+                                    "porcion_g": 350,
+                                    "kcal": 450,
+                                    "prot_g": 16,
+                                    "carb_g": 75,
+                                    "grasa_g": 6,
+                                },
+                                {
+                                    "nombre": "lentejas",
+                                    "es_real": True,
+                                    "cantidad": 1,
+                                    "porcion_g": 150,
+                                    "kcal": 200,
+                                    "prot_g": 12,
+                                    "carb_g": 30,
+                                    "grasa_g": 1,
+                                },
+                                {
+                                    "nombre": "arroz",
+                                    "es_real": True,
+                                    "cantidad": 1,
+                                    "porcion_g": 200,
+                                    "kcal": 260,
+                                    "prot_g": 4,
+                                    "carb_g": 56,
+                                    "grasa_g": 0.5,
+                                },
+                            ]
+                        }
+                    )
                 return json.dumps({"alimentos": []})
             return json.dumps({"alimentos": []})
 

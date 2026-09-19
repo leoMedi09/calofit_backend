@@ -9,6 +9,7 @@ from app.models.historial import ProgresoCalorias
 from app.models import MetaUsuario
 from app.services.ia_service import ia_engine
 
+
 @pytest.mark.integration
 class TestRobustezAsistente:
     """Pruebas de robustez y casos límite (anomalías, fallos, ambigüedad) para la demo."""
@@ -17,7 +18,8 @@ class TestRobustezAsistente:
     def setup_user(self, db, sample_client):
         class MockUser:
             email = sample_client.email
-        return {'client': sample_client, 'user': MockUser(), 'db': db}
+
+        return {"client": sample_client, "user": MockUser(), "db": db}
 
     @pytest.fixture(autouse=True)
     def mock_groq_calls(self):
@@ -31,7 +33,7 @@ class TestRobustezAsistente:
                     line_s = line.strip()
                     for marker in ["mensaje a clasificar:", "mensaje actual:", "mensaje del usuario:", "mensaje:"]:
                         if line_s.startswith(marker):
-                            after = line_s[len(marker):].strip()
+                            after = line_s[len(marker) :].strip()
                             if after.startswith('"') and after.endswith('"'):
                                 return after[1:-1].strip()
                             if after.startswith("'") and after.endswith("'"):
@@ -43,7 +45,7 @@ class TestRobustezAsistente:
 
             def has_word(text, word_list):
                 for w in word_list:
-                    if re.search(r'\b' + re.escape(w) + r'\b', text):
+                    if re.search(r"\b" + re.escape(w) + r"\b", text):
                         return True
                 return False
 
@@ -52,7 +54,25 @@ class TestRobustezAsistente:
                     return "otro"
                 elif "calorias" in msg and "mi comida" in msg:
                     return "otro"
-                elif has_word(msg, ["arroz con pollo", "hamburguesa", "lentejas", "lenteja", "comi", "comí", "zampe", "zampé", "almorce", "almorcé", "huevo", "huevos", "arroz", "leche"]):
+                elif has_word(
+                    msg,
+                    [
+                        "arroz con pollo",
+                        "hamburguesa",
+                        "lentejas",
+                        "lenteja",
+                        "comi",
+                        "comí",
+                        "zampe",
+                        "zampé",
+                        "almorce",
+                        "almorcé",
+                        "huevo",
+                        "huevos",
+                        "arroz",
+                        "leche",
+                    ],
+                ):
                     return "registrar_nutricion"
                 elif has_word(msg, ["entrenar", "comer", "cena"]):
                     return "recomendar_nutricion"
@@ -60,59 +80,125 @@ class TestRobustezAsistente:
 
             if "extrae todos los alimentos" in prompt_lower or "responde solo con json" in prompt_lower:
                 if "arroz con pollo" in msg:
-                    return json.dumps({
-                        "alimentos": [
-                            {"nombre": "Arroz con pollo", "es_real": True, "cantidad": 1, "porcion_g": 350, "kcal": 650, "prot_g": 35, "carb_g": 80, "grasa_g": 18}
-                        ],
-                        "prot_total": 35,
-                        "carb_total": 80,
-                        "grasa_total": 18
-                    })
+                    return json.dumps(
+                        {
+                            "alimentos": [
+                                {
+                                    "nombre": "Arroz con pollo",
+                                    "es_real": True,
+                                    "cantidad": 1,
+                                    "porcion_g": 350,
+                                    "kcal": 650,
+                                    "prot_g": 35,
+                                    "carb_g": 80,
+                                    "grasa_g": 18,
+                                }
+                            ],
+                            "prot_total": 35,
+                            "carb_total": 80,
+                            "grasa_total": 18,
+                        }
+                    )
                 elif "hamburguesa" in msg:
-                    return json.dumps({
-                        "alimentos": [
-                            {"nombre": "Hamburguesa", "es_real": True, "cantidad": 1, "porcion_g": 200, "kcal": 500, "prot_g": 25, "carb_g": 40, "grasa_g": 22}
-                        ],
-                        "prot_total": 25,
-                        "carb_total": 40,
-                        "grasa_total": 22
-                    })
+                    return json.dumps(
+                        {
+                            "alimentos": [
+                                {
+                                    "nombre": "Hamburguesa",
+                                    "es_real": True,
+                                    "cantidad": 1,
+                                    "porcion_g": 200,
+                                    "kcal": 500,
+                                    "prot_g": 25,
+                                    "carb_g": 40,
+                                    "grasa_g": 22,
+                                }
+                            ],
+                            "prot_total": 25,
+                            "carb_total": 40,
+                            "grasa_total": 22,
+                        }
+                    )
                 elif "lentejas" in msg or "lenteja" in msg:
-                    return json.dumps({
-                        "alimentos": [
-                            {"nombre": "Lentejas", "es_real": True, "cantidad": 1, "porcion_g": 250, "kcal": 350, "prot_g": 18, "carb_g": 55, "grasa_g": 5}
-                        ],
-                        "prot_total": 18,
-                        "carb_total": 55,
-                        "grasa_total": 5
-                    })
+                    return json.dumps(
+                        {
+                            "alimentos": [
+                                {
+                                    "nombre": "Lentejas",
+                                    "es_real": True,
+                                    "cantidad": 1,
+                                    "porcion_g": 250,
+                                    "kcal": 350,
+                                    "prot_g": 18,
+                                    "carb_g": 55,
+                                    "grasa_g": 5,
+                                }
+                            ],
+                            "prot_total": 18,
+                            "carb_total": 55,
+                            "grasa_total": 5,
+                        }
+                    )
                 elif "arroz" in msg:
-                    return json.dumps({
-                        "alimentos": [
-                            {"nombre": "Arroz", "es_real": True, "cantidad": 1, "porcion_g": 150, "kcal": 200, "prot_g": 4, "carb_g": 44, "grasa_g": 0.5}
-                        ],
-                        "prot_total": 4,
-                        "carb_total": 44,
-                        "grasa_total": 0.5
-                    })
+                    return json.dumps(
+                        {
+                            "alimentos": [
+                                {
+                                    "nombre": "Arroz",
+                                    "es_real": True,
+                                    "cantidad": 1,
+                                    "porcion_g": 150,
+                                    "kcal": 200,
+                                    "prot_g": 4,
+                                    "carb_g": 44,
+                                    "grasa_g": 0.5,
+                                }
+                            ],
+                            "prot_total": 4,
+                            "carb_total": 44,
+                            "grasa_total": 0.5,
+                        }
+                    )
                 elif "leche" in msg:
-                    return json.dumps({
-                        "alimentos": [
-                            {"nombre": "Leche", "es_real": True, "cantidad": 1, "porcion_g": 250, "kcal": 150, "prot_g": 8, "carb_g": 12, "grasa_g": 8}
-                        ],
-                        "prot_total": 8,
-                        "carb_total": 12,
-                        "grasa_total": 8
-                    })
+                    return json.dumps(
+                        {
+                            "alimentos": [
+                                {
+                                    "nombre": "Leche",
+                                    "es_real": True,
+                                    "cantidad": 1,
+                                    "porcion_g": 250,
+                                    "kcal": 150,
+                                    "prot_g": 8,
+                                    "carb_g": 12,
+                                    "grasa_g": 8,
+                                }
+                            ],
+                            "prot_total": 8,
+                            "carb_total": 12,
+                            "grasa_total": 8,
+                        }
+                    )
                 elif "huevos" in msg or "huevo" in msg:
-                    return json.dumps({
-                        "alimentos": [
-                            {"nombre": "Huevos", "es_real": True, "cantidad": 2, "porcion_g": 100, "kcal": 140, "prot_g": 12, "carb_g": 1, "grasa_g": 10}
-                        ],
-                        "prot_total": 12,
-                        "carb_total": 1,
-                        "grasa_total": 10
-                    })
+                    return json.dumps(
+                        {
+                            "alimentos": [
+                                {
+                                    "nombre": "Huevos",
+                                    "es_real": True,
+                                    "cantidad": 2,
+                                    "porcion_g": 100,
+                                    "kcal": 140,
+                                    "prot_g": 12,
+                                    "carb_g": 1,
+                                    "grasa_g": 10,
+                                }
+                            ],
+                            "prot_total": 12,
+                            "carb_total": 1,
+                            "grasa_total": 10,
+                        }
+                    )
                 return json.dumps({"alimentos": [], "prot_total": 0, "carb_total": 0, "grasa_total": 0})
 
             if "hay al menos un plato inadecuado" in prompt_lower:
@@ -122,11 +208,27 @@ class TestRobustezAsistente:
                     return "SI"
                 return "NO"
 
-            if "restricciones dietéticas concretas" in prompt_lower or "nutricionista clínico. el paciente tiene" in prompt_lower:
+            if (
+                "restricciones dietéticas concretas" in prompt_lower
+                or "nutricionista clínico. el paciente tiene" in prompt_lower
+            ):
                 return "• Diabetes: evitar azúcar refinado, dulces y postres.\n• Vegano: evitar carne, pollo, pescado, huevo, leche animal.\n• Intolerancia a la lactosa: evitar lácteos con lactosa."
 
-            if any(w in prompt_lower for w in ["propón exactamente 3 platos", "platos para", "lista exactamente 3 platos", "exactamente 3 platos"]):
-                if "vegano" in prompt_lower or "vegana" in prompt_lower or "tofu" in prompt_lower or "lentejas" in prompt_lower:
+            if any(
+                w in prompt_lower
+                for w in [
+                    "propón exactamente 3 platos",
+                    "platos para",
+                    "lista exactamente 3 platos",
+                    "exactamente 3 platos",
+                ]
+            ):
+                if (
+                    "vegano" in prompt_lower
+                    or "vegana" in prompt_lower
+                    or "tofu" in prompt_lower
+                    or "lentejas" in prompt_lower
+                ):
                     if "tofu" in prompt_lower:
                         return (
                             "- Ensalada de garbanzos con palta y chía (~350 kcal, P:18g C:50g G:8g)\n"
@@ -174,9 +276,9 @@ class TestRobustezAsistente:
 
     @pytest.mark.asyncio
     async def test_caso1_falla_servicio_llm(self, setup_user):
-        client = setup_user['client']
-        user = setup_user['user']
-        db = setup_user['db']
+        client = setup_user["client"]
+        user = setup_user["user"]
+        db = setup_user["db"]
 
         client.medical_conditions = ["Diabetes"]
         db.commit()
@@ -185,10 +287,7 @@ class TestRobustezAsistente:
 
         with patch.object(ia_engine, "_llamar_groq", side_effect=asyncio.TimeoutError("Timeout simulado")):
             resp_timeout = await asistente.consultar(
-                mensaje="¿Qué puedo comer de cena?",
-                db=db,
-                current_user=user,
-                historial=[]
+                mensaje="¿Qué puedo comer de cena?", db=db, current_user=user, historial=[]
             )
             resp_text = resp_timeout["respuesta_ia"].lower()
             assert len(resp_text) > 10
@@ -197,27 +296,26 @@ class TestRobustezAsistente:
 
         with patch.object(ia_engine, "_llamar_groq", return_value=""):
             resp_empty = await asistente.consultar(
-                mensaje="¿Qué puedo comer de cena?",
-                db=db,
-                current_user=user,
-                historial=[]
+                mensaje="¿Qué puedo comer de cena?", db=db, current_user=user, historial=[]
             )
             resp_text = resp_empty["respuesta_ia"].lower()
             assert len(resp_text) > 10
             assert "sopa de verduras" in resp_text or "ensalada" in resp_text
 
-        with patch.object(ia_engine, "_llamar_groq", return_value="El asistente está temporalmente ocupado (límite de consultas alcanzado). Espera unos minutos y vuelve a intentarlo. "):
+        with patch.object(
+            ia_engine,
+            "_llamar_groq",
+            return_value="El asistente está temporalmente ocupado (límite de consultas alcanzado). Espera unos minutos y vuelve a intentarlo. ",
+        ):
             resp_rate = await asistente.consultar(
-                mensaje="¿Qué puedo comer de cena?",
-                db=db,
-                current_user=user,
-                historial=[]
+                mensaje="¿Qué puedo comer de cena?", db=db, current_user=user, historial=[]
             )
             resp_text = resp_rate["respuesta_ia"].lower()
             assert len(resp_text) > 10
             assert "sopa de verduras" in resp_text or "ensalada" in resp_text
 
         original_llamar_groq = ia_engine._llamar_groq
+
         async def mock_llamar_groq(prompt, *args, **kwargs):
             if "condiciones" in prompt or "médico" in prompt or "paciente" in prompt:
                 raise Exception("Error de microconsulta médica simulado")
@@ -225,10 +323,7 @@ class TestRobustezAsistente:
 
         with patch.object(ia_engine, "_llamar_groq", new=mock_llamar_groq):
             resp_med_err = await asistente.consultar(
-                mensaje="¿Qué puedo comer de cena?",
-                db=db,
-                current_user=user,
-                historial=[]
+                mensaje="¿Qué puedo comer de cena?", db=db, current_user=user, historial=[]
             )
             resp_text = resp_med_err["respuesta_ia"].lower()
             assert "leche" not in resp_text
@@ -236,19 +331,14 @@ class TestRobustezAsistente:
 
     @pytest.mark.asyncio
     async def test_caso2_recuperacion_cambio_tema(self, setup_user):
-        client = setup_user['client']
-        user = setup_user['user']
-        db = setup_user['db']
+        client = setup_user["client"]
+        user = setup_user["user"]
+        db = setup_user["db"]
 
         asistente = AsistenteService()
         historial = []
 
-        resp1 = await asistente.consultar(
-            mensaje="Comí arroz con pollo",
-            db=db,
-            current_user=user,
-            historial=historial
-        )
+        resp1 = await asistente.consultar(mensaje="Comí arroz con pollo", db=db, current_user=user, historial=historial)
         assert resp1["intencion"] == "SUCCESS"
         historial.append({"role": "user", "content": "Comí arroz con pollo"})
         historial.append({"role": "assistant", "content": resp1["respuesta_ia"]})
@@ -256,33 +346,27 @@ class TestRobustezAsistente:
         await asyncio.sleep(3)
 
         resp2 = await asistente.consultar(
-            mensaje="¿Cuál es la capital de Francia?",
-            db=db,
-            current_user=user,
-            historial=historial
+            mensaje="¿Cuál es la capital de Francia?", db=db, current_user=user, historial=historial
         )
         assert resp2["intencion"] == "INFO"
         assert "nutrición" in resp2["respuesta_ia"] or "ejercicio" in resp2["respuesta_ia"]
-        
+
         historial.append({"role": "user", "content": "¿Cuál es la capital de Francia?"})
         historial.append({"role": "assistant", "content": resp2["respuesta_ia"]})
 
         await asyncio.sleep(3)
 
         resp3 = await asistente.consultar(
-            mensaje="Ahora dime cuántas calorías tenía mi comida",
-            db=db,
-            current_user=user,
-            historial=historial
+            mensaje="Ahora dime cuántas calorías tenía mi comida", db=db, current_user=user, historial=historial
         )
         resp_text = resp3["respuesta_ia"].lower()
         assert "arroz" in resp_text or "pollo" in resp_text or "calorías" in resp_text
 
     @pytest.mark.asyncio
     async def test_caso3_contexto_incompleto(self, setup_user):
-        client = setup_user['client']
-        user = setup_user['user']
-        db = setup_user['db']
+        client = setup_user["client"]
+        user = setup_user["user"]
+        db = setup_user["db"]
 
         client.goal = None
         client.medical_conditions = []
@@ -290,12 +374,7 @@ class TestRobustezAsistente:
         db.commit()
 
         asistente = AsistenteService()
-        resp = await asistente.consultar(
-            mensaje="¿Qué puedo comer?",
-            db=db,
-            current_user=user,
-            historial=[]
-        )
+        resp = await asistente.consultar(mensaje="¿Qué puedo comer?", db=db, current_user=user, historial=[])
         resp_text = resp["respuesta_ia"].lower()
         assert len(resp_text) > 10
         assert "diabetes" not in resp_text
@@ -303,21 +382,16 @@ class TestRobustezAsistente:
 
     @pytest.mark.asyncio
     async def test_caso4_contradiccion_mensaje_perfil(self, setup_user):
-        client = setup_user['client']
-        user = setup_user['user']
-        db = setup_user['db']
+        client = setup_user["client"]
+        user = setup_user["user"]
+        db = setup_user["db"]
 
         client.goal = "ganar_leve"
         db.commit()
 
         asistente = AsistenteService()
-        resp = await asistente.consultar(
-            mensaje="Quiero bajar grasa rápido",
-            db=db,
-            current_user=user,
-            historial=[]
-        )
-        
+        resp = await asistente.consultar(mensaje="Quiero bajar grasa rápido", db=db, current_user=user, historial=[])
+
         db.refresh(client)
         assert client.goal == "ganar_leve"
 
@@ -326,9 +400,9 @@ class TestRobustezAsistente:
 
     @pytest.mark.asyncio
     async def test_caso5_restriccion_medica_objetivo_conflictivo(self, setup_user):
-        client = setup_user['client']
-        user = setup_user['user']
-        db = setup_user['db']
+        client = setup_user["client"]
+        user = setup_user["user"]
+        db = setup_user["db"]
 
         client.goal = "ganar masa"
         client.medical_conditions = ["Diabetes"]
@@ -338,10 +412,18 @@ class TestRobustezAsistente:
         if not meta:
             meta = MetaUsuario(
                 client_id=client.id,
-                genero="M", edad=25, peso_kg=75, talla_cm=175,
-                nivel_actividad="Moderado", objetivo="ganar masa",
-                tmb=1700, get=2500, calorias_objetivo=3000,
-                proteinas_g=150, carbohidratos_g=300, grasas_g=70
+                genero="M",
+                edad=25,
+                peso_kg=75,
+                talla_cm=175,
+                nivel_actividad="Moderado",
+                objetivo="ganar masa",
+                tmb=1700,
+                get=2500,
+                calorias_objetivo=3000,
+                proteinas_g=150,
+                carbohidratos_g=300,
+                grasas_g=70,
             )
             db.add(meta)
             db.commit()
@@ -351,59 +433,46 @@ class TestRobustezAsistente:
             mensaje="Quiero subir calorías rápido, dame comidas para aumentar peso",
             db=db,
             current_user=user,
-            historial=[]
+            historial=[],
         )
         resp_text = resp["respuesta_ia"].lower()
 
         assert "picarones" not in resp_text
         assert "azúcar" not in resp_text and "dulces" not in resp_text
-        assert any(w in resp_text for w in ["palta", "frutos secos", "nueces", "avena", "grasas saludables", "tofu", "lentejas", "quinua"])
+        assert any(
+            w in resp_text
+            for w in ["palta", "frutos secos", "nueces", "avena", "grasas saludables", "tofu", "lentejas", "quinua"]
+        )
 
     @pytest.mark.asyncio
     async def test_caso6_entradas_ambiguas(self, setup_user):
-        client = setup_user['client']
-        user = setup_user['user']
-        db = setup_user['db']
+        client = setup_user["client"]
+        user = setup_user["user"]
+        db = setup_user["db"]
 
         asistente = AsistenteService()
 
-        resp_arroz = await asistente.consultar(
-            mensaje="Comí un poco de arroz",
-            db=db,
-            current_user=user,
-            historial=[]
-        )
+        resp_arroz = await asistente.consultar(mensaje="Comí un poco de arroz", db=db, current_user=user, historial=[])
         assert "duda" in resp_arroz["respuesta_ia"].lower() or "estimado" in resp_arroz["respuesta_ia"].lower()
 
-        resp_leche = await asistente.consultar(
-            mensaje="Tomé algo de leche",
-            db=db,
-            current_user=user,
-            historial=[]
-        )
+        resp_leche = await asistente.consultar(mensaje="Tomé algo de leche", db=db, current_user=user, historial=[])
         assert "duda" in resp_leche["respuesta_ia"].lower() or "estimado" in resp_leche["respuesta_ia"].lower()
 
         resp_huevos = await asistente.consultar(
-            mensaje="Creo que fueron unos huevos",
-            db=db,
-            current_user=user,
-            historial=[]
+            mensaje="Creo que fueron unos huevos", db=db, current_user=user, historial=[]
         )
         assert "duda" in resp_huevos["respuesta_ia"].lower() or "estimado" in resp_huevos["respuesta_ia"].lower()
 
     @pytest.mark.asyncio
     async def test_caso7_lenguaje_natural_informal(self, setup_user):
-        client = setup_user['client']
-        user = setup_user['user']
-        db = setup_user['db']
+        client = setup_user["client"]
+        user = setup_user["user"]
+        db = setup_user["db"]
 
         asistente = AsistenteService()
 
         resp_meteo = await asistente.consultar(
-            mensaje="me metí un arroz con pollo",
-            db=db,
-            current_user=user,
-            historial=[]
+            mensaje="me metí un arroz con pollo", db=db, current_user=user, historial=[]
         )
         assert resp_meteo["intencion"] == "SUCCESS"
         assert "arroz" in resp_meteo["respuesta_ia"].lower() or "pollo" in resp_meteo["respuesta_ia"].lower()
@@ -411,50 +480,40 @@ class TestRobustezAsistente:
         await asyncio.sleep(3)
 
         resp_zampe = await asistente.consultar(
-            mensaje="me zampé una hamburguesa",
-            db=db,
-            current_user=user,
-            historial=[]
+            mensaje="me zampé una hamburguesa", db=db, current_user=user, historial=[]
         )
         assert resp_zampe["intencion"] == "SUCCESS"
         assert "hamburguesa" in resp_zampe["respuesta_ia"].lower()
 
         await asyncio.sleep(3)
 
-        resp_lentejas = await asistente.consultar(
-            mensaje="almorcé lentejas",
-            db=db,
-            current_user=user,
-            historial=[]
-        )
+        resp_lentejas = await asistente.consultar(mensaje="almorcé lentejas", db=db, current_user=user, historial=[])
         assert resp_lentejas["intencion"] == "SUCCESS"
         assert "lenteja" in resp_lentejas["respuesta_ia"].lower()
 
         await asyncio.sleep(3)
 
         resp_cualquier = await asistente.consultar(
-            mensaje="Hoy comí cualquier cosa",
-            db=db,
-            current_user=user,
-            historial=[]
+            mensaje="Hoy comí cualquier cosa", db=db, current_user=user, historial=[]
         )
-        assert "cualquier cosa" in resp_cualquier["respuesta_ia"].lower() or "qué comiste" in resp_cualquier["respuesta_ia"].lower() or "no pude" in resp_cualquier["respuesta_ia"].lower()
+        assert (
+            "cualquier cosa" in resp_cualquier["respuesta_ia"].lower()
+            or "qué comiste" in resp_cualquier["respuesta_ia"].lower()
+            or "no pude" in resp_cualquier["respuesta_ia"].lower()
+        )
 
         await asyncio.sleep(3)
 
         resp_gym = await asistente.consultar(
-            mensaje="Estoy muerto después del gym",
-            db=db,
-            current_user=user,
-            historial=[]
+            mensaje="Estoy muerto después del gym", db=db, current_user=user, historial=[]
         )
         assert len(resp_gym["respuesta_ia"]) > 10
 
     @pytest.mark.asyncio
     async def test_caso8_repeticion_consistencia(self, setup_user):
-        client = setup_user['client']
-        user = setup_user['user']
-        db = setup_user['db']
+        client = setup_user["client"]
+        user = setup_user["user"]
+        db = setup_user["db"]
 
         client.medical_conditions = ["Diabetes"]
         db.commit()
@@ -465,28 +524,25 @@ class TestRobustezAsistente:
         respuestas = []
         for i in range(3):
             resp = await asistente.consultar(
-                mensaje="¿Qué puedo comer después de entrenar?",
-                db=db,
-                current_user=user,
-                historial=historial
+                mensaje="¿Qué puedo comer después de entrenar?", db=db, current_user=user, historial=historial
             )
             resp_text = resp["respuesta_ia"].lower()
             respuestas.append(resp_text)
-            
+
             historial.append({"role": "user", "content": "¿Qué puedo comer después de entrenar?"})
             historial.append({"role": "assistant", "content": resp["respuesta_ia"]})
 
         for r in respuestas:
             assert "azúcar" not in r
             assert "picarones" not in r
-            
+
         assert respuestas[0] != respuestas[1] or respuestas[1] != respuestas[2]
 
     @pytest.mark.asyncio
     async def test_caso9_perfil_complejo(self, setup_user):
-        client = setup_user['client']
-        user = setup_user['user']
-        db = setup_user['db']
+        client = setup_user["client"]
+        user = setup_user["user"]
+        db = setup_user["db"]
 
         client.goal = "ganar_leve"
         client.medical_conditions = ["Diabetes", "Vegano", "intolerancia a la lactosa"]
@@ -496,35 +552,74 @@ class TestRobustezAsistente:
         if not meta:
             meta = MetaUsuario(
                 client_id=client.id,
-                genero="M", edad=25, peso_kg=70, talla_cm=175,
-                nivel_actividad="Moderado", objetivo="ganar_leve",
-                tmb=1600, get=2300, calorias_objetivo=2500,
-                proteinas_g=140, carbohidratos_g=300, grasas_g=60
+                genero="M",
+                edad=25,
+                peso_kg=70,
+                talla_cm=175,
+                nivel_actividad="Moderado",
+                objetivo="ganar_leve",
+                tmb=1600,
+                get=2300,
+                calorias_objetivo=2500,
+                proteinas_g=140,
+                carbohidratos_g=300,
+                grasas_g=60,
             )
             db.add(meta)
             db.commit()
 
         asistente = AsistenteService()
         resp = await asistente.consultar(
-            mensaje="¿Qué puedo comer después de entrenar?",
-            db=db,
-            current_user=user,
-            historial=[]
+            mensaje="¿Qué puedo comer después de entrenar?", db=db, current_user=user, historial=[]
         )
         resp_text = resp["respuesta_ia"].lower()
 
-        assert "pollo" not in resp_text and "carne" not in resp_text and "huevo" not in resp_text and "pescado" not in resp_text
-        assert "leche" not in resp_text or "deslactosad" in resp_text or "vegetal" in resp_text or "almendra" in resp_text or "soya" in resp_text or "soja" in resp_text
-        assert any(w in resp_text for w in ["tofu", "lenteja", "garbanzo", "frijol", "poroto", "soja", "soya", "quinua", "chía", "frutos secos", "semilla", "maní", "proteína"])
-        assert "azúcar" not in resp_text and "picarones" not in resp_text and "miel" not in resp_text and "suspiro" not in resp_text
+        assert (
+            "pollo" not in resp_text
+            and "carne" not in resp_text
+            and "huevo" not in resp_text
+            and "pescado" not in resp_text
+        )
+        assert (
+            "leche" not in resp_text
+            or "deslactosad" in resp_text
+            or "vegetal" in resp_text
+            or "almendra" in resp_text
+            or "soya" in resp_text
+            or "soja" in resp_text
+        )
+        assert any(
+            w in resp_text
+            for w in [
+                "tofu",
+                "lenteja",
+                "garbanzo",
+                "frijol",
+                "poroto",
+                "soja",
+                "soya",
+                "quinua",
+                "chía",
+                "frutos secos",
+                "semilla",
+                "maní",
+                "proteína",
+            ]
+        )
+        assert (
+            "azúcar" not in resp_text
+            and "picarones" not in resp_text
+            and "miel" not in resp_text
+            and "suspiro" not in resp_text
+        )
 
     def test_caso10_filtrado_contenedores_no_redundantes(self):
         from app.services.llm_registro import _filtrar_contenedor_generico_con_ingredientes
-        
+
         alimentos_a = [
             {"nombre": "Chuleta de chancho", "porcion_g": 150},
             {"nombre": "Arroz", "porcion_g": 100},
-            {"nombre": "Jugo de piña", "porcion_g": 200}
+            {"nombre": "Jugo de piña", "porcion_g": 200},
         ]
         res_a = _filtrar_contenedor_generico_con_ingredientes(alimentos_a, "comí chuleta con arroz y jugo de piña")
         assert len(res_a) == 3
@@ -534,10 +629,10 @@ class TestRobustezAsistente:
             {"nombre": "Batido de avena con platano", "porcion_g": 300},
             {"nombre": "Avena", "porcion_g": 40},
             {"nombre": "Platano", "porcion_g": 100},
-            {"nombre": "Leche", "porcion_g": 200}
+            {"nombre": "Leche", "porcion_g": 200},
         ]
-        res_b = _filtrar_contenedor_generico_con_ingredientes(alimentos_b, "tomé un batido de avena con platano, leche, avena y platano")
+        res_b = _filtrar_contenedor_generico_con_ingredientes(
+            alimentos_b, "tomé un batido de avena con platano, leche, avena y platano"
+        )
         assert len(res_b) == 3
         assert not any("Batido" in x["nombre"] for x in res_b)
-
-

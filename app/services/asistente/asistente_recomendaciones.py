@@ -6,6 +6,7 @@ Integra:
   - ML #2 KNN Similitud Coseno — recomienda alimentos para cubrir déficit del día.
   - historial_recomendaciones — evita repetir platos sugeridos recientemente.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -22,7 +23,6 @@ from app.services.ml_service import ml_perfil, ml_recomendador
 class RecomendacionesHandler:
     """Orquesta las recomendaciones nutricionales usando KNN + historial."""
 
-
     def preparar_features_rf(self, perfil, db: Session) -> Dict[str, Any]:
         """
         Construye el dict de 14 features requeridas por el Random Forest.
@@ -34,8 +34,8 @@ class RecomendacionesHandler:
           Water_Intake(liters), Avg_BPM, Resting_BPM,
           Workout_CARDIO/HIIT/STRENGTH/YOGA (one-hot)
         """
-        hoy     = get_peru_date()
-        semana  = hoy - timedelta(days=7)
+        hoy = get_peru_date()
+        semana = hoy - timedelta(days=7)
 
         registros_activos = (
             db.query(ProgresoCalorias)
@@ -48,6 +48,7 @@ class RecomendacionesHandler:
         )
 
         from sqlalchemy import func as _f
+
         avg_quemadas = (
             db.query(_f.avg(ProgresoCalorias.calorias_quemadas))
             .filter(
@@ -59,32 +60,37 @@ class RecomendacionesHandler:
             or 0.0
         )
 
-        edad        = (datetime.now().year - perfil.birth_date.year) if perfil.birth_date else 30
-        peso        = float(getattr(perfil, "weight", None) or 70.0)
-        altura_cm   = float(getattr(perfil, "height", None) or 170.0)
-        session_h   = float(getattr(perfil, "session_duration", None) or 1.0)
-        _wt_raw     = str(getattr(perfil, "workout_type", "") or "").strip()
+        edad = (datetime.now().year - perfil.birth_date.year) if perfil.birth_date else 30
+        peso = float(getattr(perfil, "weight", None) or 70.0)
+        altura_cm = float(getattr(perfil, "height", None) or 170.0)
+        session_h = float(getattr(perfil, "session_duration", None) or 1.0)
+        _wt_raw = str(getattr(perfil, "workout_type", "") or "").strip()
         _WT_MAP = {
-            "fuerza": "Strength", "pesas": "Strength", "musculacion": "Strength",
+            "fuerza": "Strength",
+            "pesas": "Strength",
+            "musculacion": "Strength",
             "cardio": "Cardio",
-            "hiit": "HIIT", "funcional": "HIIT", "crossfit": "HIIT",
-            "yoga": "Yoga", "pilates": "Yoga",
+            "hiit": "HIIT",
+            "funcional": "HIIT",
+            "crossfit": "HIIT",
+            "yoga": "Yoga",
+            "pilates": "Yoga",
         }
         workout_type = _WT_MAP.get(_wt_raw.lower(), _wt_raw)
 
         return {
-            "age":           edad,
-            "gender":        getattr(perfil, "gender", "M"),
-            "weight":        peso,
-            "height":        altura_cm,
-            "workout_freq":  registros_activos,
+            "age": edad,
+            "gender": getattr(perfil, "gender", "M"),
+            "weight": peso,
+            "height": altura_cm,
+            "workout_freq": registros_activos,
             "session_hours": session_h,
-            "calories":      round(float(avg_quemadas), 1),
-            "fat_pct":       25.0,
-            "water":         2.0,
-            "avg_bpm":       140.0,
-            "resting_bpm":   65.0,
-            "workout_type":  workout_type,
+            "calories": round(float(avg_quemadas), 1),
+            "fat_pct": 25.0,
+            "water": 2.0,
+            "avg_bpm": 140.0,
+            "resting_bpm": 65.0,
+            "workout_type": workout_type,
         }
 
     def predecir_perfil(self, perfil, db: Session) -> tuple:
@@ -106,27 +112,31 @@ class RecomendacionesHandler:
         Vector entrada: [calorias_faltantes, proteinas_faltantes, carbos_faltantes, grasas_faltantes]
         Filtra alimentos del historial reciente y los bloqueados por el nutricionista.
         """
-        hoy      = get_peru_date()
-        progreso = db.query(ProgresoCalorias).filter(
-            ProgresoCalorias.client_id == perfil.id,
-            ProgresoCalorias.fecha     == hoy,
-        ).first()
+        hoy = get_peru_date()
+        progreso = (
+            db.query(ProgresoCalorias)
+            .filter(
+                ProgresoCalorias.client_id == perfil.id,
+                ProgresoCalorias.fecha == hoy,
+            )
+            .first()
+        )
 
-        consumidas     = float((progreso.calorias_consumidas     if progreso else 0) or 0)
-        prote_cons     = float((progreso.proteinas_consumidas     if progreso else 0) or 0)
-        carbos_cons    = float((progreso.carbohidratos_consumidos if progreso else 0) or 0)
-        grasas_cons    = float((progreso.grasas_consumidas        if progreso else 0) or 0)
+        consumidas = float((progreso.calorias_consumidas if progreso else 0) or 0)
+        prote_cons = float((progreso.proteinas_consumidas if progreso else 0) or 0)
+        carbos_cons = float((progreso.carbohidratos_consumidos if progreso else 0) or 0)
+        grasas_cons = float((progreso.grasas_consumidas if progreso else 0) or 0)
 
-        cal_meta   = float(plan_hoy_data.get("calorias_dia")    or 0)
-        prot_meta  = float(plan_hoy_data.get("proteinas_g")     or 0)
+        cal_meta = float(plan_hoy_data.get("calorias_dia") or 0)
+        prot_meta = float(plan_hoy_data.get("proteinas_g") or 0)
         carbo_meta = float(plan_hoy_data.get("carbohidratos_g") or 0)
-        grasa_meta = float(plan_hoy_data.get("grasas_g")        or 0)
+        grasa_meta = float(plan_hoy_data.get("grasas_g") or 0)
 
         deficit = {
-            "calorias":    max(0.0, cal_meta   - consumidas),
-            "proteinas":   max(0.0, prot_meta  - prote_cons),
-            "carbos":      max(0.0, carbo_meta - carbos_cons),
-            "grasas":      max(0.0, grasa_meta - grasas_cons),
+            "calorias": max(0.0, cal_meta - consumidas),
+            "proteinas": max(0.0, prot_meta - prote_cons),
+            "carbos": max(0.0, carbo_meta - carbos_cons),
+            "grasas": max(0.0, grasa_meta - grasas_cons),
         }
 
         excluir = self._nombres_historial_reciente(perfil.id, db, dias=2)
@@ -137,34 +147,27 @@ class RecomendacionesHandler:
         n_fetch = n * 4 if _hay_dieta else (n * 2 if recommended else n)
 
         recs = ml_recomendador.obtener_recomendaciones(
-            calorias_faltantes = deficit["calorias"],
-            prote_faltante     = deficit["proteinas"],
-            carbo_faltante     = deficit["carbos"],
-            grasa_faltante     = deficit["grasas"],
-            n_recomendaciones  = n_fetch,
-            excluir_nombres    = excluir,
+            calorias_faltantes=deficit["calorias"],
+            prote_faltante=deficit["proteinas"],
+            carbo_faltante=deficit["carbos"],
+            grasa_faltante=deficit["grasas"],
+            n_recomendaciones=n_fetch,
+            excluir_nombres=excluir,
         )
 
         if _hay_dieta:
             try:
                 from app.services.recomendador_platos import _tokens_prohibidos
+
                 _tok = _tokens_prohibidos(condiciones_dieta)
                 if _tok:
-                    recs = [
-                        r for r in recs
-                        if not any(
-                            t in (r.get("alimento", "") or "").lower()
-                            for t in _tok
-                        )
-                    ]
+                    recs = [r for r in recs if not any(t in (r.get("alimento", "") or "").lower() for t in _tok)]
             except Exception:
                 pass
 
         if recommended and len(recs) > n:
             rec_norm = {r.lower() for r in recommended}
-            preferred = [r for r in recs if any(
-                token in (r.get("alimento") or "").lower() for token in rec_norm
-            )]
+            preferred = [r for r in recs if any(token in (r.get("alimento") or "").lower() for token in rec_norm)]
             rest = [r for r in recs if r not in preferred]
             recs = (preferred + rest)[:n]
         else:
@@ -184,29 +187,26 @@ class RecomendacionesHandler:
         """Persiste en historial_recomendaciones para evitar repeticiones futuras."""
         db.add(
             HistorialRecomendacion(
-                client_id        = client_id,
-                plato_id         = plato_id,
-                nombre_plato     = nombre_plato[:200],
-                calorias         = macros.get("calorias", 0),
-                proteinas_g      = macros.get("proteinas_g", 0),
-                carbohidratos_g  = macros.get("carbohidratos_g", 0),
-                grasas_g         = macros.get("grasas_g", 0),
-                momento_dia      = momento_dia,
-                fue_consumido    = False,
+                client_id=client_id,
+                plato_id=plato_id,
+                nombre_plato=nombre_plato[:200],
+                calorias=macros.get("calorias", 0),
+                proteinas_g=macros.get("proteinas_g", 0),
+                carbohidratos_g=macros.get("carbohidratos_g", 0),
+                grasas_g=macros.get("grasas_g", 0),
+                momento_dia=momento_dia,
+                fue_consumido=False,
             )
         )
         db.commit()
 
-
-    def _nombres_historial_reciente(
-        self, client_id: int, db: Session, dias: int = 7
-    ) -> List[str]:
+    def _nombres_historial_reciente(self, client_id: int, db: Session, dias: int = 7) -> List[str]:
         """Devuelve nombres de platos ya recomendados en las últimas N días."""
         desde = datetime.now() - timedelta(days=dias)
-        rows  = (
+        rows = (
             db.query(HistorialRecomendacion.nombre_plato)
             .filter(
-                HistorialRecomendacion.client_id  == client_id,
+                HistorialRecomendacion.client_id == client_id,
                 HistorialRecomendacion.created_at >= desde,
             )
             .all()

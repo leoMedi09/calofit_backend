@@ -49,8 +49,7 @@ from app.core.mets_gym import METS_GYM
 from app.services.nutricion_service import nutricion_service
 
 FALLBACK_MSG_IA_TIMEOUT = (
-    "No pudimos completar la respuesta a tiempo. "
-    "Por favor envía tu mensaje otra vez en unos segundos."
+    "No pudimos completar la respuesta a tiempo. Por favor envía tu mensaje otra vez en unos segundos."
 )
 
 FALLBACK_MSG_RATE_LIMIT = (
@@ -60,20 +59,47 @@ FALLBACK_MSG_RATE_LIMIT = (
 )
 
 CONDICIONES_CRITICAS = [
-    "diabetes", "hipertensión", "hipertension", "renal", "cardíaca",
-    "cardiaca", "embarazo", "lactancia", "celiaco", "celíaco"
+    "diabetes",
+    "hipertensión",
+    "hipertension",
+    "renal",
+    "cardíaca",
+    "cardiaca",
+    "embarazo",
+    "lactancia",
+    "celiaco",
+    "celíaco",
 ]
 
 PORCIONES_ESTANDAR = {
-    "desayuno": 300, "almuerzo": 400, "cena": 300, "snack": 150,
-    "merienda": 150, "media mañana": 150, "lonche": 200,
-    "plato": 350, "plato de": 350, "porción": 200, "porcion": 200,
-    "tazón": 300, "tazon": 300, "sopa": 300, "caldo": 300,
-    "ensalada": 200, "fruta": 150, "pan": 80,
-    "vaso": 250, "taza": 240, "botella": 500,
-    "presa": 150, "filete": 150, "bistec": 180,
-    "huevo": 55, "huevos": 110,
-    "porcion pequeña": 150, "porcion grande": 450,
+    "desayuno": 300,
+    "almuerzo": 400,
+    "cena": 300,
+    "snack": 150,
+    "merienda": 150,
+    "media mañana": 150,
+    "lonche": 200,
+    "plato": 350,
+    "plato de": 350,
+    "porción": 200,
+    "porcion": 200,
+    "tazón": 300,
+    "tazon": 300,
+    "sopa": 300,
+    "caldo": 300,
+    "ensalada": 200,
+    "fruta": 150,
+    "pan": 80,
+    "vaso": 250,
+    "taza": 240,
+    "botella": 500,
+    "presa": 150,
+    "filete": 150,
+    "bistec": 180,
+    "huevo": 55,
+    "huevos": 110,
+    "porcion pequeña": 150,
+    "porcion grande": 450,
 }
 
 
@@ -86,6 +112,7 @@ class IAService:
         if groq_api_key:
             if groq_api_key.startswith("sk-or-"):
                 from app.services.ai.openrouter_client import OpenRouterClient
+
                 self.groq_client = OpenRouterClient(
                     api_key=groq_api_key,
                     timeout=180.0,
@@ -106,16 +133,14 @@ class IAService:
         self.gemini_model = None
         self.gemini_model_fast = None
 
-        self._fs_client_id     = getattr(settings, "FATSECRET_CLIENT_ID", None)
+        self._fs_client_id = getattr(settings, "FATSECRET_CLIENT_ID", None)
         self._fs_client_secret = getattr(settings, "FATSECRET_CLIENT_SECRET", None)
-        self._fs_token         = None
+        self._fs_token = None
 
         self._alerta_sim = self._setup_fuzzy_logic()
 
-
     def calcular_requerimiento(
-        self, genero: int, edad: int, peso: float,
-        talla: float, nivel_actividad: float, objetivo: str
+        self, genero: int, edad: int, peso: float, talla: float, nivel_actividad: float, objetivo: str
     ) -> float:
         """
         Calcula el Gasto Energético Total (GET) basado en Mifflin-St Jeor.
@@ -127,16 +152,19 @@ class IAService:
         mantenimiento = tmb * nivel_actividad
 
         ajustes = {
-            "perder": -500, "perder peso": -500, "perder_leve": -300,
-            "mantener": 0,  "mantener peso": 0,
+            "perder": -500,
+            "perder peso": -500,
+            "perder_leve": -300,
+            "mantener": 0,
+            "mantener peso": 0,
             "ganar_leve": 250,
-            "ganar": 500,   "ganar masa": 500,
+            "ganar": 500,
+            "ganar masa": 500,
         }
         return round(mantenimiento + ajustes.get(objetivo.lower(), 0), 2)
 
     def calcular_macros_completos(
-        self, genero: int, edad: int, peso: float,
-        talla: float, nivel_actividad: float, objetivo: str
+        self, genero: int, edad: int, peso: float, talla: float, nivel_actividad: float, objetivo: str
     ) -> Tuple[float, float, float, float]:
         """Retorna calorías y P/C/G (misma lógica que plan/dashboard: ``macros_desde_calorias_peso_objetivo``)."""
         from app.core.macros_diarios import macros_desde_calorias_peso_objetivo
@@ -150,55 +178,58 @@ class IAService:
             m["grasas_g"],
         )
 
-    def calcular_macros_optimizados(
-        self, calorias: float, objetivo: str, peso: float = 70.0
-    ) -> Dict:
+    def calcular_macros_optimizados(self, calorias: float, objetivo: str, peso: float = 70.0) -> Dict:
         """Distribución de macros (g/kg + reparto grasa); ver app.core.macros_diarios."""
         from app.core.macros_diarios import macros_desde_calorias_peso_objetivo
 
         return macros_desde_calorias_peso_objetivo(calorias, objetivo, peso)
 
-
     def _setup_fuzzy_logic(self):
-        if not (fuzz and ctrl): return None
+        if not (fuzz and ctrl):
+            return None
         try:
             adherencia = ctrl.Antecedent(np.arange(0, 101, 1), "adherencia")
-            progreso   = ctrl.Antecedent(np.arange(0, 101, 1), "progreso")
-            alerta     = ctrl.Consequent(np.arange(0, 101, 1), "alerta")
+            progreso = ctrl.Antecedent(np.arange(0, 101, 1), "progreso")
+            alerta = ctrl.Consequent(np.arange(0, 101, 1), "alerta")
 
-            adherencia["baja"]  = fuzz.trimf(adherencia.universe, [0,   0,  50])
-            adherencia["media"] = fuzz.trimf(adherencia.universe, [25, 50,  75])
-            adherencia["alta"]  = fuzz.trimf(adherencia.universe, [50, 100, 100])
+            adherencia["baja"] = fuzz.trimf(adherencia.universe, [0, 0, 50])
+            adherencia["media"] = fuzz.trimf(adherencia.universe, [25, 50, 75])
+            adherencia["alta"] = fuzz.trimf(adherencia.universe, [50, 100, 100])
 
-            progreso["lento"]  = fuzz.trimf(progreso.universe, [0,   0,  50])
-            progreso["normal"] = fuzz.trimf(progreso.universe, [25, 50,  75])
+            progreso["lento"] = fuzz.trimf(progreso.universe, [0, 0, 50])
+            progreso["normal"] = fuzz.trimf(progreso.universe, [25, 50, 75])
             progreso["rapido"] = fuzz.trimf(progreso.universe, [50, 100, 100])
 
-            alerta["suave"]    = fuzz.trimf(alerta.universe, [0,   0,  40])
-            alerta["moderada"] = fuzz.trimf(alerta.universe, [30, 50,  70])
+            alerta["suave"] = fuzz.trimf(alerta.universe, [0, 0, 40])
+            alerta["moderada"] = fuzz.trimf(alerta.universe, [30, 50, 70])
             alerta["estricta"] = fuzz.trimf(alerta.universe, [60, 100, 100])
 
             rules = [
-                ctrl.Rule(adherencia["alta"]  & progreso["rapido"], alerta["suave"]),
+                ctrl.Rule(adherencia["alta"] & progreso["rapido"], alerta["suave"]),
                 ctrl.Rule(adherencia["media"] & progreso["normal"], alerta["moderada"]),
-                ctrl.Rule(adherencia["baja"]  | progreso["lento"],  alerta["estricta"]),
+                ctrl.Rule(adherencia["baja"] | progreso["lento"], alerta["estricta"]),
             ]
             return ctrl.ControlSystemSimulation(ctrl.ControlSystem(rules))
-        except: return None
+        except:
+            return None
 
     def generar_alerta_fuzzy(self, adh_pct: float, prog_pct: float) -> Dict:
-        if not self._alerta_sim: return {"nivel": "N/A", "score": 50, "mensaje": "Estándar."}
+        if not self._alerta_sim:
+            return {"nivel": "N/A", "score": 50, "mensaje": "Estándar."}
         try:
             self._alerta_sim.input["adherencia"] = max(0, min(100, adh_pct))
-            self._alerta_sim.input["progreso"]   = max(0, min(100, prog_pct))
+            self._alerta_sim.input["progreso"] = max(0, min(100, prog_pct))
             self._alerta_sim.compute()
             score = self._alerta_sim.output["alerta"]
-            if score < 40: nivel, msg = "Bajo",  "Excelente ritmo."
-            elif score < 70: nivel, msg = "Medio", "Estable, sigue así."
-            else: nivel, msg = "Alto",  "Necesitas refuerzo motivaional."
+            if score < 40:
+                nivel, msg = "Bajo", "Excelente ritmo."
+            elif score < 70:
+                nivel, msg = "Medio", "Estable, sigue así."
+            else:
+                nivel, msg = "Alto", "Necesitas refuerzo motivaional."
             return {"nivel": nivel, "score": round(float(score), 2), "mensaje": msg}
-        except: return {"nivel": "N/A", "score": 50, "mensaje": "Estándar."}
-
+        except:
+            return {"nivel": "N/A", "score": 50, "mensaje": "Estándar."}
 
     @staticmethod
     def es_fallo_respuesta_llm(text: Optional[str]) -> bool:
@@ -230,19 +261,41 @@ class IAService:
 
         _SEMANTICO = {
             "registrar_nutricion": [
-                "registro", "registrar", "comida", "comer", "ingesta", "alimento",
-                "nutricion", "nutrición", "log", "anotar", "apuntar",
+                "registro",
+                "registrar",
+                "comida",
+                "comer",
+                "ingesta",
+                "alimento",
+                "nutricion",
+                "nutrición",
+                "log",
+                "anotar",
+                "apuntar",
             ],
             "recomendar_nutricion": [
-                "recomienda", "recomendacion", "recomendación", "sugerencia",
-                "opciones", "qué comer", "que comer", "menú", "menu",
+                "recomienda",
+                "recomendacion",
+                "recomendación",
+                "sugerencia",
+                "opciones",
+                "qué comer",
+                "que comer",
+                "menú",
+                "menu",
             ],
             "registrar_ejercicio": [
-                "ejercicio registrado", "actividad física", "actividad fisica",
-                "entrenamiento registrado", "cardio", "workout",
+                "ejercicio registrado",
+                "actividad física",
+                "actividad fisica",
+                "entrenamiento registrado",
+                "cardio",
+                "workout",
             ],
             "recomendar_ejercicio": [
-                "rutina", "ejercicios recomendados", "plan de ejercicio",
+                "rutina",
+                "ejercicios recomendados",
+                "plan de ejercicio",
             ],
         }
         for modo, palabras in _SEMANTICO.items():
@@ -278,9 +331,7 @@ class IAService:
                 f"{'Usuario' if h.get('role') == 'user' else 'Asistente'}: {str(h.get('content', ''))[:200]}"
                 for h in _ultimos
             )
-            _contexto_historial = (
-                f"\n━━ CONVERSACIÓN RECIENTE (para contexto) ━━\n{_lineas}\n"
-            )
+            _contexto_historial = f"\n━━ CONVERSACIÓN RECIENTE (para contexto) ━━\n{_lineas}\n"
         prompt = (
             "Eres el clasificador de intenciones de CaloFit, app de nutrición y ejercicio en Perú.\n"
             "Responde ÚNICAMENTE con una de estas 5 palabras (nada más, sin explicación):\n"
@@ -356,11 +407,10 @@ class IAService:
             "  ✓ 'leí que sentadillas 4x12 con 80kg es lo que hacen los profesionales' → otro (marca: 'leí que')\n"
             "  ✓ 'mi entrenador me dijo que haga press banca 3x10 la próxima semana' → otro (marca: 'me dijo')\n"
             f"{_contexto_historial}\n"
-            f"Mensaje a clasificar: \"{m[:500]}\"\n"
+            f'Mensaje a clasificar: "{m[:500]}"\n'
             "Respuesta (una sola palabra exacta):"
         )
-        raw = await self._llamar_groq(prompt, max_tokens=150, temp=0.0,
-                                      model="groq/compound-mini")
+        raw = await self._llamar_groq(prompt, max_tokens=150, temp=0.0, model="groq/compound-mini")
         if self.es_fallo_respuesta_llm(raw):
             raw = await self._llamar_groq(prompt, max_tokens=150, temp=0.0)
         if self.es_fallo_respuesta_llm(raw):
@@ -374,8 +424,7 @@ class IAService:
         try:
             loop = asyncio.get_event_loop()
             resp = await asyncio.wait_for(
-                loop.run_in_executor(None, lambda: self.gemini_model.generate_content(prompt)),
-                timeout=30.0
+                loop.run_in_executor(None, lambda: self.gemini_model.generate_content(prompt)), timeout=30.0
             )
             return resp.text.strip()
         except asyncio.TimeoutError:
@@ -390,8 +439,9 @@ class IAService:
             print(f"[Gemini] Error inesperado: {e}")
             return FALLBACK_MSG_IA_TIMEOUT
 
-    async def _llamar_groq(self, prompt: str, max_tokens: int = 800, temp: float = 0.7,
-                           model: str | None = None) -> str:
+    async def _llamar_groq(
+        self, prompt: str, max_tokens: int = 800, temp: float = 0.7, model: str | None = None
+    ) -> str:
         """
         Motor de IA con selección de modelo:
         - groq/compound-mini (default): respuestas principales, NLP, macros (70k TPM limit)
@@ -401,7 +451,7 @@ class IAService:
         if not self.groq_client:
             return "[Modo Offline]"
         modelo = model or "groq/compound-mini"
-        
+
         if "gpt-oss" in modelo:
             palabras_estimadas = len(prompt.split())
             tokens_prompt_est = int(palabras_estimadas * 1.3)
@@ -422,16 +472,18 @@ class IAService:
         except Exception as e:
             err = str(e).lower()
             is_large = len(prompt) > 4000
-            
+
             if "413" in err or "too_large" in err or "too large" in err:
                 if modelo != "llama-3.3-70b-versatile":
-                    print(f"⚠️ Groq: prompt demasiado grande para {modelo} (413). Reintentando con llama-3.3-70b-versatile...")
+                    print(
+                        f"⚠️ Groq: prompt demasiado grande para {modelo} (413). Reintentando con llama-3.3-70b-versatile..."
+                    )
                     try:
                         return await _ejecutar_llamada("llama-3.3-70b-versatile", max_tokens)
                     except Exception as fallback_err:
                         print(f"🚨 Groq: falló también reintento con llama-3.3-70b-versatile: {fallback_err}")
                         err = str(fallback_err).lower()
-                
+
                 if "llama-3.1-8b-instant" not in modelo:
                     print("⚠️ Groq: Reintentando con llama-3.1-8b-instant por límite de contexto/fallback...")
                     try:
@@ -442,12 +494,16 @@ class IAService:
                     except Exception as fallback_err2:
                         print(f"🚨 Groq: falló también llama-3.1-8b-instant: {fallback_err2}")
                         err = str(fallback_err2).lower()
-            
+
             if "429" in err or "rate_limit" in err or "rate limit" in err or "timed out" in err or "timeout" in err:
                 if is_large:
-                    target_fallback = "llama-3.1-8b-instant" if "llama-3.1-8b-instant" not in modelo else "llama-3.3-70b-versatile"
+                    target_fallback = (
+                        "llama-3.1-8b-instant" if "llama-3.1-8b-instant" not in modelo else "llama-3.3-70b-versatile"
+                    )
                     if target_fallback != modelo:
-                        print(f"⚠️ Groq: rate limit o timeout en {modelo} con prompt grande. Reintentando con {target_fallback}...")
+                        print(
+                            f"⚠️ Groq: rate limit o timeout en {modelo} con prompt grande. Reintentando con {target_fallback}..."
+                        )
                         try:
                             tokens_prompt_est = int(len(prompt.split()) * 1.3)
                             max_tok_seguro = max(100, 5950 - tokens_prompt_est)
@@ -464,7 +520,7 @@ class IAService:
                         except Exception as fallback_err:
                             print(f"🚨 Groq: falló también reintento con groq/compound-mini: {fallback_err}")
                             err = str(fallback_err).lower()
-            
+
             if "timed out" in err or "timeout" in err:
                 return FALLBACK_MSG_IA_TIMEOUT
             if "429" in err or "rate_limit" in err or "rate limit" in err:
@@ -472,34 +528,42 @@ class IAService:
             return f"[Error: {e}]"
 
     async def recomendar_alimentos_con_groq(
-        self, perfil_usuario: Dict, comando_texto: str = None,
-        adherencia_pct: float = 100, progreso_pct: float = 50,
+        self,
+        perfil_usuario: Dict,
+        comando_texto: str = None,
+        adherencia_pct: float = 100,
+        progreso_pct: float = 50,
     ) -> str:
         """Genera plan nutricional usando el contexto del usuario y datos de los modelos ML."""
         genero = 1 if perfil_usuario.get("gender", "M") == "M" else 2
         calorias = self.calcular_requerimiento(
-            genero, perfil_usuario.get("age", 25), perfil_usuario.get("weight", 70),
-            perfil_usuario.get("height", 170), perfil_usuario.get("activity_level", 1.2),
-            perfil_usuario.get("goal", "mantener")
+            genero,
+            perfil_usuario.get("age", 25),
+            perfil_usuario.get("weight", 70),
+            perfil_usuario.get("height", 170),
+            perfil_usuario.get("activity_level", 1.2),
+            perfil_usuario.get("goal", "mantener"),
         )
-        macros = self.calcular_macros_optimizados(calorias, perfil_usuario.get("goal", "mantener"), perfil_usuario.get("weight", 70))
-        
+        macros = self.calcular_macros_optimizados(
+            calorias, perfil_usuario.get("goal", "mantener"), perfil_usuario.get("weight", 70)
+        )
+
         med_conditions = perfil_usuario.get("medical_conditions", [])
         cond_texto = ", ".join(med_conditions) if med_conditions else "Ninguna"
-        
+
         alerta_clinica = ""
         if cond_texto != "Ninguna" and cond_texto != "":
             alerta_clinica = f"\n⚠️ CONDICIONES MÉDICAS CRÍTICAS: {cond_texto}. ESTÁ PROHIBIDO RECOMENDAR ALIMENTOS DAÑINOS PARA ESTAS PATOLOGÍAS."
 
         prompt = f"""Eres un Nutricionista Clínico y Deportivo muy profesional especializado en gastronomía peruana.
-CLIENTE: {perfil_usuario.get('first_name', 'Cliente')} | OBJETIVO: {perfil_usuario.get('goal', 'mantener')}
-METAS: {calorias} kcal | P: {macros['proteinas_g']}g | C: {macros['carbohidratos_g']}g | G: {macros['grasas_g']}g{alerta_clinica}
+CLIENTE: {perfil_usuario.get("first_name", "Cliente")} | OBJETIVO: {perfil_usuario.get("goal", "mantener")}
+METAS: {calorias} kcal | P: {macros["proteinas_g"]}g | C: {macros["carbohidratos_g"]}g | G: {macros["grasas_g"]}g{alerta_clinica}
 
 REGLAS INFLEXIBLES:
 1. Usa principalmente alimentos disponibles en Perú (Quinua, Pollo, Camote, Atún, etc).
 2. Si el cliente tiene Condiciones Médicas Críticas, MENCIONA BREVEMENTE POR QUÉ evitaste ciertos alimentos en base a su patología.
 3. Sé empático pero sumamente riguroso clínicamente.
-{f'COMANDO DEL CLIENTE: {comando_texto}' if comando_texto else ''}"""
+{f"COMANDO DEL CLIENTE: {comando_texto}" if comando_texto else ""}"""
         return await self._llamar_groq(prompt)
 
     async def sugerir_guia_estrategica(self, perfil_usuario: Dict, alertas_salud: Optional[List[Dict]] = None) -> Dict:
@@ -537,23 +601,29 @@ REGLAS INFLEXIBLES:
                 "forbidden_foods": forbidden_default[:8],
             }
 
-        alertas_txt = "; ".join(
-            [f"{a.get('tipo', 'N/A')}: {a.get('descripcion', '')} (sev={a.get('severidad', 'N/A')})" for a in alertas_salud]
-        ) or "Sin alertas relevantes recientes"
+        alertas_txt = (
+            "; ".join(
+                [
+                    f"{a.get('tipo', 'N/A')}: {a.get('descripcion', '')} (sev={a.get('severidad', 'N/A')})"
+                    for a in alertas_salud
+                ]
+            )
+            or "Sin alertas relevantes recientes"
+        )
         cond_txt = ", ".join([str(c) for c in condiciones]) if condiciones else "Ninguna"
         peso_hist = perfil_usuario.get("weight_history") or []
         peso_hist_txt = ", ".join([f"{h.get('valor')}kg" for h in peso_hist[-6:]]) if peso_hist else "Sin historial"
 
         prompt = f"""Eres un nutricionista clínico experto. Debes responder SOLO JSON válido.
 Perfil:
-- Nombre: {perfil_usuario.get('full_name', 'Paciente')}
-- Sexo: {perfil_usuario.get('gender', 'N/A')}
-- Edad: {perfil_usuario.get('age', 'N/A')}
-- Peso actual: {perfil_usuario.get('current_weight', 'N/A')} kg
-- Talla: {perfil_usuario.get('current_height', 'N/A')} cm
-- IMC: {perfil_usuario.get('imc', 'N/A')}
-- Actividad: {perfil_usuario.get('activity_level', 'N/A')}
-- Objetivo: {perfil_usuario.get('goal', 'N/A')}
+- Nombre: {perfil_usuario.get("full_name", "Paciente")}
+- Sexo: {perfil_usuario.get("gender", "N/A")}
+- Edad: {perfil_usuario.get("age", "N/A")}
+- Peso actual: {perfil_usuario.get("current_weight", "N/A")} kg
+- Talla: {perfil_usuario.get("current_height", "N/A")} cm
+- IMC: {perfil_usuario.get("imc", "N/A")}
+- Actividad: {perfil_usuario.get("activity_level", "N/A")}
+- Objetivo: {perfil_usuario.get("goal", "N/A")}
 - Condiciones médicas: {cond_txt}
 - Historial de peso reciente: {peso_hist_txt}
 - Alertas de salud (15 días): {alertas_txt}
@@ -578,13 +648,17 @@ Reglas:
             rec = parsed.get("recommended_foods", recommended_default)
             forb = parsed.get("forbidden_foods", forbidden_default)
 
-            if not isinstance(rec, list): rec = recommended_default
-            if not isinstance(forb, list): forb = forbidden_default
+            if not isinstance(rec, list):
+                rec = recommended_default
+            if not isinstance(forb, list):
+                forb = forbidden_default
             rec = [str(x).strip() for x in rec if str(x).strip()]
             forb = [str(x).strip() for x in forb if str(x).strip()]
 
-            if not rec: rec = recommended_default
-            if not forb: forb = forbidden_default
+            if not rec:
+                rec = recommended_default
+            if not forb:
+                forb = forbidden_default
             return {
                 "ai_strategic_focus": focus,
                 "recommended_foods": list(dict.fromkeys(rec))[:8],
@@ -597,20 +671,24 @@ Reglas:
                 "forbidden_foods": forbidden_default[:8],
             }
 
-
     def identificar_intencion_salud(self, texto: str) -> str:
         t = texto.lower()
-        if any(k in t for k in ["duele", "mal", "mareo", "dolor"]): return "ALERT"
-        if any(k in t for k in ["hice", "entrené", "gym", "cardio"]): return "EXERCISE"
-        if any(k in t for k in ["comí", "desayuné", "cené", "registra"]): return "LOG"
-        if any(k in t for k in ["caloría", "cuánto tiene", "macro"]): return "INFO"
-        if any(k in t for k in ["qué como", "recomienda", "plan", "dieta"]): return "RECIPE"
+        if any(k in t for k in ["duele", "mal", "mareo", "dolor"]):
+            return "ALERT"
+        if any(k in t for k in ["hice", "entrené", "gym", "cardio"]):
+            return "EXERCISE"
+        if any(k in t for k in ["comí", "desayuné", "cené", "registra"]):
+            return "LOG"
+        if any(k in t for k in ["caloría", "cuánto tiene", "macro"]):
+            return "INFO"
+        if any(k in t for k in ["qué como", "recomienda", "plan", "dieta"]):
+            return "RECIPE"
         return "GENERAL"
 
     def interpretar_comando_nlp(self, comando: str) -> Dict:
         """Parsea el lenguaje natural para identificar intenciones de registro."""
         intencion = self.identificar_intencion_salud(comando)
-        numeros = re.findall(r'\d+\.?\d*', comando)
+        numeros = re.findall(r"\d+\.?\d*", comando)
         return {
             "intencion": intencion,
             "texto_original": comando,
@@ -619,7 +697,9 @@ Reglas:
         }
 
     async def extraer_macros_de_texto(
-        self, texto: str, peso_usuario_kg: float = 70.0,
+        self,
+        texto: str,
+        peso_usuario_kg: float = 70.0,
         peso_usuario: float = None,
     ) -> Dict:
         """
@@ -648,22 +728,25 @@ Reglas:
 
             duracion_min = parse_duracion_minutos(texto_lower, default=45.0)
             calorias = round(
-                ejercicios_service.calcular_calorias(
-                    met_detectado, peso_usuario_kg, duracion_min
-                ),
+                ejercicios_service.calcular_calorias(met_detectado, peso_usuario_kg, duracion_min),
                 1,
             )
             return {
-                "es_ejercicio": True, "es_comida": False,
-                "calorias": calorias, "proteinas_g": 0,
-                "carbohidratos_g": 0, "grasas_g": 0,
-                "fibra_g": 0, "azucar_g": 0, "sodio_mg": 0,
+                "es_ejercicio": True,
+                "es_comida": False,
+                "calorias": calorias,
+                "proteinas_g": 0,
+                "carbohidratos_g": 0,
+                "grasas_g": 0,
+                "fibra_g": 0,
+                "azucar_g": 0,
+                "sodio_mg": 0,
                 "ejercicios_detectados": [f"{ejercicio_detectado} {duracion_min} min"],
                 "alimentos_detectados": [],
                 "calidad_nutricional": "Alta",
                 "duracion_min": duracion_min,
                 "met": met_detectado,
-                "origen": "Tabla MET Cientifica"
+                "origen": "Tabla MET Cientifica",
             }
 
         from app.services.asistente.asistente_ejercicio import (
@@ -671,11 +754,13 @@ Reglas:
             frase_registro_actividad_fisica,
             frase_vocabulario_gimnasio,
         )
+
         if frase_registro_actividad_fisica(texto) and frase_vocabulario_gimnasio(texto):
             return extraccion_ejercicio_fallback_fuerza(texto, texto_lower, peso_usuario_kg)
 
         try:
             from app.core.utils import get_peru_now
+
             hora_peru = get_peru_now().hour
         except Exception:
             hora_peru = 12
@@ -693,10 +778,7 @@ Reglas:
         else:
             porcion_g = PORCIONES_ESTANDAR["snack"]
 
-        match_cantidad = re.search(
-            r'(\d+(?:\.\d+)?)\s*(?:g\b|gr\b|gramos?|ml\b|kg\b)',
-            texto_lower
-        )
+        match_cantidad = re.search(r"(\d+(?:\.\d+)?)\s*(?:g\b|gr\b|gramos?|ml\b|kg\b)", texto_lower)
         if match_cantidad:
             porcion_g = float(match_cantidad.group(1))
 
@@ -708,7 +790,7 @@ Reglas:
         print(f"[IA-Service] Estimando macros para '{texto}' vía LLM...")
         meal_context = "de desayuno" if 5 <= hora_peru < 10 else "tamaño de porción razonable"
         qtxt = (texto.split("(NOTA INTERNA", 1)[0] or texto).replace('"', "'").strip()
-        
+
         prompt = (
             "Eres un Nutricionista Clínico y Deportivo experto.\n"
             f"Estima los macros y calorías para 1 porción típica ({meal_context}) del siguiente alimento o plato: «{qtxt}».\n"
@@ -716,20 +798,20 @@ Reglas:
             "Evita incluir palabras que indiquen contenedores, porciones o medidas (como 'taza de', 'vaso de', 'plato de') en el nombre del alimento. El nombre debe ser simplemente el alimento (ej. 'Café' en lugar de 'Taza de café').\n\n"
             "Responde únicamente con un objeto JSON válido en este formato (sin explicaciones ni texto extra):\n"
             "{\n"
-            "  \"alimento\": \"Nombre del alimento o plato en singular y limpio\",\n"
-            "  \"calorias\": número,\n"
-            "  \"proteinas_g\": número,\n"
-            "  \"carbohidratos_g\": número,\n"
-            "  \"grasas_g\": número,\n"
-            "  \"fibra_g\": número,\n"
-            "  \"azucar_g\": número,\n"
-            "  \"sodio_mg\": número,\n"
-            "  \"es_comida\": true\n"
+            '  "alimento": "Nombre del alimento o plato en singular y limpio",\n'
+            '  "calorias": número,\n'
+            '  "proteinas_g": número,\n'
+            '  "carbohidratos_g": número,\n'
+            '  "grasas_g": número,\n'
+            '  "fibra_g": número,\n'
+            '  "azucar_g": número,\n'
+            '  "sodio_mg": número,\n'
+            '  "es_comida": true\n'
             "}"
         )
         raw = await self._llamar_groq(prompt, max_tokens=300, temp=0.1)
         try:
-            m = re.search(r'\{.*\}', raw, re.DOTALL)
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
             parsed = json.loads(m.group()) if m else {}
             if "calorias" in parsed:
                 parsed.setdefault("es_comida", True)
@@ -742,35 +824,48 @@ Reglas:
                 return parsed
         except Exception:
             pass
-        return {"es_comida": False, "es_ejercicio": False, "calorias": 0, "alimentos_detectados": [], "ejercicios_detectados": []}
-
+        return {
+            "es_comida": False,
+            "es_ejercicio": False,
+            "calorias": 0,
+            "alimentos_detectados": [],
+            "ejercicios_detectados": [],
+        }
 
     def generar_plan_inicial_automatico(self, datos_cliente: Dict) -> Optional[Dict]:
         """Genera el primer plan del cliente usando base clínica y personalización por objetivo."""
         try:
             genero = 1 if str(datos_cliente.get("genero", "M")).upper() == "M" else 2
             calorias = self.calcular_requerimiento(
-                genero, int(datos_cliente.get("edad", 25)), float(datos_cliente.get("peso", 70)),
-                float(datos_cliente.get("talla", 170)), float(datos_cliente.get("nivel_actividad", 1.2)),
-                datos_cliente.get("objetivo", "mantener")
+                genero,
+                int(datos_cliente.get("edad", 25)),
+                float(datos_cliente.get("peso", 70)),
+                float(datos_cliente.get("talla", 170)),
+                float(datos_cliente.get("nivel_actividad", 1.2)),
+                datos_cliente.get("objetivo", "mantener"),
             )
-            macros = self.calcular_macros_optimizados(calorias, datos_cliente.get("objetivo", "mantener"), float(datos_cliente.get("peso", 70)))
-            
+            macros = self.calcular_macros_optimizados(
+                calorias, datos_cliente.get("objetivo", "mantener"), float(datos_cliente.get("peso", 70))
+            )
+
             dias = []
             for i in range(1, 8):
-                dias.append({
-                    "dia_numero": i,
-                    "calorias_dia": calorias,
-                    "proteinas_g": macros["proteinas_g"],
-                    "carbohidratos_g": macros["carbohidratos_g"],
-                    "grasas_g": macros["grasas_g"],
-                    "sugerencia_entrenamiento_ia": "Entrenamiento moderado sugerido por IA.",
-                    "nota_asistente_ia": f"Día {i} enfocado en {datos_cliente.get('objetivo')}."
-                })
+                dias.append(
+                    {
+                        "dia_numero": i,
+                        "calorias_dia": calorias,
+                        "proteinas_g": macros["proteinas_g"],
+                        "carbohidratos_g": macros["carbohidratos_g"],
+                        "grasas_g": macros["grasas_g"],
+                        "sugerencia_entrenamiento_ia": "Entrenamiento moderado sugerido por IA.",
+                        "nota_asistente_ia": f"Día {i} enfocado en {datos_cliente.get('objetivo')}.",
+                    }
+                )
             return {"calorias_diarias": calorias, "macros": macros, "dias": dias}
         except Exception as e:
             print(f"[Plan inicial] Error: {e}")
             return None
+
 
 ia_service = IAService()
 ia_engine = ia_service

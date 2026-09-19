@@ -3,6 +3,7 @@ Regenera el campo `tecnica` de ejercicios que solo tienen el placeholder genéri
 Usa la misma API Groq ya integrada en el proyecto.
 Ejecutar: docker exec calofit_backend python scripts/generar_tecnica_ejercicios.py
 """
+
 import asyncio
 import time
 import sys
@@ -41,24 +42,19 @@ async def generar_tecnica(nombre: str) -> str:
 
 async def main():
     db = SessionLocal()
-    rows = db.execute(text(
-        "SELECT id, nombre FROM ejercicios "
-        "WHERE tecnica LIKE '%técnica controlada%' "
-        "ORDER BY nombre"
-    )).fetchall()
+    rows = db.execute(
+        text("SELECT id, nombre FROM ejercicios WHERE tecnica LIKE '%técnica controlada%' ORDER BY nombre")
+    ).fetchall()
 
     print(f"Ejercicios a actualizar: {len(rows)}")
     actualizados = 0
     errores = 0
 
     for i, (eid, nombre) in enumerate(rows):
-        print(f"[{i+1}/{len(rows)}] {nombre} ... ", end="", flush=True)
+        print(f"[{i + 1}/{len(rows)}] {nombre} ... ", end="", flush=True)
         tecnica = await generar_tecnica(nombre)
         if tecnica:
-            db.execute(
-                text("UPDATE ejercicios SET tecnica = :t WHERE id = :id"),
-                {"t": tecnica, "id": eid}
-            )
+            db.execute(text("UPDATE ejercicios SET tecnica = :t WHERE id = :id"), {"t": tecnica, "id": eid})
             db.commit()
             print("OK")
             actualizados += 1

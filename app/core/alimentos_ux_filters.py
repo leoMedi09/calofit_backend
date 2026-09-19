@@ -3,6 +3,7 @@ Filtros de UX para nombres de alimentos (INS/CENAN con errores de OCR o poco con
 
 No sustituye revisión nutricional: solo evita sugerencias confusas en IA y KNN.
 """
+
 from __future__ import annotations
 
 from typing import Iterable, Optional
@@ -43,9 +44,11 @@ BLOQUE_SUBCADENAS_ALIMENTO: tuple[str, ...] = (
     "chocho",
 )
 
-BLOQUE_EXACTO_ALIMENTO: frozenset[str] = frozenset({
-    "cuy",
-})
+BLOQUE_EXACTO_ALIMENTO: frozenset[str] = frozenset(
+    {
+        "cuy",
+    }
+)
 
 
 def es_alimento_bloqueado_ia(nombre: Optional[str]) -> bool:

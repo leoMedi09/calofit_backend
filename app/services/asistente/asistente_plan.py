@@ -10,6 +10,7 @@ Lógica de recalculo dinámico:
   - Si el plan es 'validado' por nutricionista  → usa valores del nutricionista, PERO si el
     cliente cambió su `goal` respecto al plan, recalcula (el objetivo del cliente es señal explícita).
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -23,8 +24,11 @@ from app.models.nutricion import PlanDiario, PlanNutricional
 from app.core.objetivo_utils import normalizar_objetivo as _norm_obj
 
 _NIVEL_MAP = {
-    "Sedentario": 1.2, "Ligero": 1.375, "Moderado": 1.55,
-    "Intenso": 1.725, "Muy intenso": 1.9,
+    "Sedentario": 1.2,
+    "Ligero": 1.375,
+    "Moderado": 1.55,
+    "Intenso": 1.725,
+    "Muy intenso": 1.9,
 }
 
 
@@ -36,19 +40,19 @@ def _calcular_macros_dinamicos(perfil, edad: int) -> dict:
     from app.services.ia_service import ia_engine
     from app.core.macros_diarios import macros_desde_calorias_peso_objetivo
 
-    obj    = (getattr(perfil, "goal", "Mantenimiento") or "Mantenimiento").strip()
-    nivel  = _NIVEL_MAP.get(getattr(perfil, "activity_level", "Moderado"), 1.55)
+    obj = (getattr(perfil, "goal", "Mantenimiento") or "Mantenimiento").strip()
+    nivel = _NIVEL_MAP.get(getattr(perfil, "activity_level", "Moderado"), 1.55)
     genero = 1 if str(getattr(perfil, "gender", "M")).upper() == "M" else 2
-    peso   = float(perfil.weight or 70)
-    talla  = float(perfil.height or 170)
+    peso = float(perfil.weight or 70)
+    talla = float(perfil.height or 170)
 
     cal = ia_engine.calcular_requerimiento(genero, edad, peso, talla, nivel, obj)
-    m   = macros_desde_calorias_peso_objetivo(cal, obj, peso)
+    m = macros_desde_calorias_peso_objetivo(cal, obj, peso)
     return {
-        "calorias_dia":    round(cal),
-        "proteinas_g":     m["proteinas_g"],
+        "calorias_dia": round(cal),
+        "proteinas_g": m["proteinas_g"],
         "carbohidratos_g": m["carbohidratos_g"],
-        "grasas_g":        m["grasas_g"],
+        "grasas_g": m["grasas_g"],
     }
 
 
@@ -73,9 +77,9 @@ def obtener_plan_hoy(perfil, edad: int, db: Session):
 
         class _PlanFallback:
             def __init__(self, objetivo):
-                self.objetivo       = objetivo
-                self.status         = "calculado_ia"
-                self.id             = None
+                self.objetivo = objetivo
+                self.status = "calculado_ia"
+                self.id = None
                 self.fecha_creacion = datetime.now()
 
         return (
@@ -88,27 +92,25 @@ def obtener_plan_hoy(perfil, edad: int, db: Session):
         )
 
     dia_semana = get_peru_date().isoweekday()
-    plan_hoy   = (
-        db.query(PlanDiario)
-        .filter(PlanDiario.plan_id == plan_maestro.id, PlanDiario.dia_numero == dia_semana)
-        .first()
+    plan_hoy = (
+        db.query(PlanDiario).filter(PlanDiario.plan_id == plan_maestro.id, PlanDiario.dia_numero == dia_semana).first()
         or db.query(PlanDiario).filter(PlanDiario.plan_id == plan_maestro.id).first()
     )
     if not plan_hoy:
         raise ValueError("Tu plan nutricional está incompleto.")
 
     plan_base = {
-        "calorias_dia":              plan_hoy.calorias_dia,
-        "proteinas_g":               plan_hoy.proteinas_g,
-        "carbohidratos_g":           plan_hoy.carbohidratos_g,
-        "grasas_g":                  plan_hoy.grasas_g,
+        "calorias_dia": plan_hoy.calorias_dia,
+        "proteinas_g": plan_hoy.proteinas_g,
+        "carbohidratos_g": plan_hoy.carbohidratos_g,
+        "grasas_g": plan_hoy.grasas_g,
         "sugerencia_entrenamiento_ia": plan_hoy.sugerencia_entrenamiento_ia,
     }
 
-    status_plan  = (plan_maestro.status or "").strip().lower()
+    status_plan = (plan_maestro.status or "").strip().lower()
 
-    plan_obj_canon  = _norm_obj(plan_maestro.objetivo)
-    perf_obj_canon  = _norm_obj(perfil.goal)
+    plan_obj_canon = _norm_obj(plan_maestro.objetivo)
+    perf_obj_canon = _norm_obj(perfil.goal)
     objetivo_cambio = plan_obj_canon != perf_obj_canon
 
     necesita_recalculo = (status_plan != "validado") or objetivo_cambio

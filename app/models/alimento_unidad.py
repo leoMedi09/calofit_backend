@@ -12,4 +12,3 @@ class AlimentoUnidad(Base):
     alimento_id = Column(Integer, ForeignKey("alimentos.id", ondelete="CASCADE"), nullable=False)
     nombre = Column(String(100), nullable=False)
     gramos = Column(Float, nullable=False)
-

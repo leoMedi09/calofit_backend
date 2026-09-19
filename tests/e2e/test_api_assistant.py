@@ -7,6 +7,7 @@ propósito el 2026-06-13 (ver CLAUDE.md, "Eliminación de la arquitectura
 nueva"). Flutter usa /asistente/consultar (legacy), no /api/v1/assistant.
 Mantenerlos generaba falsos negativos (404 esperado, no un bug).
 """
+
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app

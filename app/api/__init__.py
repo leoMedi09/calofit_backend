@@ -1,5 +1,20 @@
 from fastapi import APIRouter
-from .routes import usuarios, ejercicios, nutricion, auth, clientes, asistente, dashboard, admin, alertas, balance, alimentos, nutricionista, copiloto, notifications
+from .routes import (
+    usuarios,
+    ejercicios,
+    nutricion,
+    auth,
+    clientes,
+    asistente,
+    dashboard,
+    admin,
+    alertas,
+    balance,
+    alimentos,
+    nutricionista,
+    copiloto,
+    notifications,
+)
 
 api_router = APIRouter()
 

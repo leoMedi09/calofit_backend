@@ -6,6 +6,7 @@ load_dotenv()
 
 resend.api_key = os.getenv("RESEND_API_KEY")
 
+
 class EmailService:
     @staticmethod
     def send_otp_email(email_to: str, code: str):
@@ -25,7 +26,7 @@ class EmailService:
                         Este código expirará en 15 minutos. Si no solicitaste este cambio, ignora este correo.
                     </p>
                 </div>
-                """
+                """,
             }
             email = resend.Emails.send(params)
             return email
@@ -66,7 +67,7 @@ class EmailService:
                         Este es un mensaje automático del sistema CaloFit. Por favor no respondas a este correo.
                     </p>
                 </div>
-                """
+                """,
             }
             email = resend.Emails.send(params)
             print(f"Correo de bienvenida enviado a {email_to}")
@@ -85,10 +86,10 @@ class EmailService:
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
         import os
-        
+
         gmail_user = os.getenv("GMAIL_SENDER")
         gmail_password = os.getenv("GMAIL_APP_PASSWORD")
-        
+
         if not gmail_user or not gmail_password:
             print("Faltan credenciales GMAIL_SENDER o GMAIL_APP_PASSWORD en el archivo .env")
             return None
@@ -121,7 +122,7 @@ class EmailService:
             </p>
         </div>
         """
-        
+
         parte_html = MIMEText(html_body, "html")
         msg.attach(parte_html)
 
@@ -144,22 +145,18 @@ class EmailService:
         """
         import requests
         import os
-        
+
         api_key = os.getenv("BREVO_API_KEY")
         sender_email = os.getenv("BREVO_SENDER")
-        
+
         if not api_key or not sender_email:
             print("Faltan credenciales BREVO_API_KEY o BREVO_SENDER en el archivo .env")
             return None
 
         url = "https://api.brevo.com/v3/smtp/email"
-        
-        headers = {
-            "accept": "application/json",
-            "api-key": api_key,
-            "content-type": "application/json"
-        }
-        
+
+        headers = {"accept": "application/json", "api-key": api_key, "content-type": "application/json"}
+
         html_body = f"""
         <div style="font-family: sans-serif; max-width: 400px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
             <div style="text-align: center; margin-bottom: 20px;">
@@ -188,7 +185,7 @@ class EmailService:
             "sender": {"name": "CaloFit", "email": sender_email},
             "to": [{"email": email_to}],
             "subject": f"¡Bienvenido a CaloFit! {nutricionista_name} te registró",
-            "htmlContent": html_body
+            "htmlContent": html_body,
         }
 
         try:
@@ -206,22 +203,18 @@ class EmailService:
     def send_password_reset_brevo(email_to: str, code: str):
         import requests
         import os
-        
+
         api_key = os.getenv("BREVO_API_KEY")
         sender_email = os.getenv("BREVO_SENDER")
-        
+
         if not api_key or not sender_email:
             print("Faltan credenciales BREVO_API_KEY o BREVO_SENDER en el archivo .env")
             return None
 
         url = "https://api.brevo.com/v3/smtp/email"
-        
-        headers = {
-            "accept": "application/json",
-            "api-key": api_key,
-            "content-type": "application/json"
-        }
-        
+
+        headers = {"accept": "application/json", "api-key": api_key, "content-type": "application/json"}
+
         html_body = f"""
         <div style="font-family: sans-serif; max-width: 400px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
             <div style="text-align: center; margin-bottom: 20px;">
@@ -248,10 +241,11 @@ class EmailService:
             "sender": {"name": "CaloFit Seguridad", "email": sender_email},
             "to": [{"email": email_to}],
             "subject": f"{code} es tu código de recuperación CaloFit",
-            "htmlContent": html_body
+            "htmlContent": html_body,
         }
 
         import time
+
         last_error = None
         for attempt in range(3):
             try:
@@ -270,6 +264,7 @@ class EmailService:
     def send_welcome_staff_brevo(email_to: str, password: str, staff_name: str, role_name: str, admin_name: str):
         """Correo de bienvenida al equipo para nuevo personal (nutri, coach, admin)."""
         import requests, os
+
         api_key = os.getenv("BREVO_API_KEY")
         sender_email = os.getenv("BREVO_SENDER")
         if not api_key or not sender_email:
@@ -277,9 +272,13 @@ class EmailService:
             return None
 
         role_label = {
-            "nutritionist": "Nutricionista", "nutricionista": "Nutricionista",
-            "coach": "Entrenador", "entrenador": "Entrenador", "trainer": "Entrenador",
-            "admin": "Administrador", "administrador": "Administrador",
+            "nutritionist": "Nutricionista",
+            "nutricionista": "Nutricionista",
+            "coach": "Entrenador",
+            "entrenador": "Entrenador",
+            "trainer": "Entrenador",
+            "admin": "Administrador",
+            "administrador": "Administrador",
         }.get(role_name.lower(), role_name.capitalize())
 
         html_body = f"""
@@ -312,9 +311,11 @@ class EmailService:
             "htmlContent": html_body,
         }
         try:
-            r = requests.post("https://api.brevo.com/v3/smtp/email",
-                              headers={"accept": "application/json", "api-key": api_key, "content-type": "application/json"},
-                              json=payload)
+            r = requests.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={"accept": "application/json", "api-key": api_key, "content-type": "application/json"},
+                json=payload,
+            )
             r.raise_for_status()
             print(f"Correo de bienvenida staff enviado a {email_to}")
             return r.json()
@@ -326,6 +327,7 @@ class EmailService:
     def send_password_updated_staff_brevo(email_to: str, staff_name: str, new_password: str, admin_name: str):
         """Notificación al staff cuando el admin cambia su contraseña."""
         import requests, os
+
         api_key = os.getenv("BREVO_API_KEY")
         sender_email = os.getenv("BREVO_SENDER")
         if not api_key or not sender_email:
@@ -361,9 +363,11 @@ class EmailService:
             "htmlContent": html_body,
         }
         try:
-            r = requests.post("https://api.brevo.com/v3/smtp/email",
-                              headers={"accept": "application/json", "api-key": api_key, "content-type": "application/json"},
-                              json=payload)
+            r = requests.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={"accept": "application/json", "api-key": api_key, "content-type": "application/json"},
+                json=payload,
+            )
             r.raise_for_status()
             print(f"Notificación de cambio de contraseña enviada a {email_to}")
             return r.json()

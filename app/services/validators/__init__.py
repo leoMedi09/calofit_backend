@@ -1,6 +1,7 @@
 """
 Validadores para garantizar integridad de datos en CaloFit.
 """
+
 from app.services.validators.base_validator import BaseValidator, ValidationResult
 from app.services.validators.semantic_validator import SemanticValidator
 from app.services.validators.nutritional_validator import NutritionalValidator

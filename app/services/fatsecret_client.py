@@ -4,6 +4,7 @@ Cliente FatSecret Platform API (OAuth 2.0 client_credentials).
 Uso: búsqueda `foods.search` + macros desde `food_description` (p. ej. Per 100g).
 Las credenciales vienen de ``settings`` / variables de entorno, nunca hardcodeadas.
 """
+
 from __future__ import annotations
 
 import re
@@ -110,6 +111,7 @@ class FatSecretClient:
         Devuelve {} en lugar de lanzar excepción tras agotar los intentos.
         """
         import logging as _log
+
         _logger = _log.getLogger(__name__)
 
         self._ensure_token()
@@ -138,7 +140,8 @@ class FatSecretClient:
                         wait_sec = 2 ** (attempt + 1)
                         _logger.warning(
                             "FatSecret 429 Rate Limit (intento %d/3) — esperando %ds",
-                            attempt + 1, wait_sec,
+                            attempt + 1,
+                            wait_sec,
                         )
                         time.sleep(wait_sec)
                         last_error = f"429 Rate Limit (intento {attempt + 1})"
@@ -152,7 +155,8 @@ class FatSecretClient:
 
         _logger.error(
             "FatSecret foods_search falló tras 3 intentos para '%s': %s",
-            expr, last_error,
+            expr,
+            last_error,
         )
         return {}
 

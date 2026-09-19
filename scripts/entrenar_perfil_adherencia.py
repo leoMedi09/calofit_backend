@@ -31,14 +31,13 @@ import pandas as pd
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
-from sklearn.metrics import (classification_report, confusion_matrix,
-                              accuracy_score, f1_score)
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score
 from sklearn.preprocessing import LabelEncoder
 
-SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
-CSV_PATH    = os.path.join(SCRIPT_DIR, "data", "gym_members_exercise_tracking.csv")
-OUTPUT_DIR  = os.path.join(PROJECT_DIR, "app", "models", "ai_models")
+CSV_PATH = os.path.join(SCRIPT_DIR, "data", "gym_members_exercise_tracking.csv")
+OUTPUT_DIR = os.path.join(PROJECT_DIR, "app", "models", "ai_models")
 OUTPUT_PATH = os.path.join(OUTPUT_DIR, "perfil_adherencia.pkl")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -91,17 +90,26 @@ for col in df_raw.columns:
 print(f"\n  Distribución del TARGET (Experience_Level → Perfil):")
 counts = df_raw["Experience_Level"].value_counts().sort_index()
 for nivel, n in counts.items():
-    pct  = n / len(df_raw) * 100
+    pct = n / len(df_raw) * 100
     perfil = LABEL_MAP[nivel]
     barra = "█" * int(pct / 2)
     print(f"    Nivel {nivel} ({perfil}): {n:>3} registros ({pct:.1f}%) {barra}")
 
 print(f"\n  Estadísticas clave por perfil:")
 df_raw["Perfil"] = df_raw["Experience_Level"].map(LABEL_MAP)
-stats = df_raw.groupby("Perfil")[
-    ["Workout_Frequency (days/week)", "Session_Duration (hours)",
-     "Calories_Burned", "Fat_Percentage", "Water_Intake (liters)"]
-].mean().round(2)
+stats = (
+    df_raw.groupby("Perfil")[
+        [
+            "Workout_Frequency (days/week)",
+            "Session_Duration (hours)",
+            "Calories_Burned",
+            "Fat_Percentage",
+            "Water_Intake (liters)",
+        ]
+    ]
+    .mean()
+    .round(2)
+)
 print(stats.to_string())
 
 print("\n" + "═" * 65)
@@ -121,7 +129,7 @@ print(f"  ✅ Workout_Type codificado: {workout_cols}")
 df["Cal_por_hora"] = df["Calories_Burned"] / df["Session_Duration (hours)"].replace(0, 1)
 print("  ✅ Feature creado: Cal_por_hora (calorías/hora de sesión)")
 
-df["Height_cm"]   = df["Height (m)"] * 100
+df["Height_cm"] = df["Height (m)"] * 100
 print("  ✅ Height convertida de metros a cm (compatibilidad con app)")
 
 FEATURES = [
@@ -143,9 +151,7 @@ print(f"\n  📊 Features seleccionadas: {len(FEATURES)}")
 print(f"  📊 Total muestras: {len(X)}")
 print(f"  📊 Valores nulos en X: {df[FEATURES].isnull().sum().sum()}")
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.20, random_state=42, stratify=y
-)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42, stratify=y)
 print(f"\n  Train: {len(X_train)} muestras | Test: {len(X_test)} muestras")
 
 print("\n" + "═" * 65)
@@ -168,7 +174,7 @@ modelo = RandomForestClassifier(
     min_samples_leaf=4,
     class_weight="balanced",
     random_state=42,
-    n_jobs=-1
+    n_jobs=-1,
 )
 
 print("  ⚙️  Entrenando Random Forest...")
@@ -180,8 +186,8 @@ print("  FASE 5: EVALUATION")
 print("═" * 65)
 
 y_pred = modelo.predict(X_test)
-acc    = accuracy_score(y_test, y_pred)
-f1     = f1_score(y_test, y_pred, average="weighted")
+acc = accuracy_score(y_test, y_pred)
+f1 = f1_score(y_test, y_pred, average="weighted")
 
 print(f"\n  ━━━ Métricas en Set de Test ━━━")
 print(f"  Accuracy  : {acc * 100:.2f}%")
@@ -189,11 +195,7 @@ print(f"  F1-Score  : {f1 * 100:.2f}% (weighted)")
 
 print(f"\n  ━━━ Reporte por Clase (Perfil) ━━━")
 target_names = [LABEL_MAP[i] for i in sorted(set(y))]
-print(classification_report(
-    y_test, y_pred,
-    target_names=target_names,
-    zero_division=0
-))
+print(classification_report(y_test, y_pred, target_names=target_names, zero_division=0))
 
 print(f"  ━━━ Matriz de Confusión ━━━")
 cm = confusion_matrix(y_test, y_pred, labels=sorted(set(y)))
@@ -204,10 +206,10 @@ print(cm_df.to_string())
 print(f"\n  (Diagonal principal = predicciones correctas)")
 
 print(f"\n  ━━━ Validación Cruzada Estratificada (5-Fold) ━━━")
-skf      = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 cv_scores = cross_val_score(modelo, X, y, cv=skf, scoring="accuracy")
-print(f"  CV Accuracy: {cv_scores.mean()*100:.2f}% ± {cv_scores.std()*100:.2f}%")
-print(f"  Scores por fold: {[f'{s*100:.1f}%' for s in cv_scores]}")
+print(f"  CV Accuracy: {cv_scores.mean() * 100:.2f}% ± {cv_scores.std() * 100:.2f}%")
+print(f"  Scores por fold: {[f'{s * 100:.1f}%' for s in cv_scores]}")
 
 if acc >= 0.85:
     print(f"\n  🏆 Excelente — Accuracy ≥ 85%. Modelo listo para producción.")
@@ -218,10 +220,7 @@ else:
 
 print(f"\n  ━━━ Importancia de Features ━━━")
 importances = modelo.feature_importances_
-fi_df = pd.DataFrame({
-    "Feature":    FEATURES,
-    "Importance": importances
-}).sort_values("Importance", ascending=False)
+fi_df = pd.DataFrame({"Feature": FEATURES, "Importance": importances}).sort_values("Importance", ascending=False)
 
 for _, row in fi_df.head(10).iterrows():
     barra = "█" * int(row["Importance"] * 60)
@@ -251,9 +250,9 @@ class ModeloPerfil:
     """
 
     def __init__(self, rf_model, features, label_map, workout_types):
-        self.modelo       = rf_model
-        self.features     = features
-        self.label_map    = label_map
+        self.modelo = rf_model
+        self.features = features
+        self.label_map = label_map
         self.workout_types = workout_types
 
     def predecir_cliente(self, datos: dict) -> str:
@@ -280,64 +279,62 @@ class ModeloPerfil:
         import pandas as pd
 
         gender_enc = 1 if str(datos.get("gender", "M")).upper() in ["M", "MALE"] else 0
-        height_cm  = float(datos.get("height", 170))
-        weight_kg  = float(datos.get("weight", 70))
-        bmi        = weight_kg / ((height_cm / 100) ** 2)
+        height_cm = float(datos.get("height", 170))
+        weight_kg = float(datos.get("weight", 70))
+        bmi = weight_kg / ((height_cm / 100) ** 2)
 
-        sess_h    = float(datos.get("session_hours", 1)) or 1
-        cal       = float(datos.get("calories", 500))
-        cal_hora  = cal / sess_h
+        sess_h = float(datos.get("session_hours", 1)) or 1
+        cal = float(datos.get("calories", 500))
+        cal_hora = cal / sess_h
 
-        wt_data   = {col: 0 for col in self.workout_types}
-        wt_input  = datos.get("workout_type", "")
-        wt_col    = f"Workout_{wt_input}"
+        wt_data = {col: 0 for col in self.workout_types}
+        wt_input = datos.get("workout_type", "")
+        wt_col = f"Workout_{wt_input}"
         if wt_col in wt_data:
             wt_data[wt_col] = 1
 
-        wt_data  = {col: 0 for col in self.workout_types}
-        wt_col   = f"Workout_{datos.get('workout_type', '')}"
+        wt_data = {col: 0 for col in self.workout_types}
+        wt_col = f"Workout_{datos.get('workout_type', '')}"
         if wt_col in wt_data:
             wt_data[wt_col] = 1
 
         row = {
-            "Age":                             float(datos.get("age", 30)),
-            "Gender_Enc":                      gender_enc,
-            "Weight (kg)":                     weight_kg,
-            "Height_cm":                       height_cm,
-            "BMI":                             round(bmi, 2),
-            "Workout_Frequency (days/week)":   float(datos.get("workout_freq", 3)),
-            "Session_Duration (hours)":        float(datos.get("session_hours", 1.0)),
+            "Age": float(datos.get("age", 30)),
+            "Gender_Enc": gender_enc,
+            "Weight (kg)": weight_kg,
+            "Height_cm": height_cm,
+            "BMI": round(bmi, 2),
+            "Workout_Frequency (days/week)": float(datos.get("workout_freq", 3)),
+            "Session_Duration (hours)": float(datos.get("session_hours", 1.0)),
             **wt_data,
         }
 
         df_input = pd.DataFrame([row])[self.features]
-        pred     = self.modelo.predict(df_input.values)[0]
-        proba    = self.modelo.predict_proba(df_input.values)[0]
+        pred = self.modelo.predict(df_input.values)[0]
+        proba = self.modelo.predict_proba(df_input.values)[0]
         confianza = round(float(max(proba)) * 100, 1)
 
         return self.label_map[pred], confianza
 
-    def predecir_simple(self, workout_freq, session_hours=1.0,
-                        age=30, gender="M",
-                        weight=70.0, height=170.0,
-                        workout_type="") -> str:
+    def predecir_simple(
+        self, workout_freq, session_hours=1.0, age=30, gender="M", weight=70.0, height=170.0, workout_type=""
+    ) -> str:
         """
         Versión simplificada con las variables del Onboarding de la App.
         """
         datos = {
-            "age": age, "gender": gender, "weight": weight, "height": height,
-            "workout_freq": workout_freq, "session_hours": session_hours,
-            "workout_type": workout_type
+            "age": age,
+            "gender": gender,
+            "weight": weight,
+            "height": height,
+            "workout_freq": workout_freq,
+            "session_hours": session_hours,
+            "workout_type": workout_type,
         }
         return self.predecir_cliente(datos)
 
 
-guardado = {
-    "rf_model":      modelo,
-    "features":      FEATURES,
-    "label_map":     LABEL_MAP,
-    "workout_types": workout_cols
-}
+guardado = {"rf_model": modelo, "features": FEATURES, "label_map": LABEL_MAP, "workout_types": workout_cols}
 
 joblib.dump(guardado, OUTPUT_PATH)
 size_kb = os.path.getsize(OUTPUT_PATH) / 1024
@@ -353,18 +350,34 @@ rf_test = modelo_test["rf_model"]
 
 casos_demo = [
     {
-        "nombre"       : "Carlos — Principiante (2x/sem, sesiones cortas)",
-        "age": 25, "gender": "M", "weight": 85, "height": 175,
-        "workout_freq" : 2, "session_hours": 0.6, "calories": 420,
-        "fat_pct"      : 30, "water": 1.8, "avg_bpm": 130, "resting_bpm": 72,
-        "workout_type" : "Cardio"
+        "nombre": "Carlos — Principiante (2x/sem, sesiones cortas)",
+        "age": 25,
+        "gender": "M",
+        "weight": 85,
+        "height": 175,
+        "workout_freq": 2,
+        "session_hours": 0.6,
+        "calories": 420,
+        "fat_pct": 30,
+        "water": 1.8,
+        "avg_bpm": 130,
+        "resting_bpm": 72,
+        "workout_type": "Cardio",
     },
     {
-        "nombre"       : "María — Intermedia (3x/sem, constante)",
-        "age": 32, "gender": "F", "weight": 62, "height": 163,
-        "workout_freq" : 3, "session_hours": 1.2, "calories": 850,
-        "fat_pct"      : 27, "water": 2.5, "avg_bpm": 145, "resting_bpm": 65,
-        "workout_type" : "HIIT"
+        "nombre": "María — Intermedia (3x/sem, constante)",
+        "age": 32,
+        "gender": "F",
+        "weight": 62,
+        "height": 163,
+        "workout_freq": 3,
+        "session_hours": 1.2,
+        "calories": 850,
+        "fat_pct": 27,
+        "water": 2.5,
+        "avg_bpm": 145,
+        "resting_bpm": 65,
+        "workout_type": "HIIT",
     },
 ]
 
@@ -387,7 +400,7 @@ print(f"""
   Split    : 80% Train / 20% Test (estratificado)
   Accuracy : {acc * 100:.2f}%
   F1-Score : {f1 * 100:.2f}% (weighted)
-  CV (5k)  : {cv_scores.mean()*100:.2f}% ± {cv_scores.std()*100:.2f}%
+  CV (5k)  : {cv_scores.mean() * 100:.2f}% ± {cv_scores.std() * 100:.2f}%
   Output   : perfil_adherencia.pkl ({size_kb:.1f} KB)
 
   Integración al Asistente:

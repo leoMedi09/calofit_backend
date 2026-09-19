@@ -9,6 +9,7 @@ Estrategia:
 
 Nunca muestra un plato con macros 0 o combinaciones incoherentes.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -30,41 +31,155 @@ logger = logging.getLogger(__name__)
 
 _CONDICION_TOKENS: dict[str, set[str]] = {
     "Vegano": {
-        "pollo", "pechuga", "muslo", "gallina", "pato", "pavo", "cabrito",
-        "cerdo", "chancho", "res", "carne", "bistec", "lomo", "ternera",
-        "chicharron", "chicharrón", "jamon", "jamón", "salchicha",
-        "pescado", "salmon", "salmón", "atun", "atún", "trucha", "caballa",
-        "corvina", "cachema", "lisa", "mero", "tollo", "anchoveta",
-        "mariscos", "camaron", "camarón", "langostino", "pulpo", "calamar",
-        "leche", "queso", "yogur", "yogurt", "mantequilla",
-        "crema de leche", "crema agria", "crema chantilly",
-        "manteca", "quesillo", "huevo",
+        "pollo",
+        "pechuga",
+        "muslo",
+        "gallina",
+        "pato",
+        "pavo",
+        "cabrito",
+        "cerdo",
+        "chancho",
+        "res",
+        "carne",
+        "bistec",
+        "lomo",
+        "ternera",
+        "chicharron",
+        "chicharrón",
+        "jamon",
+        "jamón",
+        "salchicha",
+        "pescado",
+        "salmon",
+        "salmón",
+        "atun",
+        "atún",
+        "trucha",
+        "caballa",
+        "corvina",
+        "cachema",
+        "lisa",
+        "mero",
+        "tollo",
+        "anchoveta",
+        "mariscos",
+        "camaron",
+        "camarón",
+        "langostino",
+        "pulpo",
+        "calamar",
+        "leche",
+        "queso",
+        "yogur",
+        "yogurt",
+        "mantequilla",
+        "crema de leche",
+        "crema agria",
+        "crema chantilly",
+        "manteca",
+        "quesillo",
+        "huevo",
     },
     "Vegetariano": {
-        "pollo", "pechuga", "muslo", "gallina", "pato", "pavo", "cabrito",
-        "cerdo", "chancho", "res", "carne", "bistec", "lomo", "ternera",
-        "chicharron", "chicharrón", "jamon", "jamón", "salchicha",
-        "pescado", "salmon", "salmón", "atun", "atún", "trucha", "caballa",
-        "corvina", "cachema", "lisa", "mero", "tollo", "anchoveta",
-        "mariscos", "camaron", "camarón", "langostino", "pulpo", "calamar",
+        "pollo",
+        "pechuga",
+        "muslo",
+        "gallina",
+        "pato",
+        "pavo",
+        "cabrito",
+        "cerdo",
+        "chancho",
+        "res",
+        "carne",
+        "bistec",
+        "lomo",
+        "ternera",
+        "chicharron",
+        "chicharrón",
+        "jamon",
+        "jamón",
+        "salchicha",
+        "pescado",
+        "salmon",
+        "salmón",
+        "atun",
+        "atún",
+        "trucha",
+        "caballa",
+        "corvina",
+        "cachema",
+        "lisa",
+        "mero",
+        "tollo",
+        "anchoveta",
+        "mariscos",
+        "camaron",
+        "camarón",
+        "langostino",
+        "pulpo",
+        "calamar",
     },
     "Intolerancia a la Lactosa": {
-        "leche", "queso", "yogur", "yogurt", "mantequilla",
-        "crema de leche", "crema agria", "crema chantilly",
-        "manteca", "quesillo", "lactosa",
+        "leche",
+        "queso",
+        "yogur",
+        "yogurt",
+        "mantequilla",
+        "crema de leche",
+        "crema agria",
+        "crema chantilly",
+        "manteca",
+        "quesillo",
+        "lactosa",
     },
     "Celíaco": {
-        "trigo", "avena", "cebada", "centeno", "gluten",
-        "pan", "pasta", "fideos", "tallarin", "tallarín", "spaghetti",
-        "galleta", "harina", "cuscuz", "cuscús",
+        "trigo",
+        "avena",
+        "cebada",
+        "centeno",
+        "gluten",
+        "pan",
+        "pasta",
+        "fideos",
+        "tallarin",
+        "tallarín",
+        "spaghetti",
+        "galleta",
+        "harina",
+        "cuscuz",
+        "cuscús",
     },
     "Diabetes": {
-        "azucar", "azúcar", "miel", "mermelada", "jarabe",
-        "gaseosa", "chicha", "refresco", "jugo azucarado",
-        "chocolate", "caramelo", "helado", "torta", "pastel",
-        "galleta", "donuts", "churro", "suspiro",
-        "picarones", "mazamorra", "alfajor", "alfajores",
-        "tres leches", "cocada", "turron", "turrón", "keke", "queque",
+        "azucar",
+        "azúcar",
+        "miel",
+        "mermelada",
+        "jarabe",
+        "gaseosa",
+        "chicha",
+        "refresco",
+        "jugo azucarado",
+        "chocolate",
+        "caramelo",
+        "helado",
+        "torta",
+        "pastel",
+        "galleta",
+        "donuts",
+        "churro",
+        "suspiro",
+        "picarones",
+        "mazamorra",
+        "alfajor",
+        "alfajores",
+        "tres leches",
+        "cocada",
+        "turron",
+        "turrón",
+        "keke",
+        "queque",
     },
 }
 
@@ -73,7 +188,9 @@ _DIETA_KEYWORDS_MENSAJE: dict[str, tuple[str, ...]] = {
     "Vegano": ("vegano", "vegana", "veganismo"),
     "Vegetariano": ("vegetariano", "vegetariana"),
     "Intolerancia a la Lactosa": (
-        "intolerancia a la lactosa", "intolerante a la lactosa", "soy lactosa",
+        "intolerancia a la lactosa",
+        "intolerante a la lactosa",
+        "soy lactosa",
     ),
     "Celíaco": ("celiaco", "celíaco", "celiaca", "celíaca"),
     "Diabetes": ("diabetes", "diabetico", "diabético", "diabetica", "diabética"),
@@ -92,7 +209,7 @@ def _detectar_dieta_en_mensaje(mensaje: str) -> list[str]:
 def _tokens_prohibidos(condiciones: list[str]) -> set[str]:
     """Devuelve el conjunto de tokens prohibidos para una lista de condiciones."""
     tokens: set[str] = set()
-    for cond in (condiciones or []):
+    for cond in condiciones or []:
         tokens.update(_CONDICION_TOKENS.get(cond, set()))
     return tokens
 
@@ -112,43 +229,55 @@ _HISTORIAL_DIAS = 3
 _POOL_SIZE = 30
 
 _RANGOS_MOMENTO: dict[str, tuple[float, float]] = {
-    "desayuno":   (150.0,  500.0),
-    "almuerzo":   (400.0,  950.0),
-    "cena":       (120.0,  520.0),
-    "snack":      ( 60.0,  300.0),
-    "merienda":   ( 60.0,  300.0),
-    "cualquiera": (  0.0, 1200.0),
+    "desayuno": (150.0, 500.0),
+    "almuerzo": (400.0, 950.0),
+    "cena": (120.0, 520.0),
+    "snack": (60.0, 300.0),
+    "merienda": (60.0, 300.0),
+    "cualquiera": (0.0, 1200.0),
 }
 
 _INGREDIENTE_SINONIMOS: dict[str, list[str]] = {
-    "mariscos":   ["mariscos", "camaron", "camarón", "langostino", "langosta",
-                   "pulpo", "calamar", "almeja", "mejillon", "choro", "cangrejo", "concha"],
-    "salmon":     ["salmon", "salmón"],
-    "atun":       ["atun", "atún"],
-    "trucha":     ["trucha"],
-    "caballa":    ["caballa"],
-    "corvina":    ["corvina"],
-    "cerdo":      ["cerdo", "chancho", "porcino", "chicharron"],
-    "res":        ["res", "ternera", "bistec", "lomo fino", "carne de res"],
-    "cabrito":    ["cabrito", "cabrilla"],
-    "pato":       ["pato", "pato seco"],
-    "palta":      ["palta", "aguacate"],
-    "platano":    ["platano", "plátano"],
-    "lucuma":     ["lucuma", "lúcuma"],
-    "frejol":     ["frejol", "frijol", "frejoles", "frijoles"],
-    "lenteja":    ["lenteja", "lentejas", "lentejón"],
-    "arveja":     ["arveja", "arvejas", "alverjita"],
-    "garbanzo":   ["garbanzo", "garbanzos"],
-    "haba":       ["haba", "habas"],
-    "quinua":     ["quinua", "quinoa"],
-    "pasta":      ["pasta", "fideos", "spaghetti", "tallarín", "tallarin", "tallarines"],
-    "camote":     ["camote", "boniato"],
-    "choclo":     ["choclo", "maiz", "maíz", "elote"],
-    "mani":       ["mani", "maní", "mani pelado"],
+    "mariscos": [
+        "mariscos",
+        "camaron",
+        "camarón",
+        "langostino",
+        "langosta",
+        "pulpo",
+        "calamar",
+        "almeja",
+        "mejillon",
+        "choro",
+        "cangrejo",
+        "concha",
+    ],
+    "salmon": ["salmon", "salmón"],
+    "atun": ["atun", "atún"],
+    "trucha": ["trucha"],
+    "caballa": ["caballa"],
+    "corvina": ["corvina"],
+    "cerdo": ["cerdo", "chancho", "porcino", "chicharron"],
+    "res": ["res", "ternera", "bistec", "lomo fino", "carne de res"],
+    "cabrito": ["cabrito", "cabrilla"],
+    "pato": ["pato", "pato seco"],
+    "palta": ["palta", "aguacate"],
+    "platano": ["platano", "plátano"],
+    "lucuma": ["lucuma", "lúcuma"],
+    "frejol": ["frejol", "frijol", "frejoles", "frijoles"],
+    "lenteja": ["lenteja", "lentejas", "lentejón"],
+    "arveja": ["arveja", "arvejas", "alverjita"],
+    "garbanzo": ["garbanzo", "garbanzos"],
+    "haba": ["haba", "habas"],
+    "quinua": ["quinua", "quinoa"],
+    "pasta": ["pasta", "fideos", "spaghetti", "tallarín", "tallarin", "tallarines"],
+    "camote": ["camote", "boniato"],
+    "choclo": ["choclo", "maiz", "maíz", "elote"],
+    "mani": ["mani", "maní", "mani pelado"],
     "fruto_seco": ["almendra", "nuez", "pecana", "pecanas"],
-    "semilla":    ["chia", "chía", "linaza", "ajonjoli"],
-    "lacteos":    ["mantequilla", "mantequilla sin sal", "crema de leche"],
-    "yogur":      ["yogur", "yogurt", "yoghurt"],
+    "semilla": ["chia", "chía", "linaza", "ajonjoli"],
+    "lacteos": ["mantequilla", "mantequilla sin sal", "crema de leche"],
+    "yogur": ["yogur", "yogurt", "yoghurt"],
 }
 
 
@@ -159,22 +288,51 @@ def _tiene_ingrediente(nombre: str, ingredientes_str: str, ing_clave: str) -> bo
     return any(s in texto for s in sinonimos)
 
 
-_KEYWORDS_SOLO_ALMUERZO = frozenset({
-    "arroz con pato", "arroz con cabrito", "arroz con pollo",
-    "lomo saltado", "seco de res", "seco de cabrito", "seco de pollo",
-    "aji de gallina", "ají de gallina",
-    "pollo a la brasa", "chicharron de cerdo", "chicharrón",
-    "tallarin saltado", "tallarín saltado", "sopa seca",
-    "carapulcra", "pepian", "pepián",
-    "jalea", "sudado de pescado", "caldo de gallina",
-    "cebiche", "ceviche", "tiradito",
-    "causa ferreñafana", "causa rellena",
-})
+_KEYWORDS_SOLO_ALMUERZO = frozenset(
+    {
+        "arroz con pato",
+        "arroz con cabrito",
+        "arroz con pollo",
+        "lomo saltado",
+        "seco de res",
+        "seco de cabrito",
+        "seco de pollo",
+        "aji de gallina",
+        "ají de gallina",
+        "pollo a la brasa",
+        "chicharron de cerdo",
+        "chicharrón",
+        "tallarin saltado",
+        "tallarín saltado",
+        "sopa seca",
+        "carapulcra",
+        "pepian",
+        "pepián",
+        "jalea",
+        "sudado de pescado",
+        "caldo de gallina",
+        "cebiche",
+        "ceviche",
+        "tiradito",
+        "causa ferreñafana",
+        "causa rellena",
+    }
+)
 
-_KEYWORDS_LIGEROS = frozenset({
-    "sopa", "crema de", "caldo", "ensalada", "tostada", "batido",
-    "fruta", "yogurt", "avena", "granola",
-})
+_KEYWORDS_LIGEROS = frozenset(
+    {
+        "sopa",
+        "crema de",
+        "caldo",
+        "ensalada",
+        "tostada",
+        "batido",
+        "fruta",
+        "yogurt",
+        "avena",
+        "granola",
+    }
+)
 
 
 def _es_plato_apto_para_momento(nombre: str, kcal: float, momento: str) -> bool:
@@ -214,7 +372,6 @@ class RecomendadorPlatosConfiables:
     def __init__(self, db: Session, plate_builder: Optional[PlatoBuilder] = None):
         self.db = db
         self.plate_builder = plate_builder
-
 
     def recomendar(
         self,
@@ -307,7 +464,6 @@ class RecomendadorPlatosConfiables:
 
         return seleccionados
 
-
     def _candidatos_desde_bd(
         self,
         deficit_kcal: float,
@@ -326,7 +482,8 @@ class RecomendadorPlatosConfiables:
         Calcula score de similitud al déficit del usuario.
         """
         try:
-            rows = self.db.execute(text("""
+            rows = self.db.execute(
+                text("""
                 SELECT
                     p.id,
                     p.nombre,
@@ -350,7 +507,9 @@ class RecomendadorPlatosConfiables:
                     AND COUNT(CASE WHEN a.calorias_100g > 0 THEN 1 END) = COUNT(pi.id)
                     AND SUM(a.calorias_100g * pi.gramos / 100.0) > 50
                 LIMIT :pool
-            """), {"pool": pool * 3}).fetchall()
+            """),
+                {"pool": pool * 3},
+            ).fetchall()
 
         except Exception as exc:
             logger.error(f"Error consultando platos BD: {exc}")
@@ -378,50 +537,62 @@ class RecomendadorPlatosConfiables:
             carb = float(row[5] or 0)
             gras = float(row[6] or 0)
 
-            if momento_dia != "cualquiera" and not _es_plato_apto_para_momento(
-                nombre, kcal, momento_dia
-            ):
+            if momento_dia != "cualquiera" and not _es_plato_apto_para_momento(nombre, kcal, momento_dia):
                 logger.debug(
                     "[Momento] Plato '%s' (%.0f kcal) descartado para '%s'",
-                    nombre, kcal, momento_dia,
+                    nombre,
+                    kcal,
+                    momento_dia,
                 )
                 continue
 
             score = self._calcular_score(
-                kcal=kcal, prot=prot, carb=carb, gras=gras,
-                d_kcal=deficit_kcal, d_prot=deficit_proteina,
-                d_carb=deficit_carb, d_gras=deficit_grasas,
+                kcal=kcal,
+                prot=prot,
+                carb=carb,
+                gras=gras,
+                d_kcal=deficit_kcal,
+                d_prot=deficit_proteina,
+                d_carb=deficit_carb,
+                d_gras=deficit_grasas,
                 momento_dia=momento_dia,
             )
 
             if score < _MIN_CONFIANZA:
                 continue
 
-            candidatos.append({
-                "plato_id": row[0],
-                "nombre": nombre,
-                "tipo_plato": row[2] or "cualquiera",
-                "macros": {
-                    "calorias": round(kcal, 1),
-                    "proteinas_g": round(prot, 1),
-                    "carbohidratos_g": round(carb, 1),
-                    "grasas_g": round(gras, 1),
-                },
-                "n_ingredientes": int(row[7]),
-                "ingredientes_str": row[9] or "",
-                "fuente": "BD_Verificado",
-                "confianza": 95,
-                "score": score,
-            })
+            candidatos.append(
+                {
+                    "plato_id": row[0],
+                    "nombre": nombre,
+                    "tipo_plato": row[2] or "cualquiera",
+                    "macros": {
+                        "calorias": round(kcal, 1),
+                        "proteinas_g": round(prot, 1),
+                        "carbohidratos_g": round(carb, 1),
+                        "grasas_g": round(gras, 1),
+                    },
+                    "n_ingredientes": int(row[7]),
+                    "ingredientes_str": row[9] or "",
+                    "fuente": "BD_Verificado",
+                    "confianza": 95,
+                    "score": score,
+                }
+            )
 
         candidatos.sort(key=lambda x: x["score"], reverse=True)
         return candidatos[:pool]
 
     def _calcular_score(
         self,
-        kcal: float, prot: float, carb: float, gras: float,
-        d_kcal: float, d_prot: float,
-        d_carb: float, d_gras: float,
+        kcal: float,
+        prot: float,
+        carb: float,
+        gras: float,
+        d_kcal: float,
+        d_prot: float,
+        d_carb: float,
+        d_gras: float,
         momento_dia: str = "cualquiera",
     ) -> float:
         """
@@ -459,7 +630,7 @@ class RecomendadorPlatosConfiables:
                 score -= 40
             elif ratio_prot < 0.4:
                 score -= 20
-            
+
         if d_carb > 20:
             ratio_carb = carb / d_carb
             if ratio_carb >= 0.8:
@@ -468,7 +639,7 @@ class RecomendadorPlatosConfiables:
                 score += 10
             elif ratio_carb < 0.2:
                 score -= 40
-                
+
         if d_gras > 10:
             ratio_gras = gras / d_gras
             if ratio_gras >= 0.8:
@@ -491,11 +662,14 @@ class RecomendadorPlatosConfiables:
                 score -= penalizacion
                 logger.debug(
                     "[Score] '%s' penalizado %.1f pts por exceso calórico para %s (%.0f > %.0f kcal)",
-                    "plato", penalizacion, momento_dia, kcal, kcal_max_momento,
+                    "plato",
+                    penalizacion,
+                    momento_dia,
+                    kcal,
+                    kcal_max_momento,
                 )
 
         return max(0.0, min(100.0, score))
-
 
     def _seleccionar_con_diversidad(
         self,
@@ -521,22 +695,50 @@ class RecomendadorPlatosConfiables:
                 return any(kw in texto for kw in kws)
 
             for texto in (primaria, nombre_full):
-                if _match(["pollo", "pechuga", "gallina"], texto): return "pollo"
-                if _match(["pescado", "caballa", "corvina", "trucha", "lisa",
-                           "mero", "tollo", "cachema", "cebiche", "tiradito",
-                           "anchoveta", "sudado"], texto): return "pescado"
-                if _match(["lomo", "bistec", "ternera"], texto): return "res"
-                if _match([" res ", "carne de res"], " " + texto + " "): return "res"
-                if _match(["cerdo", "chancho", "chicharron"], texto): return "cerdo"
-                if _match(["pato", "pavo", "cabrito"], texto): return "ave"
-                if "huevo" in texto: return "huevo"
-                if _match(["sopa", "caldo", "crema de"], texto): return "sopa"
-                if _match(["lenteja", "garbanzo", "frejol", "frijol", "haba",
-                           "arveja", "pallare", "tofu", "soya"], texto): return "legumbre"
-                if _match(["quinua", "quinoa"], texto): return "quinua"
-                if "arroz" in texto: return "arroz"
-                if _match(["papa", "camote", "yuca", "causa"], texto): return "tuberculo"
-                if _match(["ensalada", "verdura", "vegetal"], texto): return "vegetal"
+                if _match(["pollo", "pechuga", "gallina"], texto):
+                    return "pollo"
+                if _match(
+                    [
+                        "pescado",
+                        "caballa",
+                        "corvina",
+                        "trucha",
+                        "lisa",
+                        "mero",
+                        "tollo",
+                        "cachema",
+                        "cebiche",
+                        "tiradito",
+                        "anchoveta",
+                        "sudado",
+                    ],
+                    texto,
+                ):
+                    return "pescado"
+                if _match(["lomo", "bistec", "ternera"], texto):
+                    return "res"
+                if _match([" res ", "carne de res"], " " + texto + " "):
+                    return "res"
+                if _match(["cerdo", "chancho", "chicharron"], texto):
+                    return "cerdo"
+                if _match(["pato", "pavo", "cabrito"], texto):
+                    return "ave"
+                if "huevo" in texto:
+                    return "huevo"
+                if _match(["sopa", "caldo", "crema de"], texto):
+                    return "sopa"
+                if _match(
+                    ["lenteja", "garbanzo", "frejol", "frijol", "haba", "arveja", "pallare", "tofu", "soya"], texto
+                ):
+                    return "legumbre"
+                if _match(["quinua", "quinoa"], texto):
+                    return "quinua"
+                if "arroz" in texto:
+                    return "arroz"
+                if _match(["papa", "camote", "yuca", "causa"], texto):
+                    return "tuberculo"
+                if _match(["ensalada", "verdura", "vegetal"], texto):
+                    return "vegetal"
             return "otro"
 
         categorias_usadas: Dict[str, int] = {}
@@ -569,7 +771,6 @@ class RecomendadorPlatosConfiables:
 
         return seleccionados
 
-
     def _generar_y_validar_nuevos_platos(
         self,
         client_id: int,
@@ -589,6 +790,7 @@ class RecomendadorPlatosConfiables:
         """
         try:
             from app.services.ai.llm_service import LLMService
+
             llm = LLMService()
 
             extra_ingrediente = ""
@@ -611,20 +813,22 @@ class RecomendadorPlatosConfiables:
                 "Responde ÚNICAMENTE con un arreglo JSON válido:\n"
                 "[\n"
                 "  {\n"
-                "    \"nombre_plato\": \"Pollo a la Plancha con Arroz y Ensalada\",\n"
-                "    \"ingredientes\": [\n"
-                "      {\"nombre\": \"pechuga de pollo\", \"gramos\": 150},\n"
-                "      {\"nombre\": \"arroz blanco\", \"gramos\": 100},\n"
-                "      {\"nombre\": \"lechuga\", \"gramos\": 50}\n"
+                '    "nombre_plato": "Pollo a la Plancha con Arroz y Ensalada",\n'
+                '    "ingredientes": [\n'
+                '      {"nombre": "pechuga de pollo", "gramos": 150},\n'
+                '      {"nombre": "arroz blanco", "gramos": 100},\n'
+                '      {"nombre": "lechuga", "gramos": 50}\n'
                 "    ]\n"
                 "  }\n"
                 "]"
             )
 
             import asyncio
+
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 import concurrent.futures
+
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(asyncio.run, llm.generar_json(prompt=prompt, max_tokens=1500))
                     propuestas = future.result(timeout=25)
@@ -633,7 +837,7 @@ class RecomendadorPlatosConfiables:
 
             if not propuestas or not isinstance(propuestas, list):
                 return []
-            
+
             nuevos = []
 
             for prop in propuestas:
@@ -642,14 +846,14 @@ class RecomendadorPlatosConfiables:
                     continue
 
                 ings = prop.get("ingredientes", [])
-                
+
                 if ingrediente_clave:
                     ing_clave_norm = ingrediente_clave.lower().strip()
                     ings_str_llm = " ".join(i.get("nombre", "") for i in ings)
                     if not _tiene_ingrediente(nombre, ings_str_llm, ing_clave_norm):
                         logger.warning(f"Plato LLM '{nombre}' descartado por no contener '{ingrediente_clave}'.")
                         continue
-                
+
                 resultado = self.plate_builder.construir_plato(
                     nombre_plato=nombre,
                     ingredientes=ings,
@@ -659,10 +863,10 @@ class RecomendadorPlatosConfiables:
 
                 if resultado.exito and resultado.confianza_global >= _MIN_CONFIANZA:
                     if isinstance(resultado.macros_totales, dict):
-                        kcal = resultado.macros_totales.get('calorias', 0)
-                        prot = resultado.macros_totales.get('proteina', 0)
-                        carb = resultado.macros_totales.get('carbohidratos', 0)
-                        gras = resultado.macros_totales.get('grasas', 0)
+                        kcal = resultado.macros_totales.get("calorias", 0)
+                        prot = resultado.macros_totales.get("proteina", 0)
+                        carb = resultado.macros_totales.get("carbohidratos", 0)
+                        gras = resultado.macros_totales.get("grasas", 0)
                     else:
                         kcal = resultado.macros_totales.calorias
                         prot = resultado.macros_totales.proteina
@@ -670,36 +874,45 @@ class RecomendadorPlatosConfiables:
                         gras = resultado.macros_totales.grasas
 
                     score = self._calcular_score(
-                        kcal=kcal, prot=prot, carb=carb, gras=gras,
-                        d_kcal=deficit_kcal, d_prot=deficit_proteina,
-                        d_carb=deficit_carb, d_gras=deficit_grasas,
+                        kcal=kcal,
+                        prot=prot,
+                        carb=carb,
+                        gras=gras,
+                        d_kcal=deficit_kcal,
+                        d_prot=deficit_proteina,
+                        d_carb=deficit_carb,
+                        d_gras=deficit_grasas,
                     )
 
                     if score < 40:
-                        logger.warning(f"Plato LLM '{resultado.nombre}' descartado por bajo score ({score}) respecto al objetivo.")
+                        logger.warning(
+                            f"Plato LLM '{resultado.nombre}' descartado por bajo score ({score}) respecto al objetivo."
+                        )
                         continue
 
                     ing_str_list = []
                     for i in resultado.ingredientes:
-                        _kcal_i = i.macros_totales.get('calorias', 0) if i.macros_totales else 0
+                        _kcal_i = i.macros_totales.get("calorias", 0) if i.macros_totales else 0
                         ing_str_list.append(f"{i.gramos}g {i.nombre} ({round(_kcal_i, 1)} kcal)")
 
-                    nuevos.append({
-                        "plato_id": resultado.plato_id,
-                        "nombre": resultado.nombre,
-                        "tipo_plato": momento_dia,
-                        "macros": {
-                            "calorias": round(kcal, 1),
-                            "proteinas_g": round(prot, 1),
-                            "carbohidratos_g": round(carb, 1),
-                            "grasas_g": round(gras, 1),
-                        },
-                        "n_ingredientes": len(resultado.ingredientes),
-                        "ingredientes_str": ", ".join(ing_str_list),
-                        "fuente": "IA_Generado_y_Validado",
-                        "confianza": resultado.confianza_global,
-                        "score": score,
-                    })
+                    nuevos.append(
+                        {
+                            "plato_id": resultado.plato_id,
+                            "nombre": resultado.nombre,
+                            "tipo_plato": momento_dia,
+                            "macros": {
+                                "calorias": round(kcal, 1),
+                                "proteinas_g": round(prot, 1),
+                                "carbohidratos_g": round(carb, 1),
+                                "grasas_g": round(gras, 1),
+                            },
+                            "n_ingredientes": len(resultado.ingredientes),
+                            "ingredientes_str": ", ".join(ing_str_list),
+                            "fuente": "IA_Generado_y_Validado",
+                            "confianza": resultado.confianza_global,
+                            "score": score,
+                        }
+                    )
 
                     if len(nuevos) >= n_faltantes:
                         break
@@ -710,7 +923,6 @@ class RecomendadorPlatosConfiables:
         except Exception as e:
             logger.warning(f"Error generando platos nuevos: {e}")
             return []
-
 
     def _historial_reciente(self, client_id: int, dias: int = 3) -> set:
         """Retorna nombres de platos recomendados en los últimos N días."""
@@ -733,17 +945,19 @@ class RecomendadorPlatosConfiables:
         """Persiste la recomendación en historial para evitar repeticiones."""
         try:
             macros = plato.get("macros", {})
-            self.db.add(HistorialRecomendacion(
-                client_id=client_id,
-                plato_id=plato.get("plato_id"),
-                nombre_plato=plato["nombre"][:200],
-                calorias=macros.get("calorias", 0),
-                proteinas_g=macros.get("proteinas_g", 0),
-                carbohidratos_g=macros.get("carbohidratos_g", 0),
-                grasas_g=macros.get("grasas_g", 0),
-                momento_dia=plato.get("tipo_plato", "cualquiera"),
-                fue_consumido=False,
-            ))
+            self.db.add(
+                HistorialRecomendacion(
+                    client_id=client_id,
+                    plato_id=plato.get("plato_id"),
+                    nombre_plato=plato["nombre"][:200],
+                    calorias=macros.get("calorias", 0),
+                    proteinas_g=macros.get("proteinas_g", 0),
+                    carbohidratos_g=macros.get("carbohidratos_g", 0),
+                    grasas_g=macros.get("grasas_g", 0),
+                    momento_dia=plato.get("tipo_plato", "cualquiera"),
+                    fue_consumido=False,
+                )
+            )
             self.db.commit()
         except Exception as exc:
             logger.warning(f"Error guardando historial: {exc}")

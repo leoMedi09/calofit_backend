@@ -61,8 +61,10 @@ async def parse_ingredients(
         if not datos or not datos.get("alimentos"):
             return ParseIngredientsResponse(
                 ingredientes=[],
-                calorias_total=0, proteinas_total=0,
-                carbohidratos_total=0, grasas_total=0,
+                calorias_total=0,
+                proteinas_total=0,
+                carbohidratos_total=0,
+                grasas_total=0,
                 advertencia="No identifiqué ese alimento. Intenta con más detalle.",
             )
 
@@ -70,8 +72,10 @@ async def parse_ingredients(
         if not items_reales:
             return ParseIngredientsResponse(
                 ingredientes=[],
-                calorias_total=0, proteinas_total=0,
-                carbohidratos_total=0, grasas_total=0,
+                calorias_total=0,
+                proteinas_total=0,
+                carbohidratos_total=0,
+                grasas_total=0,
                 advertencia="Ese alimento no existe en ninguna base de datos nutricional.",
             )
 
@@ -79,25 +83,27 @@ async def parse_ingredients(
         kcal_total = prot_total = carb_total = grasa_total = 0.0
 
         for item in items_reales:
-            p   = float(item.get("prot_g",  0) or 0)
-            c   = float(item.get("carb_g",  0) or 0)
-            g   = float(item.get("grasa_g", 0) or 0)
-            k   = round(4 * p + 4 * c + 9 * g, 1) or float(item.get("kcal", 0) or 0)
+            p = float(item.get("prot_g", 0) or 0)
+            c = float(item.get("carb_g", 0) or 0)
+            g = float(item.get("grasa_g", 0) or 0)
+            k = round(4 * p + 4 * c + 9 * g, 1) or float(item.get("kcal", 0) or 0)
             grm = float(item.get("porcion_g", 100) or 100)
 
-            ingredientes_list.append(ParsedIngredient(
-                nombre=item.get("nombre", "Alimento"),
-                cantidad=grm,
-                unidad="g",
-                gramos_totales=grm,
-                calorias=k,
-                proteinas_g=p,
-                carbohidratos_g=c,
-                grasas_g=g,
-            ))
-            kcal_total  += k
-            prot_total  += p
-            carb_total  += c
+            ingredientes_list.append(
+                ParsedIngredient(
+                    nombre=item.get("nombre", "Alimento"),
+                    cantidad=grm,
+                    unidad="g",
+                    gramos_totales=grm,
+                    calorias=k,
+                    proteinas_g=p,
+                    carbohidratos_g=c,
+                    grasas_g=g,
+                )
+            )
+            kcal_total += k
+            prot_total += p
+            carb_total += c
             grasa_total += g
 
         return ParseIngredientsResponse(

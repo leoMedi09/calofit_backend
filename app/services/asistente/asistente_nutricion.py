@@ -3,6 +3,7 @@ Lógica de nutrición del asistente (tarjetas de comida, macros, fuzzy de comida
 
 Separado de ``asistente_ejercicio.py`` para poder cambiar comidas sin tocar entrenamiento.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -60,9 +61,23 @@ def coherencia_proteina_platos(nombre_query_norm: str, nombre_candidato_norm: st
         return True
 
     _FISH = (
-        "pescado", "salmon", "salmón", "atun", "atún", "tilapia", "merluza",
-        "bacalao", "trucha", "lenguado", "caballa", "lisa", "mero", "tollo",
-        "anchoveta", "bonito", "salpreso",
+        "pescado",
+        "salmon",
+        "salmón",
+        "atun",
+        "atún",
+        "tilapia",
+        "merluza",
+        "bacalao",
+        "trucha",
+        "lenguado",
+        "caballa",
+        "lisa",
+        "mero",
+        "tollo",
+        "anchoveta",
+        "bonito",
+        "salpreso",
     )
     _FISH_IMPLICIT = ("ferrenafana", "ferreñafana", "chinguirito", "tiradito")
     fish_q = any(w in q for w in _FISH) or any(w in q for w in _FISH_IMPLICIT)
@@ -106,31 +121,78 @@ def coherencia_proteina_platos(nombre_query_norm: str, nombre_candidato_norm: st
     return True
 
 
-_ING_STOPWORDS = {"blanco", "fresco", "fresca", "cocido", "cocida", "natural",
-                  "ligero", "ligera", "variado", "variada", "mixta", "integral"}
+_ING_STOPWORDS = {
+    "blanco",
+    "fresco",
+    "fresca",
+    "cocido",
+    "cocida",
+    "natural",
+    "ligero",
+    "ligera",
+    "variado",
+    "variada",
+    "mixta",
+    "integral",
+}
 
-_PRIMERAS_PALABRAS_CATEGORIA = frozenset({
-    "pan", "sopa", "caldo", "crema", "ensalada", "torta", "bizcocho",
-    "tamal", "empanada", "chicha", "jugo", "nectar", "bebida", "refresco",
-    "postre", "helado", "arroz", "pollo", "leche",
-})
+_PRIMERAS_PALABRAS_CATEGORIA = frozenset(
+    {
+        "pan",
+        "sopa",
+        "caldo",
+        "crema",
+        "ensalada",
+        "torta",
+        "bizcocho",
+        "tamal",
+        "empanada",
+        "chicha",
+        "jugo",
+        "nectar",
+        "bebida",
+        "refresco",
+        "postre",
+        "helado",
+        "arroz",
+        "pollo",
+        "leche",
+    }
+)
 
 _GRAMOS_POR_UNIDAD = {
-    "cucharada": 15.0, "cucharadita": 5.0, "taza": 240.0,
-    "vaso": 250.0, "rebanada": 35.0, "loncha": 25.0,
+    "cucharada": 15.0,
+    "cucharadita": 5.0,
+    "taza": 240.0,
+    "vaso": 250.0,
+    "rebanada": 35.0,
+    "loncha": 25.0,
 }
 _GRAMOS_POR_ITEM = {
-    "huevo": 55.0, "huevos": 55.0, "aguacate": 150.0, "palta": 150.0,
-    "naranja": 130.0, "manzana": 150.0, "platano": 120.0, "banana": 120.0,
-    "lechuga": 80.0, "limon": 60.0,
+    "huevo": 55.0,
+    "huevos": 55.0,
+    "aguacate": 150.0,
+    "palta": 150.0,
+    "naranja": 130.0,
+    "manzana": 150.0,
+    "platano": 120.0,
+    "banana": 120.0,
+    "lechuga": 80.0,
+    "limon": 60.0,
 }
 
 
 _ABREV_MEDIDA = {
-    "cda": 15.0, "cdas": 15.0, "c.d.a": 15.0,
-    "cdta": 5.0, "cdtas": 5.0, "c.d.t.a": 5.0,
-    "taza": 240.0, "tazas": 240.0,
-    "vaso": 250.0, "vasos": 250.0,
+    "cda": 15.0,
+    "cdas": 15.0,
+    "c.d.a": 15.0,
+    "cdta": 5.0,
+    "cdtas": 5.0,
+    "c.d.t.a": 5.0,
+    "taza": 240.0,
+    "tazas": 240.0,
+    "vaso": 250.0,
+    "vasos": 250.0,
     "ml": 1.0,
 }
 
@@ -169,17 +231,19 @@ def _parse_ing_gramos(texto: str) -> Optional[Tuple[str, float]]:
         return _emit(_norm_ing(m.group(2).strip()), float(m.group(1)))
     m = re.match(
         r"(\d+(?:\.\d+)?)\s+(cdas?|cdtas?|c\.d\.a\.?|c\.d\.t\.a\.?|tazas?|vasos?|ml)\s+(?:de\s+)?(.+?)(?:\s*\(|$)",
-        t, re.IGNORECASE
+        t,
+        re.IGNORECASE,
     )
     if m:
-        cant  = float(m.group(1))
+        cant = float(m.group(1))
         abrev = m.group(2).lower().rstrip(".")
         nombre = _norm_ing(m.group(3).strip())
         gramos = _ABREV_MEDIDA.get(abrev, 15.0)
         return _emit(nombre, cant * gramos)
     m = re.match(
         r"(\d+(?:\.\d+)?)\s+(cucharadas?|cucharaditas?|tazas?|vasos?|rebanadas?|lonchas?)\s+(?:de\s+)?(.+?)(?:\s*\(|$)",
-        t, re.IGNORECASE
+        t,
+        re.IGNORECASE,
     )
     if m:
         cant = float(m.group(1))
@@ -194,7 +258,7 @@ def _parse_ing_gramos(texto: str) -> Optional[Tuple[str, float]]:
         return _emit(_norm_ing(m.group(2).strip()), float(m.group(3)))
     m = re.match(r"(\d+(?:\.\d+)?)\s+(.+?)(?:\s*\(|$)", t, re.IGNORECASE)
     if m:
-        cant   = float(m.group(1))
+        cant = float(m.group(1))
         nombre = _norm_ing(m.group(2).strip())
         if nombre in _ABREV_MEDIDA:
             return None
@@ -218,52 +282,32 @@ def _resolver_alimento_en_bd(db: Session, nombre_norm: str):
         return db.query(Alimento).filter(Alimento.id == alias.alimento_id).first()
     words = [w for w in nombre_norm.split() if len(w) >= 5 and w not in _ING_STOPWORDS]
     for w in words:
-        candidates = (
-            db.query(Alimento)
-            .filter(Alimento.nombre_normalizado.like(f"%{w}%"))
-            .limit(15)
-            .all()
-        )
+        candidates = db.query(Alimento).filter(Alimento.nombre_normalizado.like(f"%{w}%")).limit(15).all()
         if candidates:
             best = max(
                 candidates,
-                key=lambda c: difflib.SequenceMatcher(
-                    None, nombre_norm, c.nombre_normalizado or ""
-                ).ratio(),
+                key=lambda c: difflib.SequenceMatcher(None, nombre_norm, c.nombre_normalizado or "").ratio(),
             )
-            _ratio_best = difflib.SequenceMatcher(
-                None, nombre_norm, best.nombre_normalizado or ""
-            ).ratio()
+            _ratio_best = difflib.SequenceMatcher(None, nombre_norm, best.nombre_normalizado or "").ratio()
             _first_cand = (best.nombre_normalizado or "").split()[0] if best.nombre_normalizado else ""
             _umbral_best = (
-                0.85
-                if _first_cand in _PRIMERAS_PALABRAS_CATEGORIA
-                and _first_cand not in nombre_norm.split()
-                else 0.75
+                0.85 if _first_cand in _PRIMERAS_PALABRAS_CATEGORIA and _first_cand not in nombre_norm.split() else 0.75
             )
             if _ratio_best >= _umbral_best:
                 return best
         alias_candidates = (
-            db.query(AlimentoAlias)
-            .filter(AlimentoAlias.alias_normalizado.like(f"%{w}%"))
-            .limit(10)
-            .all()
+            db.query(AlimentoAlias).filter(AlimentoAlias.alias_normalizado.like(f"%{w}%")).limit(10).all()
         )
         if alias_candidates:
             best_alias = max(
                 alias_candidates,
-                key=lambda al: difflib.SequenceMatcher(
-                    None, nombre_norm, al.alias_normalizado or ""
-                ).ratio(),
+                key=lambda al: difflib.SequenceMatcher(None, nombre_norm, al.alias_normalizado or "").ratio(),
             )
-            _ratio_alias = difflib.SequenceMatcher(
-                None, nombre_norm, best_alias.alias_normalizado or ""
-            ).ratio()
+            _ratio_alias = difflib.SequenceMatcher(None, nombre_norm, best_alias.alias_normalizado or "").ratio()
             _first_alias = (best_alias.alias_normalizado or "").split()[0] if best_alias.alias_normalizado else ""
             _umbral_alias = (
                 0.85
-                if _first_alias in _PRIMERAS_PALABRAS_CATEGORIA
-                and _first_alias not in nombre_norm.split()
+                if _first_alias in _PRIMERAS_PALABRAS_CATEGORIA and _first_alias not in nombre_norm.split()
                 else 0.75
             )
             if _ratio_alias >= _umbral_alias:
@@ -271,11 +315,10 @@ def _resolver_alimento_en_bd(db: Session, nombre_norm: str):
     return None
 
 
-
-
 _USDA_API_KEY = "DEMO_KEY"
 try:
     from app.core.config import settings as _cfg
+
     _USDA_API_KEY = getattr(_cfg, "USDA_API_KEY", "DEMO_KEY") or "DEMO_KEY"
 except Exception:
     pass
@@ -285,16 +328,23 @@ def _buscar_usda_sync(nombre_en: str) -> Optional[dict]:
     """Consulta USDA FoodData Central y devuelve macros por 100g o None."""
     if len(nombre_en.split()) > 5:
         return None
-    params = urllib.parse.urlencode({
-        "query":    nombre_en,
-        "api_key":  _USDA_API_KEY,
-        "pageSize": 1,
-        "dataType": "Foundation,SR Legacy",
-    })
+    params = urllib.parse.urlencode(
+        {
+            "query": nombre_en,
+            "api_key": _USDA_API_KEY,
+            "pageSize": 1,
+            "dataType": "Foundation,SR Legacy",
+        }
+    )
     url = f"https://api.nal.usda.gov/fdc/v1/foods/search?{params}"
-    NUTRIENT_IDS = {1008: "calorias_100g", 1003: "proteina_100g",
-                    1005: "carbohidratos_100g", 1004: "grasas_100g",
-                    1079: "fibra_100g", 2000: "azucar_100g"}
+    NUTRIENT_IDS = {
+        1008: "calorias_100g",
+        1003: "proteina_100g",
+        1005: "carbohidratos_100g",
+        1004: "grasas_100g",
+        1079: "fibra_100g",
+        2000: "azucar_100g",
+    }
     try:
         with urllib.request.urlopen(url, timeout=8) as resp:
             data = json.loads(resp.read().decode())
@@ -303,7 +353,7 @@ def _buscar_usda_sync(nombre_en: str) -> Optional[dict]:
             return None
         food = foods[0]
         n_lower = nombre_en.lower()
-        desc    = food.get("description", "").lower()
+        desc = food.get("description", "").lower()
         if not any(p in desc for p in n_lower.split() if len(p) >= 4):
             return None
         macros: dict = {}
@@ -320,6 +370,7 @@ def _buscar_fatsecret_sync(nombre_es: str) -> Optional[dict]:
     """Consulta FatSecret con porcion_g=100 para obtener macros base por 100g."""
     try:
         from app.services.fatsecret_client import get_fatsecret_client
+
         fs = get_fatsecret_client()
         if not fs:
             return None
@@ -327,18 +378,16 @@ def _buscar_fatsecret_sync(nombre_es: str) -> Optional[dict]:
         if not raw or raw.get("calorias", 0) <= 0:
             return None
         return {
-            "calorias_100g":      round(float(raw["calorias"]), 2),
-            "proteina_100g":      round(float(raw["proteinas"]), 2),
+            "calorias_100g": round(float(raw["calorias"]), 2),
+            "proteina_100g": round(float(raw["proteinas"]), 2),
             "carbohidratos_100g": round(float(raw["carbohidratos"]), 2),
-            "grasas_100g":        round(float(raw["grasas"]), 2),
+            "grasas_100g": round(float(raw["grasas"]), 2),
         }
     except Exception:
         return None
 
 
-def _buscar_colision_local(
-    db: Session, nombre_norm: str
-) -> Optional[Tuple[Any, float]]:
+def _buscar_colision_local(db: Session, nombre_norm: str) -> Optional[Tuple[Any, float]]:
     """
     Detecta si existe un alimento similar en BD antes de insertar duplicado.
     Retorna (Alimento, similitud) o None.
@@ -347,17 +396,10 @@ def _buscar_colision_local(
     first_word = nombre_norm.split()[0] if nombre_norm else ""
     if len(first_word) < 3:
         return None
-    candidates = (
-        db.query(Alimento)
-        .filter(Alimento.nombre_normalizado.like(f"{first_word}%"))
-        .limit(30)
-        .all()
-    )
+    candidates = db.query(Alimento).filter(Alimento.nombre_normalizado.like(f"{first_word}%")).limit(30).all()
     best, best_score = None, 0.0
     for c in candidates:
-        score = difflib.SequenceMatcher(
-            None, nombre_norm, c.nombre_normalizado or ""
-        ).ratio()
+        score = difflib.SequenceMatcher(None, nombre_norm, c.nombre_normalizado or "").ratio()
         if score > best_score:
             best_score, best = score, c
     if best and best_score >= 0.75:
@@ -365,9 +407,7 @@ def _buscar_colision_local(
     return None
 
 
-async def _buscar_o_crear_alimento_async(
-    db: Session, nombre_norm: str, nombre_es: str
-) -> Optional[Alimento]:
+async def _buscar_o_crear_alimento_async(db: Session, nombre_norm: str, nombre_es: str) -> Optional[Alimento]:
     """
     Busca un alimento en BD; si no existe, intenta USDA y luego Groq.
     Guarda el resultado en `alimentos` para consultas futuras.
@@ -379,18 +419,10 @@ async def _buscar_o_crear_alimento_async(
 
     if _es_nombre_condimento_traza(nombre_norm):
         if re.match(r"^sal\b", nombre_norm):
-            sal_row = (
-                db.query(Alimento)
-                .filter(Alimento.nombre_normalizado == "sal comun")
-                .first()
-            )
+            sal_row = db.query(Alimento).filter(Alimento.nombre_normalizado == "sal comun").first()
             if sal_row:
                 return sal_row
-        traza_row = (
-            db.query(Alimento)
-            .filter(Alimento.nombre_normalizado == "especias condimento traza")
-            .first()
-        )
+        traza_row = db.query(Alimento).filter(Alimento.nombre_normalizado == "especias condimento traza").first()
         if traza_row:
             return traza_row
 
@@ -405,6 +437,7 @@ async def _buscar_o_crear_alimento_async(
     if not macros:
         try:
             from app.services.ia_service import ia_engine
+
             prompt = (
                 f"Eres un nutricionista experto. Evalúa si '{nombre_es}' es un alimento real comestible.\n"
                 f"Si NO es alimento real (jerga, insulto, objeto inanimado, palabra sin sentido culinario): "
@@ -423,11 +456,12 @@ async def _buscar_o_crear_alimento_async(
                     return None
                 if float(data.get("calorias_100g", 0)) > 0:
                     macros = {
-                        "calorias_100g":      round(float(data.get("calorias_100g", 0)), 1),
-                        "proteina_100g":      round(float(data.get("proteina_100g", 0)), 1),
+                        "calorias_100g": round(float(data.get("calorias_100g", 0)), 1),
+                        "proteina_100g": round(float(data.get("proteina_100g", 0)), 1),
                         "carbohidratos_100g": round(float(data.get("carbohidratos_100g", 0)), 1),
-                        "grasas_100g":        round(float(data.get("grasas_100g", 0)), 1),
-                        "fibra_100g": 0.0, "azucar_100g": 0.0,
+                        "grasas_100g": round(float(data.get("grasas_100g", 0)), 1),
+                        "fibra_100g": 0.0,
+                        "azucar_100g": 0.0,
                     }
                     fuente = "Groq (estimado)"
         except Exception as e:
@@ -451,6 +485,7 @@ async def _buscar_o_crear_alimento_async(
         elif sim >= 0.70 and not _nombre_es_mensaje:
             try:
                 from app.models.alimento_alias import AlimentoAlias
+
                 alias = AlimentoAlias(
                     alimento_id=alim_existente.id,
                     alias=nombre_es[:255],
@@ -460,7 +495,9 @@ async def _buscar_o_crear_alimento_async(
                 db.commit()
                 logger.info(
                     "Alias creado '%s' → '%s' (sim=%.2f)",
-                    nombre_norm, alim_existente.nombre_normalizado, sim,
+                    nombre_norm,
+                    alim_existente.nombre_normalizado,
+                    sim,
                 )
             except Exception:
                 db.rollback()
@@ -489,29 +526,32 @@ async def _buscar_o_crear_alimento_async(
         if not _ok:
             logger.warning(
                 "Alimento '%s' (fuente=%s) descartado por Atwater — %s",
-                nombre_es, fuente, _motivo,
+                nombre_es,
+                fuente,
+                _motivo,
             )
             return None
         nuevo = Alimento(
             nombre=nombre_es[:200],
             nombre_normalizado=nombre_norm[:200],
-            calorias_100g      = macros.get("calorias_100g", 0),
-            proteina_100g      = macros.get("proteina_100g", 0),
-            carbohidratos_100g = macros.get("carbohidratos_100g", 0),
-            grasas_100g        = macros.get("grasas_100g", 0),
-            fibra_100g         = macros.get("fibra_100g", 0),
-            azucar_100g        = macros.get("azucar_100g", 0),
+            calorias_100g=macros.get("calorias_100g", 0),
+            proteina_100g=macros.get("proteina_100g", 0),
+            carbohidratos_100g=macros.get("carbohidratos_100g", 0),
+            grasas_100g=macros.get("grasas_100g", 0),
+            fibra_100g=macros.get("fibra_100g", 0),
+            azucar_100g=macros.get("azucar_100g", 0),
             categoria="Otros",
             fuente=fuente,
-            es_confiable        = not _es_groq,
-            pendiente_validacion= _es_groq,
+            es_confiable=not _es_groq,
+            pendiente_validacion=_es_groq,
         )
         db.add(nuevo)
         db.commit()
         db.refresh(nuevo)
         logger.info(
             "Nuevo alimento guardado desde %s: '%s'%s",
-            fuente, nombre_es,
+            fuente,
+            nombre_es,
             " [PENDIENTE VALIDACIÓN]" if _es_groq else "",
         )
         return nuevo
@@ -539,22 +579,29 @@ async def _construir_componentes_bd_async(
 
         nombre_es_raw = re.sub(r"\(.*?\)", "", str(ing_str)).strip()
         nombre_es_raw = re.sub(r"^\d+(?:\.\d+)?\s*g\s+", "", nombre_es_raw).strip()
-        nombre_es_raw = re.sub(r"^\d+(?:\.\d+)?\s+(?:cucharadas?|cucharaditas?|tazas?|vasos?)\s+(?:de\s+)?", "", nombre_es_raw, flags=re.IGNORECASE).strip()
+        nombre_es_raw = re.sub(
+            r"^\d+(?:\.\d+)?\s+(?:cucharadas?|cucharaditas?|tazas?|vasos?)\s+(?:de\s+)?",
+            "",
+            nombre_es_raw,
+            flags=re.IGNORECASE,
+        ).strip()
         nombre_es = nombre_es_raw or nombre_norm
 
         alim = await _buscar_o_crear_alimento_async(db, nombre_norm, nombre_es)
         if alim:
             factor = gramos / 100.0
-            componentes.append({
-                "alimento_id": alim.id,
-                "nombre":      alim.nombre,
-                "gramos":      gramos,
-                "kcal":        round(alim.calorias_100g * factor, 1),
-            })
-            total["calorias"]        += round(alim.calorias_100g * factor, 1)
-            total["proteinas_g"]     += round(alim.proteina_100g * factor, 1)
+            componentes.append(
+                {
+                    "alimento_id": alim.id,
+                    "nombre": alim.nombre,
+                    "gramos": gramos,
+                    "kcal": round(alim.calorias_100g * factor, 1),
+                }
+            )
+            total["calorias"] += round(alim.calorias_100g * factor, 1)
+            total["proteinas_g"] += round(alim.proteina_100g * factor, 1)
             total["carbohidratos_g"] += round(alim.carbohidratos_100g * factor, 1)
-            total["grasas_g"]        += round(alim.grasas_100g * factor, 1)
+            total["grasas_g"] += round(alim.grasas_100g * factor, 1)
         else:
             print(f"[Nutricion] Ingrediente no resuelto (incluso con fallback): '{nombre_norm}'")
 
@@ -715,14 +762,14 @@ def _buscar_reciente_por_nombre(user_id: Any, nombre_plato: str) -> Optional[Dic
 
 
 _MEDIDA_GRAMOS: dict = {
-    "cdta":         5,
-    "cucharadita":  5,
-    "cta":          5,
-    "cda":          15,
-    "cucharada":    15,
-    "taza":         240,
-    "vaso":         240,
-    "ml":           1,
+    "cdta": 5,
+    "cucharadita": 5,
+    "cta": 5,
+    "cda": 15,
+    "cucharada": 15,
+    "taza": 240,
+    "vaso": 240,
+    "ml": 1,
 }
 
 _RE_MEDIDA = re.compile(
@@ -732,52 +779,52 @@ _RE_MEDIDA = re.compile(
 )
 
 _GRAMOS_POR_UNIDAD: dict[str, float] = {
-    "aguacate":   200.0,
-    "palta":      200.0,
-    "platano":    120.0,
-    "banana":     120.0,
-    "manzana":    150.0,
-    "naranja":    130.0,
-    "mandarina":   80.0,
-    "limon":       50.0,
-    "lima":        50.0,
-    "pera":       150.0,
-    "durazno":    130.0,
-    "melocoton":  130.0,
-    "mango":      200.0,
-    "papaya":     200.0,
-    "sandia":     300.0,
-    "maracuya":    80.0,
-    "granadilla":  80.0,
-    "lucuma":     100.0,
-    "chirimoya":  150.0,
-    "kiwi":        75.0,
-    "fresa":       12.0,
-    "tomate":     100.0,
-    "cebolla":     80.0,
-    "papa":        150.0,
-    "camote":      150.0,
-    "zanahoria":   80.0,
-    "brocoli":    100.0,
-    "coliflor":   100.0,
-    "pepino":     200.0,
-    "pimiento":   100.0,
-    "choclo":     150.0,
+    "aguacate": 200.0,
+    "palta": 200.0,
+    "platano": 120.0,
+    "banana": 120.0,
+    "manzana": 150.0,
+    "naranja": 130.0,
+    "mandarina": 80.0,
+    "limon": 50.0,
+    "lima": 50.0,
+    "pera": 150.0,
+    "durazno": 130.0,
+    "melocoton": 130.0,
+    "mango": 200.0,
+    "papaya": 200.0,
+    "sandia": 300.0,
+    "maracuya": 80.0,
+    "granadilla": 80.0,
+    "lucuma": 100.0,
+    "chirimoya": 150.0,
+    "kiwi": 75.0,
+    "fresa": 12.0,
+    "tomate": 100.0,
+    "cebolla": 80.0,
+    "papa": 150.0,
+    "camote": 150.0,
+    "zanahoria": 80.0,
+    "brocoli": 100.0,
+    "coliflor": 100.0,
+    "pepino": 200.0,
+    "pimiento": 100.0,
+    "choclo": 150.0,
     "choclo desgranado": 100.0,
-    "berenjena":  150.0,
-    "zapallo":    150.0,
-    "yuca":       150.0,
-    "lechuga":      5.0,
-    "espinaca":     5.0,
-    "huevo":       55.0,
-    "huevos":      55.0,
-    "rebanada":    35.0,
-    "rebanadas":   35.0,
-    "loncha":      25.0,
-    "lonchas":     25.0,
-    "tostada":     30.0,
-    "bollo":       50.0,
-    "pan":         50.0,
+    "berenjena": 150.0,
+    "zapallo": 150.0,
+    "yuca": 150.0,
+    "lechuga": 5.0,
+    "espinaca": 5.0,
+    "huevo": 55.0,
+    "huevos": 55.0,
+    "rebanada": 35.0,
+    "rebanadas": 35.0,
+    "loncha": 25.0,
+    "lonchas": 25.0,
+    "tostada": 30.0,
+    "bollo": 50.0,
+    "pan": 50.0,
 }
 
 _RE_PIEZA = re.compile(
@@ -838,18 +885,18 @@ def _agregar_equivalencia_gramos(ing: str) -> str:
     m = _RE_MEDIDA.match(s)
     if m:
         cantidad = _parsear_fraccion(m.group(1))
-        unidad   = m.group(2).lower()
-        g_unit   = _MEDIDA_GRAMOS.get(unidad)
+        unidad = m.group(2).lower()
+        g_unit = _MEDIDA_GRAMOS.get(unidad)
         if g_unit:
             g_total = round(cantidad * g_unit)
-            equiv   = f"~{g_total}g"
+            equiv = f"~{g_total}g"
             if "(" in s:
                 return s.replace("(", f"({equiv} | ", 1)
             return f"{s} ({equiv})"
 
     m_pz = _RE_PIEZA.match(s)
     if m_pz:
-        cant  = _parsear_fraccion(m_pz.group(1))
+        cant = _parsear_fraccion(m_pz.group(1))
         g_por = _gramos_por_pieza(m_pz.group(2))
         if g_por > 0:
             g_tot = round(cant * g_por)
@@ -860,15 +907,15 @@ def _agregar_equivalencia_gramos(ing: str) -> str:
 
     m_u = _RE_UNIDAD_ALIMENTO.match(s)
     if m_u:
-        cant_raw  = m_u.group(1)
-        alim_raw  = m_u.group(2).strip().lower()
+        cant_raw = m_u.group(1)
+        alim_raw = m_u.group(2).strip().lower()
         g_por = (
             _GRAMOS_POR_UNIDAD.get(alim_raw)
             or _GRAMOS_POR_UNIDAD.get(alim_raw.rstrip("s"))
             or _GRAMOS_POR_UNIDAD.get(re.sub(r"es$", "", alim_raw))
         )
         if g_por:
-            cant  = _parsear_fraccion(cant_raw)
+            cant = _parsear_fraccion(cant_raw)
             if 0 < cant <= 10:
                 g_tot = round(cant * g_por)
                 equiv = f"~{g_tot}g"
@@ -879,8 +926,8 @@ def _agregar_equivalencia_gramos(ing: str) -> str:
     return ing
 
 
-_RE_ING_GRAMOS  = re.compile(r"^(\d+(?:[.,]\d+)?)\s*g\s+(.+?)(?:\s*\(.*\))?$", re.IGNORECASE)
-_RE_ING_KCAL    = re.compile(r"\(\s*([\d.,]+)\s*kcal\s*\)", re.IGNORECASE)
+_RE_ING_GRAMOS = re.compile(r"^(\d+(?:[.,]\d+)?)\s*g\s+(.+?)(?:\s*\(.*\))?$", re.IGNORECASE)
+_RE_ING_KCAL = re.compile(r"\(\s*([\d.,]+)\s*kcal\s*\)", re.IGNORECASE)
 
 
 def _recalcular_ing_desde_bd(db: Session, ing: str) -> str:
@@ -898,31 +945,31 @@ def _recalcular_ing_desde_bd(db: Session, ing: str) -> str:
 
     m_g = _RE_ING_GRAMOS.match(ing_clean)
     if m_g:
-        gramos     = float(m_g.group(1).replace(",", "."))
+        gramos = float(m_g.group(1).replace(",", "."))
         nombre_ing = m_g.group(2).strip()
-        prefix     = f"{int(gramos) if gramos == int(gramos) else gramos}g"
+        prefix = f"{int(gramos) if gramos == int(gramos) else gramos}g"
     else:
         m_pz = _RE_PIEZA.match(ing_clean)
         if m_pz:
-            gramos     = float(m_pz.group(1).replace(",", ".")) * _gramos_por_pieza(m_pz.group(2))
-            nombre_ing = ing_clean[m_pz.end():].strip()
+            gramos = float(m_pz.group(1).replace(",", ".")) * _gramos_por_pieza(m_pz.group(2))
+            nombre_ing = ing_clean[m_pz.end() :].strip()
             nombre_ing = _RE_ING_KCAL.sub("", nombre_ing).strip()
-            g_str      = str(int(gramos)) if gramos == int(gramos) else str(round(gramos, 1))
-            prefix     = f"{m_pz.group(1)} {m_pz.group(2)} (~{g_str}g)"
+            g_str = str(int(gramos)) if gramos == int(gramos) else str(round(gramos, 1))
+            prefix = f"{m_pz.group(1)} {m_pz.group(2)} (~{g_str}g)"
         else:
             m_med = _RE_MEDIDA.match(ing_clean)
             if not m_med:
                 return _agregar_equivalencia_gramos(ing_clean)
-            cantidad   = float(m_med.group(1).replace(",", "."))
-            unidad     = m_med.group(2).lower()
-            g_unit     = _MEDIDA_GRAMOS.get(unidad, 0)
+            cantidad = float(m_med.group(1).replace(",", "."))
+            unidad = m_med.group(2).lower()
+            g_unit = _MEDIDA_GRAMOS.get(unidad, 0)
             if not g_unit:
                 return _agregar_equivalencia_gramos(ing_clean)
-            gramos     = cantidad * g_unit
-            nombre_ing = ing_clean[m_med.end():].strip()
+            gramos = cantidad * g_unit
+            nombre_ing = ing_clean[m_med.end() :].strip()
             nombre_ing = _RE_ING_KCAL.sub("", nombre_ing).strip()
-            g_str      = str(int(gramos)) if gramos == int(gramos) else str(round(gramos, 1))
-            prefix     = f"{m_med.group(0)} (~{g_str}g)"
+            g_str = str(int(gramos)) if gramos == int(gramos) else str(round(gramos, 1))
+            prefix = f"{m_med.group(0)} (~{g_str}g)"
 
     nombre_ing = _RE_ING_KCAL.sub("", nombre_ing).strip()
 
@@ -930,25 +977,27 @@ def _recalcular_ing_desde_bd(db: Session, ing: str) -> str:
     if _es_nombre_condimento_traza(nombre_norm_ing):
         return f"{prefix} {nombre_ing} (0 kcal)"
 
-    row = db.execute(_text(
-        "SELECT a.calorias_100g FROM alimentos a"
-        " WHERE a.nombre_normalizado = :n LIMIT 1"
-    ), {"n": nombre_norm_ing}).fetchone()
+    row = db.execute(
+        _text("SELECT a.calorias_100g FROM alimentos a WHERE a.nombre_normalizado = :n LIMIT 1"), {"n": nombre_norm_ing}
+    ).fetchone()
 
     if not row:
-        row = db.execute(_text(
-            "SELECT a.calorias_100g FROM alimento_alias al"
-            " JOIN alimentos a ON a.id = al.alimento_id"
-            " WHERE al.alias_normalizado = :n LIMIT 1"
-        ), {"n": nombre_norm_ing}).fetchone()
+        row = db.execute(
+            _text(
+                "SELECT a.calorias_100g FROM alimento_alias al"
+                " JOIN alimentos a ON a.id = al.alimento_id"
+                " WHERE al.alias_normalizado = :n LIMIT 1"
+            ),
+            {"n": nombre_norm_ing},
+        ).fetchone()
 
     if not row:
         palabras = [p for p in nombre_norm_ing.split() if len(p) > 4]
         for p in palabras[:2]:
-            row = db.execute(_text(
-                "SELECT a.calorias_100g FROM alimentos a"
-                " WHERE a.nombre_normalizado LIKE :p LIMIT 1"
-            ), {"p": f"%{p}%"}).fetchone()
+            row = db.execute(
+                _text("SELECT a.calorias_100g FROM alimentos a WHERE a.nombre_normalizado LIKE :p LIMIT 1"),
+                {"p": f"%{p}%"},
+            ).fetchone()
             if row:
                 break
 
@@ -957,7 +1006,7 @@ def _recalcular_ing_desde_bd(db: Session, ing: str) -> str:
 
     kcal_100g = float(row[0] or 0)
     kcal_real = kcal_100g * gramos / 100.0
-    kcal_str  = str(int(kcal_real)) if kcal_real == int(kcal_real) else str(round(kcal_real, 1))
+    kcal_str = str(int(kcal_real)) if kcal_real == int(kcal_real) else str(round(kcal_real, 1))
 
     return f"{prefix} {nombre_ing} ({kcal_str} kcal)"
 
@@ -974,60 +1023,63 @@ async def _recalcular_ing_async(db: Session, ing: str) -> str:
 
     m_g = _RE_ING_GRAMOS.match(ing_clean)
     if m_g:
-        gramos     = float(m_g.group(1).replace(",", "."))
+        gramos = float(m_g.group(1).replace(",", "."))
         nombre_ing = m_g.group(2).strip()
-        prefix     = f"{int(gramos) if gramos == int(gramos) else gramos}g"
+        prefix = f"{int(gramos) if gramos == int(gramos) else gramos}g"
     else:
         m_pz = _RE_PIEZA.match(ing_clean)
         if m_pz:
-            gramos     = float(m_pz.group(1).replace(",", ".")) * _gramos_por_pieza(m_pz.group(2))
-            nombre_ing = ing_clean[m_pz.end():].strip()
+            gramos = float(m_pz.group(1).replace(",", ".")) * _gramos_por_pieza(m_pz.group(2))
+            nombre_ing = ing_clean[m_pz.end() :].strip()
             nombre_ing = _RE_ING_KCAL.sub("", nombre_ing).strip()
-            g_str      = str(int(gramos)) if gramos == int(gramos) else str(round(gramos, 1))
-            prefix     = f"{m_pz.group(1)} {m_pz.group(2)} (~{g_str}g)"
+            g_str = str(int(gramos)) if gramos == int(gramos) else str(round(gramos, 1))
+            prefix = f"{m_pz.group(1)} {m_pz.group(2)} (~{g_str}g)"
         else:
             m_med = _RE_MEDIDA.match(ing_clean)
             if not m_med:
                 return _agregar_equivalencia_gramos(ing_clean)
             cantidad = float(m_med.group(1).replace(",", "."))
-            unidad   = m_med.group(2).lower()
-            g_unit   = _MEDIDA_GRAMOS.get(unidad, 0)
+            unidad = m_med.group(2).lower()
+            g_unit = _MEDIDA_GRAMOS.get(unidad, 0)
             if not g_unit:
                 return _agregar_equivalencia_gramos(ing_clean)
-            gramos     = cantidad * g_unit
-            nombre_ing = ing_clean[m_med.end():].strip()
+            gramos = cantidad * g_unit
+            nombre_ing = ing_clean[m_med.end() :].strip()
             nombre_ing = _RE_ING_KCAL.sub("", nombre_ing).strip()
-            g_str      = str(int(gramos)) if gramos == int(gramos) else str(round(gramos, 1))
-            prefix     = f"{m_med.group(0)} (~{g_str}g)"
+            g_str = str(int(gramos)) if gramos == int(gramos) else str(round(gramos, 1))
+            prefix = f"{m_med.group(0)} (~{g_str}g)"
 
-    nombre_ing     = _RE_ING_KCAL.sub("", nombre_ing).strip()
+    nombre_ing = _RE_ING_KCAL.sub("", nombre_ing).strip()
     nombre_norm_ing = _norm(nombre_ing)
     if _es_nombre_condimento_traza(nombre_norm_ing):
         return f"{prefix} {nombre_ing} (0 kcal)"
 
     kcal_100g: Optional[float] = None
-    row = db.execute(_text(
-        "SELECT a.calorias_100g FROM alimentos a WHERE a.nombre_normalizado = :n LIMIT 1"
-    ), {"n": nombre_norm_ing}).fetchone()
+    row = db.execute(
+        _text("SELECT a.calorias_100g FROM alimentos a WHERE a.nombre_normalizado = :n LIMIT 1"), {"n": nombre_norm_ing}
+    ).fetchone()
     if row:
         kcal_100g = float(row[0] or 0)
 
     if kcal_100g is None:
-        row = db.execute(_text(
-            "SELECT a.calorias_100g FROM alimento_alias al"
-            " JOIN alimentos a ON a.id = al.alimento_id"
-            " WHERE al.alias_normalizado = :n LIMIT 1"
-        ), {"n": nombre_norm_ing}).fetchone()
+        row = db.execute(
+            _text(
+                "SELECT a.calorias_100g FROM alimento_alias al"
+                " JOIN alimentos a ON a.id = al.alimento_id"
+                " WHERE al.alias_normalizado = :n LIMIT 1"
+            ),
+            {"n": nombre_norm_ing},
+        ).fetchone()
         if row:
             kcal_100g = float(row[0] or 0)
 
     if kcal_100g is None:
         palabras = [p for p in nombre_norm_ing.split() if len(p) > 4]
         for p in palabras[:2]:
-            row = db.execute(_text(
-                "SELECT a.calorias_100g FROM alimentos a"
-                " WHERE a.nombre_normalizado LIKE :p LIMIT 1"
-            ), {"p": f"%{p}%"}).fetchone()
+            row = db.execute(
+                _text("SELECT a.calorias_100g FROM alimentos a WHERE a.nombre_normalizado LIKE :p LIMIT 1"),
+                {"p": f"%{p}%"},
+            ).fetchone()
             if row:
                 kcal_100g = float(row[0] or 0)
                 break
@@ -1041,7 +1093,7 @@ async def _recalcular_ing_async(db: Session, ing: str) -> str:
         return _agregar_equivalencia_gramos(ing_clean)
 
     kcal_real = kcal_100g * gramos / 100.0
-    kcal_str  = str(int(kcal_real)) if kcal_real == int(kcal_real) else str(round(kcal_real, 1))
+    kcal_str = str(int(kcal_real)) if kcal_real == int(kcal_real) else str(round(kcal_real, 1))
     return f"{prefix} {nombre_ing} ({kcal_str} kcal)"
 
 
@@ -1055,17 +1107,21 @@ def _cargar_ingredientes_bd(db: Session, plato_id: int) -> list:
     El widget parsea el último (X kcal) como badge naranja y muestra el nombre limpio.
     """
     from sqlalchemy import text as _text
-    rows = db.execute(_text(
-        "SELECT a.nombre, pi2.gramos,"
-        " ROUND((a.calorias_100g      * pi2.gramos / 100.0)::numeric, 1) AS kcal,"
-        " ROUND((a.proteina_100g      * pi2.gramos / 100.0)::numeric, 1) AS prot,"
-        " ROUND((a.carbohidratos_100g * pi2.gramos / 100.0)::numeric, 1) AS carb,"
-        " ROUND((a.grasas_100g        * pi2.gramos / 100.0)::numeric, 1) AS gras"
-        " FROM plato_ingredientes pi2"
-        " JOIN alimentos a ON a.id = pi2.alimento_id"
-        " WHERE pi2.plato_id = :pid"
-        " ORDER BY kcal DESC"
-    ), {"pid": plato_id}).fetchall()
+
+    rows = db.execute(
+        _text(
+            "SELECT a.nombre, pi2.gramos,"
+            " ROUND((a.calorias_100g      * pi2.gramos / 100.0)::numeric, 1) AS kcal,"
+            " ROUND((a.proteina_100g      * pi2.gramos / 100.0)::numeric, 1) AS prot,"
+            " ROUND((a.carbohidratos_100g * pi2.gramos / 100.0)::numeric, 1) AS carb,"
+            " ROUND((a.grasas_100g        * pi2.gramos / 100.0)::numeric, 1) AS gras"
+            " FROM plato_ingredientes pi2"
+            " JOIN alimentos a ON a.id = pi2.alimento_id"
+            " WHERE pi2.plato_id = :pid"
+            " ORDER BY kcal DESC"
+        ),
+        {"pid": plato_id},
+    ).fetchall()
     result = []
     for nombre_ing, gramos, kcal, prot, carb, gras in rows:
         kcal_v = float(kcal or 0)
@@ -1080,36 +1136,59 @@ def _cargar_ingredientes_bd(db: Session, plato_id: int) -> list:
 
 _PLATOS_ESENCIALES_BD: list[dict] = [
     {
-        "keywords":    ("ceviche", "cebiche"),
+        "keywords": ("ceviche", "cebiche"),
         "obligatorio_todos": [
-            ("pescado", "lisa", "caballa", "mero", "tollo", "camaron",
-             "langostino", "pulpo", "calamar", "anchoveta", "bonito",
-             "trucha", "salmon", "atun"),
+            (
+                "pescado",
+                "lisa",
+                "caballa",
+                "mero",
+                "tollo",
+                "camaron",
+                "langostino",
+                "pulpo",
+                "calamar",
+                "anchoveta",
+                "bonito",
+                "trucha",
+                "salmon",
+                "atun",
+            ),
             ("limon", "lima", "citrico"),
             ("cebolla",),
         ],
         "prohibidos": (
-            "aceite de oliva", "aceite vegetal", "aceite",
-            "mantequilla", "crema", "mayonesa", "leche",
-            "queso", "yogurt",
-            "pescado blanco cocido", "salmon cocido", "trucha cocida",
+            "aceite de oliva",
+            "aceite vegetal",
+            "aceite",
+            "mantequilla",
+            "crema",
+            "mayonesa",
+            "leche",
+            "queso",
+            "yogurt",
+            "pescado blanco cocido",
+            "salmon cocido",
+            "trucha cocida",
         ),
     },
     {
-        "keywords":    ("tiradito",),
+        "keywords": ("tiradito",),
         "obligatorio_todos": [
-            ("pescado", "lisa", "caballa", "mero", "lenguado", "trucha",
-             "salmon", "atun", "bonito"),
+            ("pescado", "lisa", "caballa", "mero", "lenguado", "trucha", "salmon", "atun", "bonito"),
             ("limon", "lima"),
         ],
         "prohibidos": (
-            "aceite de oliva", "mantequilla", "crema", "mayonesa",
+            "aceite de oliva",
+            "mantequilla",
+            "crema",
+            "mayonesa",
         ),
     },
     {
-        "keywords":    ("tortilla de huevo", "tortilla"),
+        "keywords": ("tortilla de huevo", "tortilla"),
         "obligatorio_todos": [("huevo",)],
-        "prohibidos":  (),
+        "prohibidos": (),
     },
 ]
 
@@ -1123,11 +1202,15 @@ def _validar_plato_bd_esenciales(plato_id: int, nombre_norm: str, db) -> tuple[b
     Retorna (False, motivo) si debe descartarse y re-crearse.
     """
     from sqlalchemy import text as _text
-    rows = db.execute(_text(
-        "SELECT a.nombre_normalizado FROM plato_ingredientes pi2"
-        " JOIN alimentos a ON a.id = pi2.alimento_id"
-        " WHERE pi2.plato_id = :pid"
-    ), {"pid": plato_id}).fetchall()
+
+    rows = db.execute(
+        _text(
+            "SELECT a.nombre_normalizado FROM plato_ingredientes pi2"
+            " JOIN alimentos a ON a.id = pi2.alimento_id"
+            " WHERE pi2.plato_id = :pid"
+        ),
+        {"pid": plato_id},
+    ).fetchall()
     ings_norms = [r[0] or "" for r in rows]
 
     for regla in _PLATOS_ESENCIALES_BD:
@@ -1144,8 +1227,7 @@ def _validar_plato_bd_esenciales(plato_id: int, nombre_norm: str, db) -> tuple[b
         for prohibido in regla.get("prohibidos", ()):
             if any(prohibido in ing for ing in ings_norms):
                 return False, (
-                    f"plato id={plato_id} tiene ingrediente prohibido "
-                    f"'{prohibido}' para tipo '{regla['keywords'][0]}'"
+                    f"plato id={plato_id} tiene ingrediente prohibido '{prohibido}' para tipo '{regla['keywords'][0]}'"
                 )
 
     return True, ""
@@ -1182,6 +1264,7 @@ def _buscar_plato_bd_por_nombre(db: Session, nombre_norm: str) -> Optional[Dict[
             logger.warning("[bd_esenciales] %s", motivo)
             try:
                 from sqlalchemy import text as _del
+
                 db.execute(_del("DELETE FROM plato_ingredientes WHERE plato_id=:p"), {"p": plato_id})
                 db.execute(_del("DELETE FROM platos WHERE id=:p"), {"p": plato_id})
                 db.commit()
@@ -1189,20 +1272,16 @@ def _buscar_plato_bd_por_nombre(db: Session, nombre_norm: str) -> Optional[Dict[
             except Exception as e:
                 logger.error("[bd_esenciales] Error eliminando plato: %s", e)
             return None
-        plato_meta = (
-            db.query(Plato.preparacion, Plato.nota)
-            .filter(Plato.id == plato_id)
-            .first()
-        )
+        plato_meta = db.query(Plato.preparacion, Plato.nota).filter(Plato.id == plato_id).first()
         return {
-            "plato_id":        plato_id,
-            "calorias":        float(row[2] or 0),
-            "proteinas_g":     float(row[3] or 0),
+            "plato_id": plato_id,
+            "calorias": float(row[2] or 0),
+            "proteinas_g": float(row[3] or 0),
             "carbohidratos_g": float(row[4] or 0),
-            "grasas_g":        float(row[5] or 0),
-            "ingredientes":    _cargar_ingredientes_bd(db, plato_id),
-            "preparacion":     list(plato_meta[0] or []) if plato_meta else [],
-            "nota":            plato_meta[1] if plato_meta else None,
+            "grasas_g": float(row[5] or 0),
+            "ingredientes": _cargar_ingredientes_bd(db, plato_id),
+            "preparacion": list(plato_meta[0] or []) if plato_meta else [],
+            "nota": plato_meta[1] if plato_meta else None,
         }
 
     cand = (
@@ -1211,10 +1290,10 @@ def _buscar_plato_bd_por_nombre(db: Session, nombre_norm: str) -> Optional[Dict[
         .limit(300)
         .all()
     )
-    best_id    = None
+    best_id = None
     best_score = 0.0
-    best_prep  = None
-    best_nota  = None
+    best_prep = None
+    best_nota = None
     for plato_id, nn, prep, nota in cand:
         if not nn:
             continue
@@ -1223,9 +1302,9 @@ def _buscar_plato_bd_por_nombre(db: Session, nombre_norm: str) -> Optional[Dict[
         score = difflib.SequenceMatcher(a=nombre_norm, b=str(nn)).ratio()
         if score > best_score:
             best_score = score
-            best_id    = plato_id
-            best_prep  = prep
-            best_nota  = nota
+            best_id = plato_id
+            best_prep = prep
+            best_nota = nota
 
     if best_id and best_score >= 0.82:
         ok, motivo = _validar_plato_bd_esenciales(best_id, nombre_norm, db)
@@ -1233,30 +1312,34 @@ def _buscar_plato_bd_por_nombre(db: Session, nombre_norm: str) -> Optional[Dict[
             logger.warning("[bd_esenciales_fuzzy] %s", motivo)
             try:
                 from sqlalchemy import text as _del
+
                 db.execute(_del("DELETE FROM plato_ingredientes WHERE plato_id=:p"), {"p": best_id})
                 db.execute(_del("DELETE FROM platos WHERE id=:p"), {"p": best_id})
                 db.commit()
             except Exception:
                 pass
             return None
-        row2 = db.execute(_text(
-            "SELECT SUM(a.calorias_100g * pi2.gramos / 100.0),"
-            " SUM(a.proteina_100g * pi2.gramos / 100.0),"
-            " SUM(a.carbohidratos_100g * pi2.gramos / 100.0),"
-            " SUM(a.grasas_100g * pi2.gramos / 100.0)"
-            " FROM plato_ingredientes pi2"
-            " JOIN alimentos a ON a.id = pi2.alimento_id"
-            " WHERE pi2.plato_id = :pid"
-        ), {"pid": best_id}).fetchone()
+        row2 = db.execute(
+            _text(
+                "SELECT SUM(a.calorias_100g * pi2.gramos / 100.0),"
+                " SUM(a.proteina_100g * pi2.gramos / 100.0),"
+                " SUM(a.carbohidratos_100g * pi2.gramos / 100.0),"
+                " SUM(a.grasas_100g * pi2.gramos / 100.0)"
+                " FROM plato_ingredientes pi2"
+                " JOIN alimentos a ON a.id = pi2.alimento_id"
+                " WHERE pi2.plato_id = :pid"
+            ),
+            {"pid": best_id},
+        ).fetchone()
         return {
-            "plato_id":        best_id,
-            "calorias":        float(row2[0] or 0) if row2 else 0.0,
-            "proteinas_g":     float(row2[1] or 0) if row2 else 0.0,
+            "plato_id": best_id,
+            "calorias": float(row2[0] or 0) if row2 else 0.0,
+            "proteinas_g": float(row2[1] or 0) if row2 else 0.0,
             "carbohidratos_g": float(row2[2] or 0) if row2 else 0.0,
-            "grasas_g":        float(row2[3] or 0) if row2 else 0.0,
-            "ingredientes":    _cargar_ingredientes_bd(db, best_id),
-            "preparacion":     list(best_prep or []),
-            "nota":            best_nota,
+            "grasas_g": float(row2[3] or 0) if row2 else 0.0,
+            "ingredientes": _cargar_ingredientes_bd(db, best_id),
+            "preparacion": list(best_prep or []),
+            "nota": best_nota,
         }
     return None
 
@@ -1276,9 +1359,7 @@ def verificar_conflicto_macros(
 
     if meta_cal > 0 and consumidas > meta_cal:
         exceso = consumidas - meta_cal
-        alertas.append(
-            f"🔥 Calorías: llevas {consumidas:.0f}/{meta_cal:.0f} kcal (+{exceso:.0f} de exceso)"
-        )
+        alertas.append(f"🔥 Calorías: llevas {consumidas:.0f}/{meta_cal:.0f} kcal (+{exceso:.0f} de exceso)")
 
     prot_consumidas = progreso.proteinas_consumidas or 0
     prot_meta = plan_hoy_data.get("proteinas_g", 0) or 0
@@ -1306,9 +1387,7 @@ def verificar_conflicto_macros(
     )
 
 
-_RE_NOMBRE_GENERICO = re.compile(
-    r"(?i)^(?:sugerencia|opci[oó]n|plato|comida|receta|alternativa)\s*\d*\.?\s*$"
-)
+_RE_NOMBRE_GENERICO = re.compile(r"(?i)^(?:sugerencia|opci[oó]n|plato|comida|receta|alternativa)\s*\d*\.?\s*$")
 
 _TDEE_FALLBACK_KCAL: float = 2000.0
 
@@ -1336,12 +1415,12 @@ def _calcular_tdee_perfil(perfil: Any) -> float:
     Fallback a _TDEE_FALLBACK_KCAL si faltan campos o hay error.
     """
     try:
-        peso   = getattr(perfil, "weight", None)
+        peso = getattr(perfil, "weight", None)
         altura = getattr(perfil, "height", None)
         genero = getattr(perfil, "gender", None)
-        birth  = getattr(perfil, "birth_date", None)
-        nivel  = getattr(perfil, "activity_level", None) or "Moderado"
-        goal   = getattr(perfil, "goal", None) or "Mantener peso"
+        birth = getattr(perfil, "birth_date", None)
+        nivel = getattr(perfil, "activity_level", None) or "Moderado"
+        goal = getattr(perfil, "goal", None) or "Mantener peso"
 
         if not all([peso, altura, genero, birth]):
             return _TDEE_FALLBACK_KCAL
@@ -1414,8 +1493,7 @@ def _validar_momento_semantico(nombre_norm: str, momento: str) -> tuple[bool, st
         for plato_prohibido in _PLATOS_NOCTURNOS_PROHIBIDOS:
             if plato_prohibido in nombre_norm:
                 return True, (
-                    f"'{plato_prohibido}' no recomendado en cena — "
-                    f"plato frío/crudo marino, mejor en almuerzo"
+                    f"'{plato_prohibido}' no recomendado en cena — plato frío/crudo marino, mejor en almuerzo"
                 )
 
     return False, ""
@@ -1430,26 +1508,61 @@ def _extraer_platos_del_mensaje(mensaje: str) -> List[str]:
         return []
     low = mensaje.lower().strip()
     for pref in (
-        "comi ", "comí ", "almorcé ", "almorce ", "desayuné ", "desayune ",
-        "cené ", "cene ", "tomé ", "tome ", "bebí ", "bebi ", "meriendé ",
-        "almorce con ", "desayune con ",
-        "dame informacion de", "dame información de", "dame info de",
-        "dame", "recomiendame", "recomiéndame", "cuéntame sobre", "cuentame sobre",
-        "como se prepara", "cómo se prepara", "que tiene", "qué tiene",
-        "registra que comi ", "registra que comí ", "registra que almorce ",
-        "registra que almorcé ", "registra que desayune ", "registra que desayuné ",
-        "registra que tome ", "registra que tomé ",
+        "comi ",
+        "comí ",
+        "almorcé ",
+        "almorce ",
+        "desayuné ",
+        "desayune ",
+        "cené ",
+        "cene ",
+        "tomé ",
+        "tome ",
+        "bebí ",
+        "bebi ",
+        "meriendé ",
+        "almorce con ",
+        "desayune con ",
+        "dame informacion de",
+        "dame información de",
+        "dame info de",
+        "dame",
+        "recomiendame",
+        "recomiéndame",
+        "cuéntame sobre",
+        "cuentame sobre",
+        "como se prepara",
+        "cómo se prepara",
+        "que tiene",
+        "qué tiene",
+        "registra que comi ",
+        "registra que comí ",
+        "registra que almorce ",
+        "registra que almorcé ",
+        "registra que desayune ",
+        "registra que desayuné ",
+        "registra que tome ",
+        "registra que tomé ",
         "registra que ",
     ):
         if low.startswith(pref):
-            low = low[len(pref):].strip()
+            low = low[len(pref) :].strip()
             break
     for suf in (
-        " en el almuerzo", " en el desayuno", " en la cena", " en la merienda",
-        " al almuerzo", " al desayuno", " a la cena",
-        " con ingredientes y preparacion", " con ingredientes y preparación",
-        " con ingredientes", " con preparacion", " con preparación",
-        " y preparacion", " y preparación",
+        " en el almuerzo",
+        " en el desayuno",
+        " en la cena",
+        " en la merienda",
+        " al almuerzo",
+        " al desayuno",
+        " a la cena",
+        " con ingredientes y preparacion",
+        " con ingredientes y preparación",
+        " con ingredientes",
+        " con preparacion",
+        " con preparación",
+        " y preparacion",
+        " y preparación",
     ):
         if low.endswith(suf):
             low = low[: -len(suf)].strip()
@@ -1470,7 +1583,7 @@ async def _resolver_y_construir_desde_bd(
     o None si no se pueden resolver ≥2 ingredientes válidos.
     """
     parsed: List[tuple] = []
-    for ing_str in (ingredientes_llm or []):
+    for ing_str in ingredientes_llm or []:
         result = _parse_ing_gramos(str(ing_str))
         if not result:
             continue
@@ -1484,17 +1597,20 @@ async def _resolver_y_construir_desde_bd(
     if len(parsed) < 2:
         logger.debug(
             "[FASE4] _resolver_bd: solo %d ingrediente(s) resueltos en BD para '%s'",
-            len(parsed), nombre_plato,
+            len(parsed),
+            nombre_plato,
         )
         return None
 
     try:
         from app.services.plato_constructor import _validar_compatibilidad_ingredientes
+
         _ok_compat, _mot_compat = _validar_compatibilidad_ingredientes(parsed)
         if not _ok_compat:
             logger.warning(
                 "[FASE4.2] _resolver_bd: '%s' rechazado — %s",
-                nombre_plato, _mot_compat,
+                nombre_plato,
+                _mot_compat,
             )
             return None
     except Exception as _e_compat:
@@ -1513,7 +1629,8 @@ async def _resolver_y_construir_desde_bd(
     if not _ok_atw:
         logger.warning(
             "[FASE4] 0e Atwater gap en '%s': %s — macros BD aceptados",
-            nombre_plato, _mot_atw,
+            nombre_plato,
+            _mot_atw,
         )
 
     ings_str = [
@@ -1526,59 +1643,86 @@ async def _resolver_y_construir_desde_bd(
     ]
 
     return {
-        "calorias":        round(kcal, 1),
-        "proteinas_g":     round(prot, 1),
+        "calorias": round(kcal, 1),
+        "proteinas_g": round(prot, 1),
         "carbohidratos_g": round(carb, 1),
-        "grasas_g":        round(gras, 1),
-        "ingredientes":    ings_str,
-        "_fuente":         "bd_resolucion_directa",
+        "grasas_g": round(gras, 1),
+        "ingredientes": ings_str,
+        "_fuente": "bd_resolucion_directa",
     }
 
 
-_INTENCION_ALTA_PROTEINA: frozenset[str] = frozenset({
-    "alto en proteina", "alta proteina", "mas proteina", "proteina alta",
-    "ganar masa", "masa muscular", "musculo", "hipertrofia",
-    "proteico", "proteica", "subir masa",
-})
-_INTENCION_BAJO_CALORIAS: frozenset[str] = frozenset({
-    "bajo en calorias", "pocas calorias", "ligero", "liviano", "light",
-    "dieta", "bajar de peso", "perder peso", "deficit", "adelgazar",
-    "algo ligero", "poco calorico",
-})
-_INTENCION_RAPIDO: frozenset[str] = frozenset({
-    "rapido", "rapida", "facil", "sencillo", "simple", "sin cocinar",
-    "facil de preparar",
-})
+_INTENCION_ALTA_PROTEINA: frozenset[str] = frozenset(
+    {
+        "alto en proteina",
+        "alta proteina",
+        "mas proteina",
+        "proteina alta",
+        "ganar masa",
+        "masa muscular",
+        "musculo",
+        "hipertrofia",
+        "proteico",
+        "proteica",
+        "subir masa",
+    }
+)
+_INTENCION_BAJO_CALORIAS: frozenset[str] = frozenset(
+    {
+        "bajo en calorias",
+        "pocas calorias",
+        "ligero",
+        "liviano",
+        "light",
+        "dieta",
+        "bajar de peso",
+        "perder peso",
+        "deficit",
+        "adelgazar",
+        "algo ligero",
+        "poco calorico",
+    }
+)
+_INTENCION_RAPIDO: frozenset[str] = frozenset(
+    {
+        "rapido",
+        "rapida",
+        "facil",
+        "sencillo",
+        "simple",
+        "sin cocinar",
+        "facil de preparar",
+    }
+)
 
 _PLATOS_BASE_CONTEXTUAL: Dict[str, Dict[str, str]] = {
     "alto_proteina": {
         "desayuno": "huevos revueltos con avena integral",
         "almuerzo": "pechuga de pollo con arroz y ensalada",
-        "cena":     "pechuga de pollo a la plancha con verduras",
-        "snack":    "atun con galletas integrales",
+        "cena": "pechuga de pollo a la plancha con verduras",
+        "snack": "atun con galletas integrales",
     },
     "bajo_calorias": {
         "desayuno": "avena con platano",
         "almuerzo": "ensalada de pollo con verduras mixtas",
-        "cena":     "sopa de pollo con verduras",
-        "snack":    "manzana con yogurt natural",
+        "cena": "sopa de pollo con verduras",
+        "snack": "manzana con yogurt natural",
     },
     "default": {
         "desayuno": "avena con platano y leche",
         "almuerzo": "arroz con pollo y ensalada verde",
-        "cena":     "sopa de pollo con verduras",
-        "snack":    "fruta fresca con yogurt",
+        "cena": "sopa de pollo con verduras",
+        "snack": "fruta fresca con yogurt",
     },
 }
 
 _PROTEINAS_VARIEDAD_KEYS: Dict[str, List[str]] = {
-    "pollo":    ["pollo", "pechuga", "muslo"],
-    "pescado":  ["pescado", "caballa", "lisa", "mero", "tollo", "salmon",
-                 "trucha", "atun", "bonito", "salpreso"],
-    "res":      ["res", "lomo", "carne", "bistec", "vacuno"],
-    "cerdo":    ["cerdo", "chancho", "tocino"],
+    "pollo": ["pollo", "pechuga", "muslo"],
+    "pescado": ["pescado", "caballa", "lisa", "mero", "tollo", "salmon", "trucha", "atun", "bonito", "salpreso"],
+    "res": ["res", "lomo", "carne", "bistec", "vacuno"],
+    "cerdo": ["cerdo", "chancho", "tocino"],
     "mariscos": ["camaron", "langostino", "pulpo", "calamar"],
-    "huevo":    ["huevo"],
+    "huevo": ["huevo"],
     "legumbre": ["lenteja", "frijol", "garbanzo", "arveja"],
 }
 
@@ -1592,7 +1736,7 @@ def _interpretar_intencion_usuario(mensaje: str) -> Dict[str, Any]:
     return {
         "alto_proteina": any(kw in msg_norm for kw in _INTENCION_ALTA_PROTEINA),
         "bajo_calorias": any(kw in msg_norm for kw in _INTENCION_BAJO_CALORIAS),
-        "rapido":        any(kw in msg_norm for kw in _INTENCION_RAPIDO),
+        "rapido": any(kw in msg_norm for kw in _INTENCION_RAPIDO),
     }
 
 
@@ -1656,19 +1800,20 @@ def _score_plato(
         score += 0.5
 
     from app.core.objetivo_utils import normalizar_objetivo as _norm_obj_score, DEFICIT, SUPERAVIT
+
     _concepto_obj = _norm_obj_score(getattr(perfil, "goal", None))
     if _concepto_obj == DEFICIT:
-        score += (1.0 if kcal < 450 else (-1.0 if kcal > 700 else 0.0))
+        score += 1.0 if kcal < 450 else (-1.0 if kcal > 700 else 0.0)
     elif _concepto_obj == SUPERAVIT:
-        score += (1.0 if kcal > 600 else 0.0)
+        score += 1.0 if kcal > 600 else 0.0
 
     if momento == "cena":
-        score += (-1.5 if kcal > 550 else (0.5 if kcal < 400 else 0.0))
+        score += -1.5 if kcal > 550 else (0.5 if kcal < 400 else 0.0)
     elif momento == "desayuno":
-        score += (-1.0 if kcal > 500 else 0.0)
+        score += -1.0 if kcal > 500 else 0.0
 
     if intencion.get("bajo_calorias"):
-        score += (1.5 if kcal < 400 else (-1.0 if kcal > 600 else 0.0))
+        score += 1.5 if kcal < 400 else (-1.0 if kcal > 600 else 0.0)
 
     if prot > 0 and carb > 0 and gras > 0:
         score += 0.3
@@ -1698,33 +1843,36 @@ async def _fallback_garantizado_bd(
     from sqlalchemy import text as _text
 
     _intencion = intencion or {}
-    _excluir   = [_norm(n) for n in (historial_nombres or []) if n]
+    _excluir = [_norm(n) for n in (historial_nombres or []) if n]
 
     _RANGO_MOMENTO: Dict[str, tuple] = {
-        "desayuno": (200.0,  500.0),
-        "almuerzo": (400.0,  850.0),
-        "cena":     (200.0,  550.0),
-        "snack":    ( 80.0,  300.0),
+        "desayuno": (200.0, 500.0),
+        "almuerzo": (400.0, 850.0),
+        "cena": (200.0, 550.0),
+        "snack": (80.0, 300.0),
     }
     min_k, max_k = _RANGO_MOMENTO.get(momento, (150.0, 1000.0))
-    _goal   = getattr(perfil, "goal", "") or ""
-    _pct    = _obtener_pct_por_objetivo(_goal).get(momento, 0.40)
-    max_k   = min(max_k, _pct * tdee)
+    _goal = getattr(perfil, "goal", "") or ""
+    _pct = _obtener_pct_por_objetivo(_goal).get(momento, 0.40)
+    max_k = min(max_k, _pct * tdee)
     if _intencion.get("alto_proteina"):
         max_k = max(max_k, min(750.0, tdee * 0.45))
 
     try:
-        rows = db.execute(_text(
-            "SELECT p.id, p.nombre,"
-            " SUM(a.calorias_100g * pi2.gramos / 100.0) AS kcal_total"
-            " FROM platos p"
-            " JOIN plato_ingredientes pi2 ON pi2.plato_id = p.id"
-            " JOIN alimentos a ON a.id = pi2.alimento_id"
-            " WHERE p.nombre IS NOT NULL"
-            " GROUP BY p.id, p.nombre"
-            " HAVING SUM(a.calorias_100g * pi2.gramos / 100.0) BETWEEN :min_k AND :max_k"
-            " ORDER BY RANDOM() LIMIT 15"
-        ), {"min_k": min_k, "max_k": max_k}).fetchall()
+        rows = db.execute(
+            _text(
+                "SELECT p.id, p.nombre,"
+                " SUM(a.calorias_100g * pi2.gramos / 100.0) AS kcal_total"
+                " FROM platos p"
+                " JOIN plato_ingredientes pi2 ON pi2.plato_id = p.id"
+                " JOIN alimentos a ON a.id = pi2.alimento_id"
+                " WHERE p.nombre IS NOT NULL"
+                " GROUP BY p.id, p.nombre"
+                " HAVING SUM(a.calorias_100g * pi2.gramos / 100.0) BETWEEN :min_k AND :max_k"
+                " ORDER BY RANDOM() LIMIT 15"
+            ),
+            {"min_k": min_k, "max_k": max_k},
+        ).fetchall()
     except Exception as _e_q:
         logger.error("[FASE4.3] fallback BD query falló: %s", _e_q)
         rows = []
@@ -1741,10 +1889,7 @@ async def _fallback_garantizado_bd(
             continue
 
         _nn_cand = _norm(_nombre)
-        if any(
-            difflib.SequenceMatcher(None, _nn_cand, excl).ratio() > 0.75
-            for excl in _excluir
-        ):
+        if any(difflib.SequenceMatcher(None, _nn_cand, excl).ratio() > 0.75 for excl in _excluir):
             continue
 
         _nn = _norm_nombre_plato(str(_nombre))
@@ -1766,105 +1911,112 @@ async def _fallback_garantizado_bd(
     for _score, plato_data, _nombre, _pid in candidatos:
         if len(fallback_secs) >= 2:
             break
-        _prot_key = _detectar_proteina_plato(
-            _norm(_nombre), plato_data.get("ingredientes") or []
-        )
+        _prot_key = _detectar_proteina_plato(_norm(_nombre), plato_data.get("ingredientes") or [])
         if _prot_key != "otro" and _prot_key in _proteinas_usadas:
             continue
         _proteinas_usadas.add(_prot_key)
 
-        _cid   = str(uuid.uuid4())
-        _kcal  = float(plato_data.get("calorias") or 0)
-        _pay   = {
-            "calorias":        _kcal,
-            "proteinas_g":     float(plato_data.get("proteinas_g") or 0),
+        _cid = str(uuid.uuid4())
+        _kcal = float(plato_data.get("calorias") or 0)
+        _pay = {
+            "calorias": _kcal,
+            "proteinas_g": float(plato_data.get("proteinas_g") or 0),
             "carbohidratos_g": float(plato_data.get("carbohidratos_g") or 0),
-            "grasas_g":        float(plato_data.get("grasas_g") or 0),
-            "nombre":          str(_nombre),
-            "ingredientes":    plato_data.get("ingredientes") or [],
+            "grasas_g": float(plato_data.get("grasas_g") or 0),
+            "nombre": str(_nombre),
+            "ingredientes": plato_data.get("ingredientes") or [],
         }
         set_consulta_cached(_cid, _pay)
         _mac = (
             f"Cal: {_pay['calorias']}kcal | P: {_pay['proteinas_g']}g | "
             f"C: {_pay['carbohidratos_g']}g | G: {_pay['grasas_g']}g"
         )
-        fallback_secs.append({
-            "tipo":                "comida",
-            "nombre":              str(_nombre),
-            "macros":              _mac,
-            "macros_cache":        _mac,
-            "macros_normalizados": {
-                "kcal":            _kcal,
-                "proteinas_g":     _pay["proteinas_g"],
-                "carbohidratos_g": _pay["carbohidratos_g"],
-                "grasas_g":        _pay["grasas_g"],
-            },
-            "ingredientes":        _pay["ingredientes"],
-            "preparacion":         plato_data.get("preparacion") or [],
-            "consulta_id":         _cid,
-            "_fallback_bd":        True,
-        })
+        fallback_secs.append(
+            {
+                "tipo": "comida",
+                "nombre": str(_nombre),
+                "macros": _mac,
+                "macros_cache": _mac,
+                "macros_normalizados": {
+                    "kcal": _kcal,
+                    "proteinas_g": _pay["proteinas_g"],
+                    "carbohidratos_g": _pay["carbohidratos_g"],
+                    "grasas_g": _pay["grasas_g"],
+                },
+                "ingredientes": _pay["ingredientes"],
+                "preparacion": plato_data.get("preparacion") or [],
+                "consulta_id": _cid,
+                "_fallback_bd": True,
+            }
+        )
         logger.info(
             "[FASE4.3] fallback: '%s' (score=%.2f, %.0f kcal, prot=%s)",
-            _nombre, _score, _kcal, _prot_key,
+            _nombre,
+            _score,
+            _kcal,
+            _prot_key,
         )
 
     if not fallback_secs:
         _plato_base = _elegir_plato_base_contextual(_intencion, momento)
         logger.warning(
-            "[FASE4.3] BD vacía (momento=%s, rango=%.0f-%.0f kcal) — "
-            "smart fallback: '%s'",
-            momento, min_k, max_k, _plato_base,
+            "[FASE4.3] BD vacía (momento=%s, rango=%.0f-%.0f kcal) — smart fallback: '%s'",
+            momento,
+            min_k,
+            max_k,
+            _plato_base,
         )
         try:
             from app.services.plato_constructor import crear_plato_dinamico as _cpd
+
             _nuevo = await _cpd(db, _plato_base)
             if _nuevo:
                 _data_b = _buscar_plato_bd_por_nombre(db, _nuevo.nombre_normalizado)
                 if _data_b and float(_data_b.get("calorias") or 0) > 0:
-                    _cid2  = str(uuid.uuid4())
+                    _cid2 = str(uuid.uuid4())
                     _kcal2 = float(_data_b.get("calorias") or 0)
-                    _pay2  = {
-                        "calorias":        _kcal2,
-                        "proteinas_g":     float(_data_b.get("proteinas_g") or 0),
+                    _pay2 = {
+                        "calorias": _kcal2,
+                        "proteinas_g": float(_data_b.get("proteinas_g") or 0),
                         "carbohidratos_g": float(_data_b.get("carbohidratos_g") or 0),
-                        "grasas_g":        float(_data_b.get("grasas_g") or 0),
-                        "nombre":          _nuevo.nombre,
-                        "ingredientes":    _data_b.get("ingredientes") or [],
+                        "grasas_g": float(_data_b.get("grasas_g") or 0),
+                        "nombre": _nuevo.nombre,
+                        "ingredientes": _data_b.get("ingredientes") or [],
                     }
                     set_consulta_cached(_cid2, _pay2)
                     _mac2 = (
                         f"Cal: {_pay2['calorias']}kcal | P: {_pay2['proteinas_g']}g | "
                         f"C: {_pay2['carbohidratos_g']}g | G: {_pay2['grasas_g']}g"
                     )
-                    fallback_secs.append({
-                        "tipo":                "comida",
-                        "nombre":              _nuevo.nombre,
-                        "macros":              _mac2,
-                        "macros_cache":        _mac2,
-                        "macros_normalizados": {
-                            "kcal":            _kcal2,
-                            "proteinas_g":     _pay2["proteinas_g"],
-                            "carbohidratos_g": _pay2["carbohidratos_g"],
-                            "grasas_g":        _pay2["grasas_g"],
-                        },
-                        "ingredientes":        _pay2["ingredientes"],
-                        "preparacion":         _data_b.get("preparacion") or [],
-                        "consulta_id":         _cid2,
-                        "_fallback_bd":        True,
-                        "_smart_fallback":     True,
-                    })
+                    fallback_secs.append(
+                        {
+                            "tipo": "comida",
+                            "nombre": _nuevo.nombre,
+                            "macros": _mac2,
+                            "macros_cache": _mac2,
+                            "macros_normalizados": {
+                                "kcal": _kcal2,
+                                "proteinas_g": _pay2["proteinas_g"],
+                                "carbohidratos_g": _pay2["carbohidratos_g"],
+                                "grasas_g": _pay2["grasas_g"],
+                            },
+                            "ingredientes": _pay2["ingredientes"],
+                            "preparacion": _data_b.get("preparacion") or [],
+                            "consulta_id": _cid2,
+                            "_fallback_bd": True,
+                            "_smart_fallback": True,
+                        }
+                    )
                     logger.info(
                         "[FASE4.3] Smart fallback: '%s' creado (%.0f kcal)",
-                        _nuevo.nombre, _kcal2,
+                        _nuevo.nombre,
+                        _kcal2,
                     )
         except Exception as _e_sf:
             logger.error("[FASE4.3] Smart fallback falló para '%s': %s", _plato_base, _e_sf)
 
     if not fallback_secs:
-        logger.error(
-            "[FASE4.3] Fallback completamente vacío — momento=%s", momento
-        )
+        logger.error("[FASE4.3] Fallback completamente vacío — momento=%s", momento)
     return fallback_secs
 
 
@@ -1900,12 +2052,12 @@ async def procesar_secciones_comida(
     mensaje_original: Optional[str] = None,
 ) -> None:
     """Cachea secciones de comida para consistencia de registro (mutación in-place)."""
-    _perfil_id   = perfil.id
+    _perfil_id = perfil.id
     _perfil_goal = getattr(perfil, "goal", None)
 
     _platos_del_mensaje = _extraer_platos_del_mensaje(mensaje_original or "")
 
-    _tdee_filtro    = _calcular_tdee_perfil(perfil)
+    _tdee_filtro = _calcular_tdee_perfil(perfil)
     _momento_filtro = _inferir_momento_actual()
     _secciones_rechazadas_log: List[str] = []
 
@@ -1997,26 +2149,22 @@ async def procesar_secciones_comida(
         if not macros_parsed and db and len(nombre_norm_pre.split()) >= 2:
             try:
                 from app.services.plato_constructor import crear_plato_dinamico as _cpd
+
                 _plato_nuevo = await _cpd(db, str(nombre_bruto_pre))
                 if _plato_nuevo:
-                    macros_parsed = _buscar_plato_bd_por_nombre(
-                        db, _plato_nuevo.nombre_normalizado
-                    )
+                    macros_parsed = _buscar_plato_bd_por_nombre(db, _plato_nuevo.nombre_normalizado)
             except Exception as _e_cpd:
                 logger.error("[procesar_secciones] crear_plato_dinamico falló para '%s': %s", nombre_bruto_pre, _e_cpd)
 
         if not macros_parsed and db and ing_list:
             try:
-                _bd_resolv = await _resolver_y_construir_desde_bd(
-                    db, str(nombre_bruto_pre), ing_list
-                )
+                _bd_resolv = await _resolver_y_construir_desde_bd(db, str(nombre_bruto_pre), ing_list)
                 if _bd_resolv:
                     macros_parsed = _bd_resolv
                     if _bd_resolv.get("ingredientes"):
                         seccion["ingredientes"] = _bd_resolv["ingredientes"]
                     logger.info(
-                        "[FASE4] 0e: macros desde BD para '%s' → %.0f kcal "
-                        "(%d ingredientes resueltos)",
+                        "[FASE4] 0e: macros desde BD para '%s' → %.0f kcal (%d ingredientes resueltos)",
                         nombre_bruto_pre,
                         _bd_resolv.get("calorias", 0),
                         len(_bd_resolv.get("ingredientes") or []),
@@ -2027,6 +2175,7 @@ async def procesar_secciones_comida(
         if macros_parsed and macros_parsed.get("plato_id") is not None:
             try:
                 from app.services.plato_constructor import validar_semantica_plato as _val_sem
+
                 _ings_bd = macros_parsed.get("ingredientes") or []
                 _ings_nombres = []
                 for _ing_str in _ings_bd:
@@ -2037,7 +2186,9 @@ async def procesar_secciones_comida(
                 if not _ok_bd:
                     logger.warning(
                         "Plato BD id=%s '%s' filtrado por semántica: %s",
-                        macros_parsed["plato_id"], nombre_bruto_pre, _motivo_bd,
+                        macros_parsed["plato_id"],
+                        nombre_bruto_pre,
+                        _motivo_bd,
                     )
                     macros_parsed = None
             except Exception:
@@ -2049,6 +2200,7 @@ async def procesar_secciones_comida(
                     _validar_coherencia_nombre_ingredientes as _val_coh,
                     _norm as _norm_plato,
                 )
+
                 _ings_bd2 = macros_parsed.get("ingredientes") or []
                 _ings_nombres2 = []
                 for _ing_str2 in _ings_bd2:
@@ -2068,9 +2220,11 @@ async def procesar_secciones_comida(
                     logger.debug(
                         "CAMBIO 4: plato BD '%s' con %d ingredientes pero formato no parseable — "
                         "skip coherencia (plato preservado)",
-                        nombre_bruto_pre, len(_ings_bd2),
+                        nombre_bruto_pre,
+                        len(_ings_bd2),
                     )
                 else:
+
                     class _AlimProxy:
                         def __init__(self, nombre: str):
                             self.nombre = nombre
@@ -2081,7 +2235,9 @@ async def procesar_secciones_comida(
                     if not _ok_coh2:
                         logger.warning(
                             "Plato BD id=%s '%s' descartado por incoherencia nombre↔ingredientes: %s",
-                            macros_parsed["plato_id"], nombre_bruto_pre, _motivo_coh2,
+                            macros_parsed["plato_id"],
+                            nombre_bruto_pre,
+                            _motivo_coh2,
                         )
                         macros_parsed = None
 
@@ -2090,12 +2246,14 @@ async def procesar_secciones_comida(
                             from app.services.plato_constructor import (
                                 _validar_ingredientes_en_nombre as _val_ien,
                             )
+
                             _ok_ien, _motivo_ien = _val_ien(_nombre_bd_norm, _resueltos_proxy)
                             if not _ok_ien:
                                 logger.warning(
-                                    "Plato BD id=%s '%s' descartado — nombre menciona "
-                                    "ingredientes ausentes en BD: %s",
-                                    macros_parsed["plato_id"], nombre_bruto_pre, _motivo_ien,
+                                    "Plato BD id=%s '%s' descartado — nombre menciona ingredientes ausentes en BD: %s",
+                                    macros_parsed["plato_id"],
+                                    nombre_bruto_pre,
+                                    _motivo_ien,
                                 )
                                 macros_parsed = None
                         except Exception as _e_ien:
@@ -2106,12 +2264,12 @@ async def procesar_secciones_comida(
                     if _kcal_bd <= 0:
                         logger.warning(
                             "Plato BD id=%s '%s' descartado: kcal=0 — ingredientes sin macros en BD",
-                            macros_parsed["plato_id"], nombre_bruto_pre,
+                            macros_parsed["plato_id"],
+                            nombre_bruto_pre,
                         )
                         macros_parsed = None
             except Exception as _e_coh4:
                 logger.debug("CAMBIO 4 no bloqueante falló para '%s': %s", nombre_bruto_pre, _e_coh4)
-
 
         reciente = None
         if not macros_parsed:
@@ -2137,7 +2295,8 @@ async def procesar_secciones_comida(
                     if not _ok_est:
                         logger.warning(
                             "[LLM macros] '%s' estimación incoherente — %s",
-                            nombre_bruto_pre, _mot_est,
+                            nombre_bruto_pre,
+                            _mot_est,
                         )
         else:
             ing_bd = macros_parsed.get("ingredientes") or []
@@ -2174,10 +2333,10 @@ async def procesar_secciones_comida(
             gras_estimada = cal_suma * 0.25 / 9
             carb_estimada = (cal_suma - (prot_suma * 4) - (gras_estimada * 9)) / 4
             macros_parsed = {
-                "calorias":        round(cal_suma, 1),
-                "proteinas_g":     round(prot_suma, 1),
+                "calorias": round(cal_suma, 1),
+                "proteinas_g": round(prot_suma, 1),
                 "carbohidratos_g": round(max(0, carb_estimada), 1),
-                "grasas_g":        round(gras_estimada, 1),
+                "grasas_g": round(gras_estimada, 1),
             }
         elif not macros_parsed:
             macros_parsed = {
@@ -2195,9 +2354,7 @@ async def procesar_secciones_comida(
         if (not reciente) and (not _viene_de_bd) and cal_m > 30:
             missing = sum(1 for v in (p, c, g) if v <= 0.0)
             if missing >= 1 and (p > 0.0 or c > 0.0 or g > 0.0):
-                est = macros_desde_calorias_pct_clasico(
-                    cal_m, _perfil_goal
-                )
+                est = macros_desde_calorias_pct_clasico(cal_m, _perfil_goal)
                 p2 = p if p > 0 else float(est["proteinas_g"])
                 c2 = c if c > 0 else float(est["carbohidratos_g"])
                 g2 = g if g > 0 else float(est["grasas_g"])
@@ -2230,9 +2387,7 @@ async def procesar_secciones_comida(
                         "grasas_g": round(max(0.0, g * sc), 1),
                     }
                 else:
-                    est = macros_desde_calorias_pct_clasico(
-                        ref_cal, _perfil_goal
-                    )
+                    est = macros_desde_calorias_pct_clasico(ref_cal, _perfil_goal)
                     macros_parsed = {
                         "calorias": round(ref_cal, 1),
                         "proteinas_g": round(est["proteinas_g"], 1),
@@ -2250,9 +2405,7 @@ async def procesar_secciones_comida(
             and abs(cal_suma - cal_fin) / max(cal_suma, cal_fin, 1.0) <= 0.1
             and prot_suma < 5.0
         ):
-            est = macros_desde_calorias_pct_clasico(
-                cal_suma, _perfil_goal
-            )
+            est = macros_desde_calorias_pct_clasico(cal_suma, _perfil_goal)
             macros_parsed = {
                 "calorias": round(cal_suma, 1),
                 "proteinas_g": round(est["proteinas_g"], 1),
@@ -2273,18 +2426,16 @@ async def procesar_secciones_comida(
             ing_con_gramos = []
             for i in ing_raw:
                 try:
-                    ing_con_gramos.append(
-                        await _recalcular_ing_async(db, str(i))
-                    )
+                    ing_con_gramos.append(await _recalcular_ing_async(db, str(i)))
                 except Exception:
                     ing_con_gramos.append(_agregar_equivalencia_gramos(str(i)))
 
         seccion["ingredientes"] = ing_con_gramos
 
-        _kcal_final   = float(macros_parsed.get("calorias") or 0)
-        _prot_final   = float(macros_parsed.get("proteinas_g") or 0)
-        _carb_final   = float(macros_parsed.get("carbohidratos_g") or 0)
-        _gras_final   = float(macros_parsed.get("grasas_g") or 0)
+        _kcal_final = float(macros_parsed.get("calorias") or 0)
+        _prot_final = float(macros_parsed.get("proteinas_g") or 0)
+        _carb_final = float(macros_parsed.get("carbohidratos_g") or 0)
+        _gras_final = float(macros_parsed.get("grasas_g") or 0)
 
         if not _viene_de_bd and ing_con_gramos:
             _sum_kcal = 0.0
@@ -2313,20 +2464,21 @@ async def procesar_secciones_comida(
             if _rechazar:
                 logger.warning(
                     "[filtro_kcal] '%s' descartado — %s (tdee=%.0f)",
-                    seccion.get("nombre") or "?", _motivo_kcal, _tdee_filtro,
+                    seccion.get("nombre") or "?",
+                    _motivo_kcal,
+                    _tdee_filtro,
                 )
                 _secciones_rechazadas_log.append(seccion.get("nombre") or "?")
                 seccion["_rechazar"] = True
                 continue
 
             _nombre_check = _norm(str(seccion.get("nombre") or ""))
-            _rechazar_sem, _motivo_sem_momento = _validar_momento_semantico(
-                _nombre_check, _momento_filtro or ""
-            )
+            _rechazar_sem, _motivo_sem_momento = _validar_momento_semantico(_nombre_check, _momento_filtro or "")
             if _rechazar_sem:
                 logger.warning(
                     "[filtro_momento] '%s' descartado — %s",
-                    seccion.get("nombre") or "?", _motivo_sem_momento,
+                    seccion.get("nombre") or "?",
+                    _motivo_sem_momento,
                 )
                 _secciones_rechazadas_log.append(seccion.get("nombre") or "?")
                 seccion["_rechazar"] = True
@@ -2334,21 +2486,18 @@ async def procesar_secciones_comida(
 
         consulta_id = str(uuid.uuid4())
         payload = {
-            "calorias":        _kcal_final,
-            "proteinas_g":     _prot_final,
+            "calorias": _kcal_final,
+            "proteinas_g": _prot_final,
             "carbohidratos_g": _carb_final,
-            "grasas_g":        _gras_final,
-            "nombre":          nombre_limpio,
-            "ingredientes":    ing_con_gramos,
+            "grasas_g": _gras_final,
+            "nombre": nombre_limpio,
+            "ingredientes": ing_con_gramos,
         }
         set_consulta_cached(consulta_id, payload)
         seccion["consulta_id"] = consulta_id
 
         if mensaje_original:
-            _nom_pal = [
-                w for w in _norm_nombre_plato(nombre_limpio).split()
-                if len(w) > 3
-            ]
+            _nom_pal = [w for w in _norm_nombre_plato(nombre_limpio).split() if len(w) > 3]
             if any(w in (mensaje_original or "").lower() for w in _nom_pal):
                 seccion["_origen_usuario"] = True
         macros_canon = (
@@ -2358,24 +2507,25 @@ async def procesar_secciones_comida(
         seccion["macros"] = macros_canon
         seccion["macros_cache"] = macros_canon
         seccion["macros_normalizados"] = {
-            "kcal":            _kcal_final,
-            "proteinas_g":     _prot_final,
+            "kcal": _kcal_final,
+            "proteinas_g": _prot_final,
             "carbohidratos_g": _carb_final,
-            "grasas_g":        _gras_final,
+            "grasas_g": _gras_final,
         }
         if _kcal_final > 0 and nombre_limpio:
             try:
                 from app.core.cache import set_cached
                 from unicodedata import normalize as _unorm
                 import unicodedata as _ud
+
                 _nom_reco = _unorm("NFC", nombre_limpio.lower().strip())
                 _cache_key = f"reco_macros:{_perfil_id}:{_nom_reco}"
                 _cache_val = {
-                    "calorias":        round(_kcal_final, 1),
-                    "proteinas_g":     round(_prot_final, 1),
+                    "calorias": round(_kcal_final, 1),
+                    "proteinas_g": round(_prot_final, 1),
                     "carbohidratos_g": round(_carb_final, 1),
-                    "grasas_g":        round(_gras_final, 1),
-                    "nombre":          nombre_limpio,
+                    "grasas_g": round(_gras_final, 1),
+                    "nombre": nombre_limpio,
                 }
                 set_cached(_cache_key, _cache_val, ttl_seconds=86400)
                 logger.info("[reco_macros] SET key='%s' kcal=%.1f", _cache_key, _kcal_final)
@@ -2391,16 +2541,14 @@ async def procesar_secciones_comida(
 
                 nombre_norm_bd = _norm_nombre_plato(nombre_limpio)
 
-                plato_obj = (
-                    db.query(Plato)
-                    .filter(Plato.nombre_normalizado == nombre_norm_bd)
-                    .first()
-                )
+                plato_obj = db.query(Plato).filter(Plato.nombre_normalizado == nombre_norm_bd).first()
 
                 if not plato_obj:
                     ing_list = seccion.get("ingredientes") or []
-                    ing_ok   = isinstance(ing_list, list) and len(ing_list) >= 2
-                    prep_ok  = isinstance(seccion.get("preparacion"), list) and len(seccion.get("preparacion") or []) >= 2
+                    ing_ok = isinstance(ing_list, list) and len(ing_list) >= 2
+                    prep_ok = (
+                        isinstance(seccion.get("preparacion"), list) and len(seccion.get("preparacion") or []) >= 2
+                    )
                     macros_ok = (
                         float(payload["calorias"] or 0) > 0
                         and float(payload["proteinas_g"] or 0) > 0
@@ -2408,7 +2556,7 @@ async def procesar_secciones_comida(
                         and float(payload["grasas_g"] or 0) > 0
                     )
                     _nombre_low = nombre_limpio.lower()
-                    _ings_low   = " ".join(str(i) for i in ing_list).lower()
+                    _ings_low = " ".join(str(i) for i in ing_list).lower()
                     _prot_ok = True
                     if any(w in _nombre_low for w in ("pescado", "salmón", "salmon", "atún", "atun", "tilapia")):
                         if any(w in _ings_low for w in ("pechuga", "pollo", "pavo", "carne de res", "cerdo")):
@@ -2433,26 +2581,30 @@ async def procesar_secciones_comida(
                         comps_bd, _ = await _construir_componentes_bd_async(db, ing_list)
                         if comps_bd:
                             for orden_i, comp in enumerate(comps_bd, start=1):
-                                db.add(PlatoIngrediente(
-                                    plato_id    = plato_obj.id,
-                                    alimento_id = comp["alimento_id"],
-                                    gramos      = comp["gramos"],
-                                    orden       = orden_i,
-                                ))
+                                db.add(
+                                    PlatoIngrediente(
+                                        plato_id=plato_obj.id,
+                                        alimento_id=comp["alimento_id"],
+                                        gramos=comp["gramos"],
+                                        orden=orden_i,
+                                    )
+                                )
 
                 momento = _momento_filtro
 
-                db.add(HistorialRecomendacion(
-                    client_id       = _perfil_id,
-                    plato_id        = plato_obj.id if plato_obj else None,
-                    nombre_plato    = nombre_limpio[:255],
-                    calorias        = float(payload["calorias"] or 0),
-                    proteinas_g     = float(payload["proteinas_g"] or 0),
-                    carbohidratos_g = float(payload["carbohidratos_g"] or 0),
-                    grasas_g        = float(payload["grasas_g"] or 0),
-                    momento_dia     = momento,
-                    fue_consumido   = False,
-                ))
+                db.add(
+                    HistorialRecomendacion(
+                        client_id=_perfil_id,
+                        plato_id=plato_obj.id if plato_obj else None,
+                        nombre_plato=nombre_limpio[:255],
+                        calorias=float(payload["calorias"] or 0),
+                        proteinas_g=float(payload["proteinas_g"] or 0),
+                        carbohidratos_g=float(payload["carbohidratos_g"] or 0),
+                        grasas_g=float(payload["grasas_g"] or 0),
+                        momento_dia=momento,
+                        fue_consumido=False,
+                    )
+                )
                 db.commit()
             except Exception:
                 try:
@@ -2462,35 +2614,36 @@ async def procesar_secciones_comida(
 
     if _secciones_rechazadas_log:
         respuesta_estructurada["secciones"] = [
-            s for s in respuesta_estructurada.get("secciones", [])
-            if not s.get("_rechazar")
+            s for s in respuesta_estructurada.get("secciones", []) if not s.get("_rechazar")
         ]
         logger.info(
             "[filtro_kcal] %d sección(es) eliminada(s): %s",
-            len(_secciones_rechazadas_log), _secciones_rechazadas_log,
+            len(_secciones_rechazadas_log),
+            _secciones_rechazadas_log,
         )
 
     _modo = respuesta_estructurada.get("modo_funcion", "")
     if _modo != "recomendar_nutricion":
         _secciones_validas = [
-            s for s in respuesta_estructurada.get("secciones", [])
+            s
+            for s in respuesta_estructurada.get("secciones", [])
             if s.get("tipo") == "comida" and s.get("macros_normalizados")
         ]
 
         if len(_secciones_validas) > 1:
             _pct_map_global = _obtener_pct_por_objetivo(_perfil_goal or "")
             _pct_max_global = _pct_map_global.get(_momento_filtro, 0.40)
-            _limite_global  = _pct_max_global * _tdee_filtro
-            _total_kcal     = sum(
-                float(s.get("macros_normalizados", {}).get("kcal") or 0)
-                for s in _secciones_validas
-            )
+            _limite_global = _pct_max_global * _tdee_filtro
+            _total_kcal = sum(float(s.get("macros_normalizados", {}).get("kcal") or 0) for s in _secciones_validas)
 
             logger.info(
-                "[filtro_global] momento=%s total=%.0f kcal límite=%.0f kcal "
-                "(%.0f%% TDEE=%.0f) objetivo='%s'",
-                _momento_filtro, _total_kcal, _limite_global,
-                _pct_max_global * 100, _tdee_filtro, _perfil_goal or "mantener",
+                "[filtro_global] momento=%s total=%.0f kcal límite=%.0f kcal (%.0f%% TDEE=%.0f) objetivo='%s'",
+                _momento_filtro,
+                _total_kcal,
+                _limite_global,
+                _pct_max_global * 100,
+                _tdee_filtro,
+                _perfil_goal or "mantener",
             )
 
             if _total_kcal > _limite_global and len(_secciones_validas) > 1:
@@ -2503,7 +2656,8 @@ async def procesar_secciones_comida(
                 logger.warning(
                     "[filtro_global] total %.0f kcal > límite %.0f → eliminado '%s' "
                     "(%.0f kcal, %.0f%% del total, momento=%s)",
-                    _total_kcal, _limite_global,
+                    _total_kcal,
+                    _limite_global,
                     _elim.get("nombre") or "?",
                     _kcal_elim,
                     (_kcal_elim / _total_kcal * 100) if _total_kcal > 0 else 0,
@@ -2524,13 +2678,14 @@ async def procesar_secciones_comida(
                             _kcal_s / _total_kcal * 100,
                             _total_kcal,
                             _momento_filtro,
-                    )
+                        )
                     _secciones_validas.remove(_s)
                     break
             respuesta_estructurada["secciones"] = _secciones_validas
 
     _comidas_con_datos = [
-        s for s in respuesta_estructurada.get("secciones", [])
+        s
+        for s in respuesta_estructurada.get("secciones", [])
         if s.get("tipo") == "comida"
         and not s.get("_rechazar")
         and float((s.get("macros_normalizados") or {}).get("kcal") or 0) > 0
@@ -2538,22 +2693,25 @@ async def procesar_secciones_comida(
     _modo = respuesta_estructurada.get("modo_funcion", "")
     if not _comidas_con_datos and db and _modo == "recomendar_nutricion":
         logger.warning(
-            "[FASE4] Todas las comidas rechazadas o kcal=0 — "
-            "activando fallback garantizado (momento=%s, tdee=%.0f)",
-            _momento_filtro, _tdee_filtro,
+            "[FASE4] Todas las comidas rechazadas o kcal=0 — activando fallback garantizado (momento=%s, tdee=%.0f)",
+            _momento_filtro,
+            _tdee_filtro,
         )
         try:
             _fb_secs = await _fallback_garantizado_bd(
-                db, perfil, _momento_filtro, _tdee_filtro,
+                db,
+                perfil,
+                _momento_filtro,
+                _tdee_filtro,
                 intencion=_intencion_usuario,
                 historial_nombres=_secciones_rechazadas_log,
             )
             if _fb_secs:
                 respuesta_estructurada["secciones"].extend(_fb_secs)
                 logger.info(
-                    "[FASE4.3] Fallback garantizado: %d plato(s) seleccionados "
-                    "(intencion=%s)",
-                    len(_fb_secs), _intencion_usuario,
+                    "[FASE4.3] Fallback garantizado: %d plato(s) seleccionados (intencion=%s)",
+                    len(_fb_secs),
+                    _intencion_usuario,
                 )
             else:
                 logger.error(
@@ -2564,27 +2722,28 @@ async def procesar_secciones_comida(
             logger.error("[FASE4.3] Fallback garantizado falló: %s", _e_fb)
 
     _secs_comida_ok = [
-        s for s in respuesta_estructurada.get("secciones", [])
-        if s.get("tipo") == "comida" and not s.get("_rechazar")
+        s
+        for s in respuesta_estructurada.get("secciones", [])
+        if s.get("tipo") == "comida"
+        and not s.get("_rechazar")
         and float((s.get("macros_normalizados") or {}).get("kcal") or 0) > 0
     ]
     if len(_secs_comida_ok) > 1:
         _secs_comida_ok.sort(
             key=lambda s: _score_plato(
                 {
-                    "calorias":        float((s.get("macros_normalizados") or {}).get("kcal") or 0),
-                    "proteinas_g":     float((s.get("macros_normalizados") or {}).get("proteinas_g") or 0),
+                    "calorias": float((s.get("macros_normalizados") or {}).get("kcal") or 0),
+                    "proteinas_g": float((s.get("macros_normalizados") or {}).get("proteinas_g") or 0),
                     "carbohidratos_g": float((s.get("macros_normalizados") or {}).get("carbohidratos_g") or 0),
-                    "grasas_g":        float((s.get("macros_normalizados") or {}).get("grasas_g") or 0),
+                    "grasas_g": float((s.get("macros_normalizados") or {}).get("grasas_g") or 0),
                 },
-                perfil, _intencion_usuario, _momento_filtro,
+                perfil,
+                _intencion_usuario,
+                _momento_filtro,
             ),
             reverse=True,
         )
-        _otras_secs = [
-            s for s in respuesta_estructurada.get("secciones", [])
-            if s.get("tipo") != "comida"
-        ]
+        _otras_secs = [s for s in respuesta_estructurada.get("secciones", []) if s.get("tipo") != "comida"]
         respuesta_estructurada["secciones"] = _otras_secs + _secs_comida_ok
 
     _postprocesar_secciones(respuesta_estructurada)
@@ -2610,10 +2769,26 @@ def fuzzy_match_comidas_recientes(mensaje: str, perfil: Any) -> Optional[Dict[st
 
     msg_limpio = msg_texto
     for ruido in [
-        "registra que me ", "registra que ", "registra me ", "registra ",
-        "comí ", "comi ", "cómo ", "como ", "cené ", "almorcé ", "desayuné ",
-        "cene ", "almorce ", "desayune ", "he comido ", "he cenado ",
-        "un ", "una ", "unos ", "unas ",
+        "registra que me ",
+        "registra que ",
+        "registra me ",
+        "registra ",
+        "comí ",
+        "comi ",
+        "cómo ",
+        "como ",
+        "cené ",
+        "almorcé ",
+        "desayuné ",
+        "cene ",
+        "almorce ",
+        "desayune ",
+        "he comido ",
+        "he cenado ",
+        "un ",
+        "una ",
+        "unos ",
+        "unas ",
     ]:
         msg_limpio = msg_limpio.replace(ruido, "")
     msg_limpio = msg_limpio.strip()
@@ -2738,9 +2913,7 @@ def aplicar_extraccion_nlp_comida_a_progreso(extraccion: Dict[str, Any], progres
         return
     calorias = extraccion.get("calorias", 0) or 0
     progreso.calorias_consumidas = (progreso.calorias_consumidas or 0) + calorias
-    progreso.proteinas_consumidas = (progreso.proteinas_consumidas or 0) + (
-        extraccion.get("proteinas_g", 0) or 0
-    )
+    progreso.proteinas_consumidas = (progreso.proteinas_consumidas or 0) + (extraccion.get("proteinas_g", 0) or 0)
     progreso.carbohidratos_consumidos = (progreso.carbohidratos_consumidos or 0) + (
         extraccion.get("carbohidratos_g", 0) or 0
     )
@@ -2754,6 +2927,7 @@ _RE_VERBO_INGESTA = re.compile(
     r"(?:un(?:a)?\s+|el\s+|la\s+|los\s+|las\s+|unos?\s+|unas?\s+)?",
     re.IGNORECASE | re.UNICODE,
 )
+
 
 def _limpiar_nombre_alimento(nombre: str) -> str:
     """Elimina verbos de ingesta al inicio: 'tomé un jugo' → 'jugo'."""

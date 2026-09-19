@@ -2,6 +2,7 @@
 Configuración global de pytest y fixtures.
 Auto-detecta entorno Docker o local.
 """
+
 import os
 import pytest
 from datetime import datetime
@@ -49,6 +50,7 @@ def test_engine(test_db_url):
         _conn_ext.commit()
 
     import app.models
+
     Base.metadata.create_all(bind=engine)
     logger.info("[TEST] Tablas creadas correctamente.")
 
@@ -63,6 +65,7 @@ def test_engine(test_db_url):
 def TestingSessionLocal(test_engine):
     """Sessionmaker vinculado al engine de test."""
     from sqlalchemy.orm import sessionmaker
+
     return sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
 
@@ -92,6 +95,7 @@ def _limpiar_macro_cache():
     que el resultado dependa del ORDEN de ejecución de la suite. Se limpia
     antes y después de cada test para que cada uno empiece en blanco."""
     from app.services.llm_registro import _macro_cache
+
     _macro_cache.clear()
     yield
     _macro_cache.clear()
@@ -101,6 +105,7 @@ def _limpiar_macro_cache():
 def sample_role(db):
     """Crea rol de prueba."""
     from app.models import Role
+
     role = Role(name="Nutricionista", description="Nutricionista de prueba")
     db.add(role)
     db.commit()
@@ -112,6 +117,7 @@ def sample_role(db):
 def sample_user(db, sample_role):
     """Crea usuario de prueba."""
     from app.models import User
+
     user = User(
         first_name="Test",
         last_name_paternal="User",
@@ -132,6 +138,7 @@ def sample_user(db, sample_role):
 def sample_client(db):
     """Crea cliente de prueba."""
     from app.models import Client
+
     client = Client(
         first_name="Cliente",
         last_name_paternal="Test",
@@ -158,6 +165,7 @@ def sample_client(db):
 def sample_alimentos(db):
     """Crea ingredientes de prueba."""
     from app.models import Alimento
+
     alimentos = [
         Alimento(
             nombre="Arroz blanco cocido",
@@ -207,6 +215,7 @@ def sample_alimentos(db):
 def sample_plato(db, sample_alimentos):
     """Crea plato de prueba con ingredientes."""
     from app.models import Plato, PlatoIngrediente
+
     plato = Plato(
         nombre="Arroz con pollo y brocoli",
         nombre_normalizado="arroz con pollo y brocoli",
@@ -235,6 +244,7 @@ def sample_plato(db, sample_alimentos):
 def sample_ejercicios(db):
     """Crea ejercicios de prueba."""
     from app.models import Ejercicio
+
     ejercicios = [
         Ejercicio(
             nombre="Sentadilla",
@@ -275,6 +285,7 @@ def sample_ejercicios(db):
 def sample_meta_usuario(db, sample_client):
     """Crea meta nutricional de prueba."""
     from app.models import MetaUsuario
+
     meta = MetaUsuario(
         client_id=sample_client.id,
         genero="M",
@@ -299,6 +310,7 @@ def sample_meta_usuario(db, sample_client):
 @pytest.fixture
 def mock_llm_service():
     """Mock de LLMService para tests sin IA real."""
+
     class MockLLMService:
         def generar_propuesta_plato(self, contexto, cantidad=3):
             return [
@@ -327,6 +339,7 @@ def mock_llm_service():
 @pytest.fixture
 def mock_usda_client():
     """Mock de USDA Client (siempre retorna None → fallback a BD)."""
+
     class MockUSDAClient:
         def buscar_alimento(self, nombre):
             return None
@@ -340,6 +353,7 @@ def mock_usda_client():
 @pytest.fixture
 def mock_fatsecret_client():
     """Mock de FatSecret Client (siempre retorna None → fallback a BD)."""
+
     class MockFatSecretClient:
         def buscar_alimento(self, nombre):
             return None

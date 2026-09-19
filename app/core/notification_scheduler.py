@@ -32,7 +32,7 @@ def notificar_si_excede_meta(cliente: Client, progreso, meta: float, quemado: fl
         return
 
     consumidas = float(progreso.calorias_consumidas or 0)
-    quemadas   = float(quemado) if quemado is not None else float(progreso.calorias_quemadas or 0)
+    quemadas = float(quemado) if quemado is not None else float(progreso.calorias_quemadas or 0)
     disponible = meta + quemadas
     if consumidas <= disponible:
         return
@@ -51,8 +51,10 @@ def notificar_si_excede_meta(cliente: Client, progreso, meta: float, quemado: fl
         progreso.alerta_exceso_enviada = True
         logger.info(
             "Alerta de exceso calórico enviada a client_id=%s (+%s kcal)",
-            cliente.id, exceso,
+            cliente.id,
+            exceso,
         )
+
 
 _FRASES_MOTIVACIONALES = [
     "Cada comida que registras es un paso más cerca de tu meta. ¡Vamos! 💪",
@@ -79,10 +81,12 @@ _FRASES_MOTIVACIONALES = [
 def _racha_actual(cliente_id: int, hoy, db) -> int:
     """Días consecutivos con registro hasta ayer (hoy aún no registró)."""
     from datetime import timedelta as _td
+
     fechas = sorted(
-        {r.fecha for r in db.query(ComidaRegistro.fecha)
-         .filter(ComidaRegistro.client_id == cliente_id)
-         .distinct().all()},
+        {
+            r.fecha
+            for r in db.query(ComidaRegistro.fecha).filter(ComidaRegistro.client_id == cliente_id).distinct().all()
+        },
         reverse=True,
     )
     racha = 0
@@ -108,10 +112,7 @@ def revisar_clientes_sin_registro():
         hoy = get_peru_date()
 
         clientes = (
-            db.query(Client)
-            .filter(Client.fcm_token.isnot(None))
-            .filter(Client.notificaciones_activas.is_(True))
-            .all()
+            db.query(Client).filter(Client.fcm_token.isnot(None)).filter(Client.notificaciones_activas.is_(True)).all()
         )
 
         for cliente in clientes:
@@ -127,15 +128,18 @@ def revisar_clientes_sin_registro():
             racha = _racha_actual(cliente.id, hoy, db)
             if racha >= 2:
                 title = f"🔥 Tu racha de {racha} días está en riesgo"
-                body  = "Registra algo hoy antes de que termine el día para no perderla."
-                tipo  = "alerta_racha"
+                body = "Registra algo hoy antes de que termine el día para no perderla."
+                tipo = "alerta_racha"
             else:
                 title = "¿Ya registraste tu alimentación de hoy?"
-                body  = "No olvides registrar tus comidas para mantener tu progreso en CaloFit 💪"
-                tipo  = "recordatorio_diario"
+                body = "No olvides registrar tus comidas para mantener tu progreso en CaloFit 💪"
+                tipo = "recordatorio_diario"
 
             enviado = send_push_notification(
-                token=cliente.fcm_token, title=title, body=body, data={"tipo": tipo},
+                token=cliente.fcm_token,
+                title=title,
+                body=body,
+                data={"tipo": tipo},
             )
             if enviado:
                 logger.info("Recordatorio diario (%s) enviado a client_id=%s", tipo, cliente.id)
@@ -155,10 +159,7 @@ def enviar_motivacion_diaria():
     db = SessionLocal()
     try:
         clientes = (
-            db.query(Client)
-            .filter(Client.fcm_token.isnot(None))
-            .filter(Client.notificaciones_activas.is_(True))
-            .all()
+            db.query(Client).filter(Client.fcm_token.isnot(None)).filter(Client.notificaciones_activas.is_(True)).all()
         )
 
         frase = random.choice(_FRASES_MOTIVACIONALES)
@@ -193,7 +194,6 @@ def iniciar_scheduler() -> BackgroundScheduler:
     )
     scheduler.start()
     logger.info(
-        "Scheduler de notificaciones iniciado (motivación 8:00, "
-        "recordatorio de registro / racha 20:30, hora Perú)."
+        "Scheduler de notificaciones iniciado (motivación 8:00, recordatorio de registro / racha 20:30, hora Perú)."
     )
     return scheduler

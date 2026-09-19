@@ -5,6 +5,7 @@ AppCacheAlimentos tiene: food_normalized, user_id, alimento_id, source,
 raw_response (TEXT), hit_count, expires_at, created_at.
 Los macros se serializan como JSON en raw_response.
 """
+
 import json
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
@@ -40,10 +41,14 @@ class CacheManager:
             Dict con claves calorias_100g, proteina_100g, … o None si expiró/no existe.
         """
         try:
-            entry = self.db.query(AppCacheAlimentos).filter(
-                AppCacheAlimentos.food_normalized == food_normalized.lower().strip(),
-                AppCacheAlimentos.user_id == user_id,
-            ).first()
+            entry = (
+                self.db.query(AppCacheAlimentos)
+                .filter(
+                    AppCacheAlimentos.food_normalized == food_normalized.lower().strip(),
+                    AppCacheAlimentos.user_id == user_id,
+                )
+                .first()
+            )
 
             if not entry:
                 return None
@@ -90,10 +95,14 @@ class CacheManager:
             expires = datetime.now(timezone.utc) + timedelta(days=self.CACHE_EXPIRY_DAYS)
             norm = food_normalized.lower().strip()
 
-            existing = self.db.query(AppCacheAlimentos).filter(
-                AppCacheAlimentos.food_normalized == norm,
-                AppCacheAlimentos.user_id == user_id,
-            ).first()
+            existing = (
+                self.db.query(AppCacheAlimentos)
+                .filter(
+                    AppCacheAlimentos.food_normalized == norm,
+                    AppCacheAlimentos.user_id == user_id,
+                )
+                .first()
+            )
 
             if existing:
                 existing.raw_response = payload
@@ -138,9 +147,7 @@ class CacheManager:
     def limpiar_cache_expirado(self, user_id: Optional[int] = None) -> int:
         """Elimina entradas expiradas."""
         try:
-            q = self.db.query(AppCacheAlimentos).filter(
-                AppCacheAlimentos.expires_at < datetime.now(timezone.utc)
-            )
+            q = self.db.query(AppCacheAlimentos).filter(AppCacheAlimentos.expires_at < datetime.now(timezone.utc))
             if user_id:
                 q = q.filter(AppCacheAlimentos.user_id == user_id)
             count = q.delete()

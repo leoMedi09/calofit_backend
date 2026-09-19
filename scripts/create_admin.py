@@ -5,8 +5,10 @@ from passlib.context import CryptContext
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
+
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
+
 
 def main():
     db_url = os.getenv("DATABASE_URL")
@@ -15,7 +17,7 @@ def main():
         sys.exit(1)
 
     print(f"🔌 Conectando a la base de datos...")
-    
+
     try:
         engine = create_engine(db_url, pool_pre_ping=True)
     except Exception as e:
@@ -34,25 +36,19 @@ def main():
                 (1, "admin", "Acceso total al sistema"),
                 (2, "coach", "Gestión de entrenamientos"),
                 (3, "nutritionist", "Gestión de dietas y nutrición"),
-                (4, "client", "Cliente del gimnasio")
+                (4, "client", "Cliente del gimnasio"),
             ]
             for r_id, r_name, r_desc in roles:
-                res = conn.execute(
-                    text("SELECT id FROM roles WHERE id = :rid"),
-                    {"rid": r_id}
-                ).fetchone()
+                res = conn.execute(text("SELECT id FROM roles WHERE id = :rid"), {"rid": r_id}).fetchone()
                 if not res:
                     print(f"   ➕ Creando rol: {r_name} (ID: {r_id})")
                     conn.execute(
                         text("INSERT INTO roles (id, name, description) VALUES (:rid, :rname, :rdesc)"),
-                        {"rid": r_id, "rname": r_name, "rdesc": r_desc}
+                        {"rid": r_id, "rname": r_name, "rdesc": r_desc},
                     )
-            
+
             print(f"🔍 Buscando usuario administrador '{admin_email}'...")
-            user = conn.execute(
-                text("SELECT id FROM users WHERE email = :email"),
-                {"email": admin_email}
-            ).fetchone()
+            user = conn.execute(text("SELECT id FROM users WHERE email = :email"), {"email": admin_email}).fetchone()
 
             if user:
                 print("   🔄 El usuario existe. Restableciendo contraseña y asegurando rol de administrador...")
@@ -73,8 +69,8 @@ def main():
                         "paternal": "Medina",
                         "maternal": "",
                         "hash": hashed_pwd,
-                        "email": admin_email
-                    }
+                        "email": admin_email,
+                    },
                 )
                 print("   ✅ Contraseña del administrador restablecida con éxito.")
             else:
@@ -89,8 +85,8 @@ def main():
                         "paternal": "Medina",
                         "maternal": "",
                         "email": admin_email,
-                        "hash": hashed_pwd
-                    }
+                        "hash": hashed_pwd,
+                    },
                 )
                 print("   ✅ Usuario administrador creado con éxito.")
 
@@ -100,11 +96,12 @@ def main():
             print(f"🔑 Contraseña establecida: {admin_password}")
             print(f"👉 Rol: admin (ID: 1)")
             print(f"⚠️ ¡Recuerda cambiar la contraseña después de loguearte por seguridad!")
-            
+
         except Exception as e:
             trans.rollback()
             print(f"❌ Error durante la operación en la base de datos: {e}")
             sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

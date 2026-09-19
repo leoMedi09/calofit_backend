@@ -4,6 +4,7 @@ Modelo de resultado nutricional con estado, confianza y modo de resolución.
 Usado por plato_constructor.py para reportar la calidad del plato construido,
 y como vocabulario compartido para trazabilidad en el pipeline de 5 capas.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -11,33 +12,56 @@ from typing import Literal, Optional
 
 
 KCAL_RANGES: dict[str, tuple[int, int]] = {
-    "cebiche":            (150,  450),
-    "tiradito":           (150,  400),
-    "causa ferreñafana":  (400,  650),
-    "arroz con pato":     (700, 1000),
-    "jalea":              (500,  900),
-    "ensalada":           ( 80,  450),
-    "sopa":               (100,  400),
-    "snack":              ( 80,  300),
-    "merienda":           ( 80,  300),
-    "desayuno":           (300,  600),
-    "almuerzo":           (600, 1000),
-    "cena":               (300,  600),
-    "default":            ( 80, 1100),
+    "cebiche": (150, 450),
+    "tiradito": (150, 400),
+    "causa ferreñafana": (400, 650),
+    "arroz con pato": (700, 1000),
+    "jalea": (500, 900),
+    "ensalada": (80, 450),
+    "sopa": (100, 400),
+    "snack": (80, 300),
+    "merienda": (80, 300),
+    "desayuno": (300, 600),
+    "almuerzo": (600, 1000),
+    "cena": (300, 600),
+    "default": (80, 1100),
 }
 
-_PROTEIN_KEYWORDS: frozenset[str] = frozenset({
-    "pollo", "res", "carne", "cerdo", "chancho", "pato", "cabrito",
-    "pavo", "cordero", "pescado", "atun", "atún", "salmon", "salmón",
-    "caballa", "trucha", "lenguado", "salpreso", "camarones", "langostino",
-    "pulpo", "calamar", "jalea", "chicharron", "chicharrón",
-})
+_PROTEIN_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "pollo",
+        "res",
+        "carne",
+        "cerdo",
+        "chancho",
+        "pato",
+        "cabrito",
+        "pavo",
+        "cordero",
+        "pescado",
+        "atun",
+        "atún",
+        "salmon",
+        "salmón",
+        "caballa",
+        "trucha",
+        "lenguado",
+        "salpreso",
+        "camarones",
+        "langostino",
+        "pulpo",
+        "calamar",
+        "jalea",
+        "chicharron",
+        "chicharrón",
+    }
+)
 
 _FUENTE_SCORE: dict[str, float] = {
-    "USDA (auto-aprendido)":      0.8,
+    "USDA (auto-aprendido)": 0.8,
     "FatSecret (auto-aprendido)": 0.8,
-    "Groq (estimado)":            0.5,
-    "manual":                     1.0,
+    "Groq (estimado)": 0.5,
+    "manual": 1.0,
     # Todo lo no listado (INS/CENAN, catálogo) → 1.0 (default)
 }
 
@@ -62,6 +86,7 @@ class ResultadoNutricional:
         "reconstruido"  — construido por plato_constructor (CAPA 1.5)
         "estimado_llm"  — estimado directamente por Groq (CAPA 5)
     """
+
     estado: Literal["ok", "incompleto", "invalido"]
     kcal: float
     proteina: float
@@ -126,14 +151,10 @@ def validar_plato_nutricional(
         advertencias.append(f"kcal=0 — plato sin macros resueltos (posible fallo de transacción)")
     elif kcal < min_k:
         advertencias.append(
-            f"kcal {kcal:.0f} < mínimo esperado {min_k} para '{tipo_plato}' "
-            f"(posible ingrediente principal omitido)"
+            f"kcal {kcal:.0f} < mínimo esperado {min_k} para '{tipo_plato}' (posible ingrediente principal omitido)"
         )
     elif kcal > max_k:
-        advertencias.append(
-            f"kcal {kcal:.0f} > máximo esperado {max_k} para '{tipo_plato}' "
-            f"(verificar gramajes)"
-        )
+        advertencias.append(f"kcal {kcal:.0f} > máximo esperado {max_k} para '{tipo_plato}' (verificar gramajes)")
 
     nombre_lower = (nombre or "").lower()
     if any(kw in nombre_lower for kw in _PROTEIN_KEYWORDS) and proteina < 10.0:
@@ -160,10 +181,7 @@ def validar_macros_atwater(
         return True, ""
     kcal_calculada = proteina * 4.0 + carbohidratos * 4.0 + grasas * 9.0
     if kcal_calculada < 1.0:
-        return False, (
-            f"macros insuficientes para kcal={kcal:.1f} "
-            f"(Atwater produce {kcal_calculada:.1f} kcal)"
-        )
+        return False, (f"macros insuficientes para kcal={kcal:.1f} (Atwater produce {kcal_calculada:.1f} kcal)")
     desviacion = abs(kcal - kcal_calculada) / kcal
     if desviacion > 0.30:
         return False, (

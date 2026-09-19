@@ -1,6 +1,7 @@
 """
 Tests para PlatoBuilder.
 """
+
 import pytest
 from app.services.nutrition.plate.plate_builder import PlatoBuilder
 from app.services.nutrition.food.resolver.source_resolver import FoodSourceResolver
@@ -27,8 +28,8 @@ class TestPlatoBuilder:
         resultado = builder.construir_plato(
             nombre_plato="Arroz con pollo",
             ingredientes=[
-                {'nombre': 'arroz blanco cocido', 'gramos': 200},
-                {'nombre': 'pollo pechuga cocida', 'gramos': 150},
+                {"nombre": "arroz blanco cocido", "gramos": 200},
+                {"nombre": "pollo pechuga cocida", "gramos": 150},
             ],
             client_id=sample_client.id,
         )
@@ -44,8 +45,8 @@ class TestPlatoBuilder:
         Usa solo ingredientes que existen en la BD de test (sin acentos problemáticos).
         """
         ingredientes = [
-            {'nombre': 'arroz blanco cocido', 'gramos': 200},
-            {'nombre': 'pollo pechuga cocida', 'gramos': 150},
+            {"nombre": "arroz blanco cocido", "gramos": 200},
+            {"nombre": "pollo pechuga cocida", "gramos": 150},
         ]
 
         resultado1 = builder.construir_plato(
@@ -72,16 +73,13 @@ class TestPlatoBuilder:
         resultado = builder.construir_plato(
             nombre_plato="Plato con ingrediente raro",
             ingredientes=[
-                {'nombre': 'arroz blanco cocido', 'gramos': 200},
-                {'nombre': 'ingrediente_inexistente_xyz', 'gramos': 50},
+                {"nombre": "arroz blanco cocido", "gramos": 200},
+                {"nombre": "ingrediente_inexistente_xyz", "gramos": 50},
             ],
             client_id=sample_client.id,
         )
 
         assert resultado is not None
         assert resultado.macros_totales is not None
-        ingredientes_resueltos = [
-            i for i in resultado.ingredientes
-            if i.macros_totales is not None
-        ]
+        ingredientes_resueltos = [i for i in resultado.ingredientes if i.macros_totales is not None]
         assert len(ingredientes_resueltos) >= 1

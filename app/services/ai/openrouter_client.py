@@ -12,10 +12,12 @@ MODEL_MAPPING = {
     "llama-3.1-8b-instant": "meta-llama/llama-3.1-8b-instruct",
 }
 
+
 class OpenRouterClient:
     """
     Clase cliente compatible con la interfaz mínima de AsyncGroq para OpenRouter.
     """
+
     def __init__(self, api_key: str, timeout: float = 180.0, **kwargs):
         self.api_key = api_key
         if isinstance(timeout, httpx.Timeout):
@@ -24,34 +26,25 @@ class OpenRouterClient:
             self.timeout = float(timeout)
         self.chat = OpenRouterChat(self)
 
+
 class OpenRouterChat:
     def __init__(self, client: OpenRouterClient):
         self.client = client
         self.completions = OpenRouterCompletions(self.client)
 
+
 class OpenRouterCompletions:
     def __init__(self, client: OpenRouterClient):
         self.client = client
 
-    async def create(
-        self,
-        model: str,
-        messages: list,
-        max_tokens: int = None,
-        temperature: float = None,
-        **kwargs
-    ):
+    async def create(self, model: str, messages: list, max_tokens: int = None, temperature: float = None, **kwargs):
         mapped_model = MODEL_MAPPING.get(model, model)
         logger.info(f"OpenRouter: mapeando modelo '{model}' a '{mapped_model}'")
-        
+
         if max_tokens is None:
             max_tokens = 1000
-            
-        payload = {
-            "model": mapped_model,
-            "messages": messages,
-            "max_tokens": max_tokens
-        }
+
+        payload = {"model": mapped_model, "messages": messages, "max_tokens": max_tokens}
         if temperature is not None:
             payload["temperature"] = temperature
 
@@ -68,21 +61,21 @@ class OpenRouterCompletions:
                     "https://openrouter.ai/api/v1/chat/completions",
                     headers=headers,
                     json=payload,
-                    timeout=self.client.timeout
+                    timeout=self.client.timeout,
                 )
                 if resp.status_code != 200:
                     error_msg = f"Error en OpenRouter API ({resp.status_code}): {resp.text}"
                     logger.error(error_msg)
                     raise RuntimeError(error_msg)
-                
+
                 data = resp.json()
                 content = data["choices"][0]["message"]["content"]
-                
+
                 message_obj = SimpleNamespace(content=content)
                 choice_obj = SimpleNamespace(message=message_obj)
                 response_obj = SimpleNamespace(choices=[choice_obj])
                 return response_obj
-                
+
             except Exception as e:
                 logger.error(f"Excepción llamando a OpenRouter: {e}")
                 raise e
