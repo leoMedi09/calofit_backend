@@ -135,7 +135,7 @@ class FatSecretClient:
                         },
                     )
                     if r.status_code == 429:
-                        wait_sec = 2 ** (attempt + 1)   # 2 → 4 → 8 s
+                        wait_sec = 2 ** (attempt + 1)
                         _logger.warning(
                             "FatSecret 429 Rate Limit (intento %d/3) — esperando %ds",
                             attempt + 1, wait_sec,
@@ -148,7 +148,7 @@ class FatSecretClient:
             except httpx.RequestError as exc:
                 last_error = exc
                 if attempt < 2:
-                    time.sleep(1 << attempt)  # 1 → 2 s
+                    time.sleep(1 << attempt)
 
         _logger.error(
             "FatSecret foods_search falló tras 3 intentos para '%s': %s",
@@ -248,7 +248,6 @@ def simplify_text_for_fatsecret_query(texto: str) -> str:
         if low.startswith(pref):
             t = t[len(pref) :].strip()
             low = t.lower()
-    # Primera línea o segmento antes de coma larga
     t = t.split("\n")[0].strip()
     if "," in t and len(t) > 40:
         t = t.split(",")[0].strip()

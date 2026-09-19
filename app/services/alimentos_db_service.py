@@ -43,8 +43,6 @@ def _parse_cantidad_token(token: str) -> float:
 
 _RX_G = re.compile(r"(?i)^\s*(?P<num>[\d.,]+)\s*(?:g|gr|gramos?)\s+(?P<name>.+?)\s*$")
 _RX_UNIDAD = re.compile(r"(?i)^\s*(?P<num>[\d.,]+)\s+(?P<unit>[a-záéíóúñ\s\.]+?)\s+de\s+(?P<name>.+?)\s*$")
-# "una lata de atun", "media lata de atun" (sin dígito al inicio)
-# Cantidad en palabras + unidad + "de" + alimento (sin dígito obligatorio)
 _RX_UNIDAD_ES = re.compile(
     r"(?i)^\s*(?P<num>[\d.,]+|media|medio|un|una|uno|dos|tres|cuatro|cinco)\s+"
     r"(?P<unit>"
@@ -56,7 +54,6 @@ _RX_CLEAN_PREFIX = re.compile(
     r"|he\s+comido|me\s+com[ií]|hoy\s+com[ií])\s*[:\-]?\s*"
 )
 
-# Drenado típico lata atún 170g/140g: ~155g escurrido rinde ~180 kcal a 116 kcal/100g
 _DEFAULT_LATA_G_ATUN = 155.0
 
 
@@ -97,7 +94,6 @@ class AlimentosDBService:
         )
         if al:
             return int(al.alimento_id)
-        # Fallback simple por LIKE (prefijo) para UX; mantener determinista.
         like = f"{n}%"
         a2 = (
             self.db.query(Alimento)
@@ -159,7 +155,6 @@ class AlimentosDBService:
         if not u:
             return None
 
-        # Normalizar plurales comunes / abreviaturas para que "tazas" matchee "taza", etc.
         alias_unit = {
             "tazas": "taza",
             "vasos": "vaso",
@@ -181,10 +176,8 @@ class AlimentosDBService:
 
         row = _buscar(u2)
         if not row and u2.endswith("s") and len(u2) > 3:
-            # Fallback singular genérico: "tazas" -> "taza"
             row = _buscar(u2[:-1])
         if not row:
-            # Fallback flexible: algunas BD guardan unidades como "taza cocida", "taza (arroz)".
             row = (
                 self.db.query(AlimentoUnidad)
                 .filter(AlimentoUnidad.alimento_id == alimento_id)
@@ -278,7 +271,6 @@ class AlimentosDBService:
         if not t:
             return []
         t = _RX_CLEAN_PREFIX.sub("", t).strip()
-        # Separar por conectores simples.
         parts = re.split(r"(?i)\s+y\s+|,", t)
         out: List[MacroPorcion] = []
         for p in parts:

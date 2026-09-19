@@ -59,8 +59,6 @@ class TestFixContenedorGenerico:
             if "extrae todos los alimentos" in prompt_lower or "responde solo con json" in prompt_lower:
                 msg = _get_mensaje(prompt)
                 if "batido" in msg or "avena" in msg:
-                    # Reproduce EXACTAMENTE lo que devolvió Groq real en el
-                    # diagnóstico: el contenedor Y los 4 ingredientes a la vez.
                     return json.dumps({"alimentos": [
                         {"nombre": "Batido de avena", "es_real": True, "cantidad": 1,
                          "porcion_g": 250, "kcal": 252, "prot_g": 8, "carb_g": 40, "grasa_g": 5},
@@ -95,8 +93,6 @@ class TestFixContenedorGenerico:
 
         filas = _filas_de_hoy(db, sample_client.id)
         assert not any("batido" in f.nombre_alimento.lower() for f in filas)
-        # Ninguna fila debe corresponder a las ~252 kcal que el LLM le asignó
-        # al contenedor — esa cantidad no debe aparecer sumada en el total.
         assert all(abs(f.kcal - 252) > 1 for f in filas), (
             f"Parece que las kcal del contenedor (252) se filtraron igual: {[(f.nombre_alimento, f.kcal) for f in filas]}"
         )
@@ -114,9 +110,6 @@ class TestFixAlimentoAlucinado:
             if "extrae todos los alimentos" in prompt_lower or "responde solo con json" in prompt_lower:
                 msg = _get_mensaje(prompt)
                 if "umas" in msg or "café" in msg or "cafe" in msg:
-                    # Reproduce EXACTAMENTE lo que devolvió Groq real:
-                    # "umas" marcado es_real=true con macros en 0, café
-                    # también con macros en 0 (bebida real ~0 kcal).
                     return json.dumps({"alimentos": [
                         {"nombre": "Tres umas", "es_real": True, "cantidad": 3,
                          "porcion_g": 50, "kcal": 0, "prot_g": 0, "carb_g": 0, "grasa_g": 0},
@@ -176,10 +169,6 @@ class TestFixPalabraMomentoDia:
     def mock_groq(self):
         async def mock_llamar_groq(prompt, max_tokens=800, temp=0.7, model=None):
             if "extrae todos los alimentos" in prompt.lower():
-                # Reproduce EXACTAMENTE lo que devolvió Groq real: macros NO
-                # nulos (790/30/100/30) — el fix de momento-del-día debe
-                # bloquearlo por el NOMBRE, sin depender de que los macros
-                # sean sospechosos.
                 return json.dumps({"alimentos": [
                     {"nombre": "Almuerzo", "es_real": True, "cantidad": 1,
                      "porcion_g": 400, "kcal": 790, "prot_g": 30, "carb_g": 100, "grasa_g": 30},

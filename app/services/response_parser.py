@@ -21,19 +21,13 @@ def sanear_texto_conversacional_recipe(texto: str) -> str:
     if not texto or not str(texto).strip():
         return texto
     t = str(texto).strip()
-    # Quitar artefactos de formato que el LLM incluye literalmente:
-    # "[Tipo: INFO]", "[Type: INFO]", "[TIPO: RECIPE]", etc.
     t = re.sub(r"\s*\[Tipo:\s*\w+\]", "", t, flags=re.IGNORECASE)
     t = re.sub(r"\s*\[Type:\s*\w+\]", "", t, flags=re.IGNORECASE)
-    # Si todo el texto está envuelto en corchetes "[Hola...] " → quitar corchetes externos
     if t.startswith("[") and t.endswith("]"):
         _inner = t[1:-1].strip()
-        # Solo quitar si el interior no tiene más corchetes no cerrados (para evitar borrar listas)
         if _inner.count("[") == _inner.count("]"):
             t = _inner
-    # Corchete de apertura suelto al inicio seguido de texto normal → quitar solo el corchete
     t = re.sub(r"^\[\s*(?=[A-ZÁÉÍÓÚ])", "", t)
-    # Corchete de cierre suelto al final → quitar
     t = re.sub(r"\s*\]\s*$", "", t)
     t = re.sub(r"(?im)^\s*[123]\.\s*$", "", t)
     t = re.sub(
@@ -43,27 +37,19 @@ def sanear_texto_conversacional_recipe(texto: str) -> str:
     )
     t = re.sub(r"(?i):\s*\n\s*[123]\.?\s*$", ".", t.strip())
     t = re.sub(r"\s+[123]\.\s*$", "", t.strip())
-    # Líneas huérfanas tipo "1. :" o "**1. :**" (enumeración cortada antes de CALOFIT)
     for _rx in (
         r"(?im)^\s*\*{0,2}\s*\d+\s*\.\s*:\s*\*{0,2}\s*$",
         r"(?im)^\s*\d+\s*\.\s*:\s*$",
         r"(?im)^\s*\*{0,2}\s*\d+\s*\.\s*\*{0,2}\s*:\s*$",
     ):
         t = re.sub(_rx, "", t.strip())
-    # Mismo artefacto pegado en una línea con texto (p. ej. «... **1. :** siguiente»)
     t = re.sub(r"\*{0,2}\s*[123]\s*\.\s*:\s*\*{0,2}", "", t)
-    # Quitar headers sueltos tipo "Opción 1:" que deberían vivir solo en CALOFIT_HEADER.
     t = re.sub(r"(?im)^\s*(opci[oó]n|opcion)\s*\d+\s*:\s*$", "", t.strip())
-    # Eliminar líneas con patrón de ingrediente que el LLM pone en texto libre
-    # Ej: "150g pollo a la parrilla (165 kcal)" — pertenece al CALOFIT_LIST, no al texto
     t = re.sub(
         r"(?im)^\s*\d+g\s+[^\n]{5,80}\(\d+\s*kcal\)[^\n]*$",
         "",
         t,
     )
-    # Eliminar el nombre del plato que queda huérfano justo antes de una lista de ingredientes
-    # Ej: "Pollo a la Parrilla 150g pollo a la parrilla (165 kcal) 100g arroz..."
-    # → detectar fragmentos nombre+cantidad+kcal concatenados en una línea
     t = re.sub(
         r"(?i)([A-ZÁÉÍÓÚÑ][a-záéíóúñ ]{4,40})\s+\d+g\s+[^\n]{5,120}\(\d+\s*kcal\)[^\n]*",
         "",
@@ -86,7 +72,6 @@ def _es_linea_macros(linea: str) -> bool:
     t = (linea or "").strip()
     if not t:
         return False
-    # Evitar falsos positivos en ingredientes con "proteína" textual.
     if "prote" in t.lower() and ":" not in t:
         return False
     return bool(_RE_LINEA_MACROS.search(t)) and (
@@ -102,11 +87,9 @@ def _split_ingredientes_inline(linea: str) -> List[str]:
     t = (linea or "").strip()
     if not t:
         return []
-    # Separar cuando termina un paréntesis y empieza otra cantidad.
     parts = re.split(r"(?<=\))\s+(?=\d)", t)
     if len(parts) >= 2:
         return [p.strip() for p in parts if p.strip()]
-    # Alternativa: "...kcal" seguido de otra cantidad (sin paréntesis).
     parts = re.split(r"(?i)(?<=kcal)\s+(?=\d)", t)
     if len(parts) >= 2:
         return [p.strip() for p in parts if p.strip()]
@@ -191,7 +174,6 @@ def _limpiar_parentesis_kcal(item: str) -> str:
     """
     if not item:
         return item
-    # Si hay "(...kcal...)" quedarse solo con hasta "kcal" dentro del paréntesis.
     return re.sub(r"\(([^)]*?kcal)[^)]*\)", r"(\1)", item, flags=re.IGNORECASE).strip()
 
 
@@ -251,35 +233,25 @@ def parsear_respuesta_para_frontend(
 
     if not texto_principal: return resultado
 
-    # v15.1: Regex más simple para estandarizar tags sin romper intents
     texto_principal = re.sub(r'\[\s*(/?CALOFIT_[A-Z_]+)(?:\s*:\s*([A-Z_]+))?\s*\]', 
                              lambda m: f"[{m.group(1).upper().strip()}{': ' + m.group(2).upper().strip() if m.group(2) else ''}]", 
                              texto_principal, flags=re.IGNORECASE)
-    # Corregir espacios en cierres residuales
     texto_principal = re.sub(r'\[/\s*(CALOFIT_[A-Z_]+)\s*\]', r'[/\1]', texto_principal, flags=re.IGNORECASE)
     
-    # 🛡️ FIX v73.0: Eliminar etiquetas de cierre huérfanas o mal formadas al inicio de la respuesta
     texto_principal = re.sub(r'^\[/CALOFIT_[A-Z_]+\]\s*', '', texto_principal, flags=re.IGNORECASE)
     intent_match = re.search(r'\[CALOFIT_INTENT:\s*(\w+)\]', texto_principal, re.IGNORECASE)
     if intent_match:
         resultado["intent"] = intent_match.group(1).upper()
-        # Limpiar la etiqueta del texto para no mostrarla al usuario
         texto_principal = texto_principal.replace(intent_match.group(0), "").strip()
 
-    # Modo ya clasificado en el servidor: intent estable aunque el modelo olvide el tag.
-    # Guardamos lo que vino del modelo para depuración/telemetría (el intent efectivo es resultado["intent"]).
     resultado["intent_modelo"] = resultado.get("intent") or "CHAT"
     resultado["intent"] = intent_prioritario_para_parser(
         resultado["intent_modelo"], modo_funcion
     )
 
-    # --- FASE 2: EXTRACCIÓN POR ETIQUETAS BLINDADAS (PROTOCOLO 3.5 - MULTI-SECCIÓN) ---
-    # Detectar headers sin importar mayúsculas/minúsculas
     if re.search(r'\[CALOFIT_HEADER\]', texto_principal, re.IGNORECASE):
-        # Dividir el texto en potenciales bloques de sección (cada bloque empieza con intent o header)
         bloques_raw = re.split(r'(\[CALOFIT_INTENT:.*?\]|\[CALOFIT_HEADER\])', texto_principal, flags=re.IGNORECASE)
         
-        # Reconstruir bloques lógicos
         bloques_reales = []
         i = 1 
         while i < len(bloques_raw):
@@ -297,11 +269,9 @@ def parsear_respuesta_para_frontend(
             justif  = re.search(r'\[CALOFIT_JUSTIF\](.*?)\[/CALOFIT_JUSTIF\]',   bloque, re.DOTALL | re.IGNORECASE)
 
             if header or lista:
-                # 🎯 DETECCIÓN DE TIPO MEJORADA (v12.1 - INTENT POR BLOQUE + DEBUG MACROS)
                 bloque_low = bloque.lower()
-                tipo = "comida"  # Default
+                tipo = "comida"
 
-                # 1. Prioridad: Intent dentro del propio bloque (multi-opcion tiene un intent por bloque)
                 bloque_intent_match = re.search(r'\[CALOFIT_INTENT:\s*(\w+)\]', bloque, re.IGNORECASE)
                 bloque_intent = bloque_intent_match.group(1).upper() if bloque_intent_match else resultado["intent"]
 
@@ -310,7 +280,6 @@ def parsear_respuesta_para_frontend(
                 elif bloque_intent in ["ITEM_RECIPE", "RECIPE", "FOOD", "MEAL", "LOG"]:
                     tipo = "comida"
                 else:
-                    # 2. Fallback: Keywords en el bloque
                     kw_ejercicio = ["series", "repeticiones", "reps", "sets", "plancha", "sentadillas",
                                     "flexiones", "abdominales", "cardio", "calentamiento", "rutina",
                                     "workout", "ejercicio", "burpees", "trote"]
@@ -325,23 +294,18 @@ def parsear_respuesta_para_frontend(
                     elif comida_score > 0:
                         tipo = "comida"
                 
-                # Limpiar items - Regex mejorado (v63): No borrar (X kcal)
                 if lista:
                     items_raw = lista.group(1).strip().split('\n')
                 else:
                     items_raw = re.findall(r'^\s*[-\*•]\s+(.+)$', bloque, re.MULTILINE)
                     if not items_raw:
-                        # Fallback adicional: buscar líneas que mencionen 'series' o 'reps' o 'minutos'
                         items_raw = re.findall(r'^\s*(.*?(?:series|reps|repeticiones|minutos|segundos).*)$', bloque, re.IGNORECASE | re.MULTILINE)
 
-                # v63: Solo borra bullets, NO borra el contenido entre paréntesis si parece kcal
                 items = []
                 for i in items_raw:
                     linea = i.strip()
                     if not linea: continue
-                    # Limpiar bullet inicial
                     linea = re.sub(r'^(\s*[-\*•]\s?|\s*\d+[\.\)]\s?)', '', linea).strip()
-                    # Filtrar encabezados de lista
                     if re.match(
                         r'^(ingredientes|ejercicios|lista|secciones|componentes)[:\.]?$',
                         linea,
@@ -352,19 +316,14 @@ def parsear_respuesta_para_frontend(
                         continue
                     items.append(linea)
 
-                # Limpiar pasos
                 if action:
                     pasos_raw = action.group(1).strip().split('\n')
                 else:
-                    # Fallback: Buscar líneas numeradas (1., 2.)
                     pasos_raw = re.findall(r'^\s*\d+[\.\)]\s+(.+)$', bloque, re.MULTILINE)
                     if not pasos_raw:
-                        # Fallback adicional: buscar prefijos comunes de ejercicio
                         pasos_raw = re.findall(r'^\s*(?:T[eé]cnica|Instrucciones|Nota|Tip):\s*(.+)$', bloque, re.IGNORECASE | re.MULTILINE)
-                        # Re-añadir el prefijo para mantener contexto
                         pasos_raw = ["Técnica: " + p for p in pasos_raw] if pasos_raw else []
                     if not pasos_raw:
-                        # Último recurso: cualquier línea libre que no parezca metadata
                         lineas_sueltas = [
                             ln.strip() for ln in bloque.split('\n')
                             if ln.strip() 
@@ -375,17 +334,13 @@ def parsear_respuesta_para_frontend(
                         if lineas_sueltas:
                             pasos_raw = lineas_sueltas
                     
-                # Igual para pasos, manteniendo el texto limpio
                 pasos = [re.sub(r'^(\s*[-\*•]\s?|\s*\d+[\.\)]\s?)', '', p).strip() for p in pasos_raw if p.strip()]
                 
-                # 🚀 HEURÍSTICA DE SEGURIDAD (v72.0): Detectar pasos mezclados en ingredientes
-                # Si un ingrediente empieza con verbos de acción, moverlo a pasos
                 verbos_accion = ["sirve", "disfruta", "lleva", "cocina", "mezcla", "hornea", "calienta", "pica", "corta", "agrega", "añade"]
                 ingredientes_originales = items[:]
                 items = []
                 for ing in ingredientes_originales:
                     ing_low = ing.lower().strip()
-                    # No degradar a "paso" si la línea lleva gramos (p. ej. "Agrega 200g cebolla")
                     tiene_cantidad = bool(
                         re.search(r"(?i)\d+[\d.,]*\s*(g|gr|gramos?|ml)\b", ing_low)
                     )
@@ -398,12 +353,9 @@ def parsear_respuesta_para_frontend(
                     else:
                         items.append(ing)
 
-                # Filtrar líneas que solo digan "preparación:" o similar
                 pasos = [p for p in pasos if not re.match(r'^(preparaci[oó]n|instrucciones|pasos|tecnica)[:\.]?$', p, re.IGNORECASE)]
 
                 items = _expand_items_vineta_inline(items)
-                # Si el modelo metió varios ingredientes en una sola línea (sin bullets),
-                # separarlos para que Flutter los muestre como lista real.
                 if tipo == "comida" and items:
                     flat: List[str] = []
                     for it in items:
@@ -419,7 +371,6 @@ def parsear_respuesta_para_frontend(
                         if _es_linea_macros(x):
                             continue
                         items.append(x)
-                # Último rescate: ingredientes como líneas sin bullets dentro del bloque.
                 if tipo == "comida" and not items:
                     interior = bloque
                     interior = re.sub(
@@ -450,8 +401,6 @@ def parsear_respuesta_para_frontend(
                             items.extend(_split_ingredientes_inline(ln))
 
                 msg_stats = stats.group(1).strip() if stats else ""
-                # v64: Normalizar formato de macros solo para comida (RecipeCard chips P/C/G/Cal).
-                # En ejercicio, las mismas regex romperían texto ("Calentamiento", "calorías", etc.).
                 msg_stats_clean = (
                     msg_stats.replace("💪", "")
                     .replace("🌾", "")
@@ -461,7 +410,6 @@ def parsear_respuesta_para_frontend(
                 )
                 msg_stats_clean = re.sub(r"\(Ajustado.*?\)", "", msg_stats_clean).strip()
                 if tipo == "comida":
-                    # Si el backend inyectó algo como "P: 30g, C: 20g" corregir a "|"
                     msg_stats_clean = re.sub(
                         r",\s*(?=(?:P|C|G|Cal|Prot|Gras|Carb)\b)",
                         " | ",
@@ -475,9 +423,6 @@ def parsear_respuesta_para_frontend(
 
                 nombre_raw = header.group(1).strip() if header else "Sugerencia CaloFit"
                 nombre_clean = re.sub(r'^(Opci[oó]n|Option|Plato|Platillo|Rutina|Receta)\s*\d+[:\.]?\s*', '', nombre_raw, flags=re.IGNORECASE).strip()
-                # Si el nombre sigue siendo genérico ("Sugerencia 1", "Sugerencia CaloFit"), intentar
-                # rescatar el nombre real desde el texto conversacional: el LLM a veces escribe
-                # "[Tortilla de Huevo con Palta]" en el texto y pone "Sugerencia 1" en el header.
                 _es_generico = bool(re.match(
                     r'(?i)^(sugerencia|opci[oó]n|plato|comida|receta|alternativa)\s*\d*\.?\s*(calofit)?$',
                     nombre_clean.strip()
@@ -488,7 +433,6 @@ def parsear_respuesta_para_frontend(
 
                     _plato_rescatado = None
 
-                    # Rescate 1: buscar "[Nombre del Plato]" en corchetes en el texto previo
                     _m_corchetes = re.findall(r'\[([A-ZÁÉÍÓÚÑ][^\[\]]{4,80})\]', _texto_previo)
                     _plato_rescatado = next(
                         (m for m in reversed(_m_corchetes)
@@ -496,12 +440,7 @@ def parsear_respuesta_para_frontend(
                         None,
                     )
 
-                    # Rescate 2: el LLM a veces escribe "Pollo a la Parrilla 150g..."
-                    # en texto libre antes del CALOFIT_HEADER genérico.
-                    # Detectar nombre en Title Case al inicio de línea/párrafo.
                     if not _plato_rescatado:
-                        # Busca líneas que comiencen con 2+ palabras en Title Case seguidas
-                        # de cantidades/macros — eso es un nombre de plato en texto libre
                         _m_title = re.findall(
                             r'(?m)^([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+(?:de|con|al?|y|en)\s+)?[A-Za-záéíóúñ]+(?:\s+[A-Za-záéíóúñ]+){0,4})'
                             r'\s+\d+g\b',
@@ -513,8 +452,6 @@ def parsear_respuesta_para_frontend(
                                     and not re.search(r'CALOFIT|INTENT|RECIPE|INFO|PROGRESS|LOG|POWER|ALERT', candidato, re.I)):
                                 _plato_rescatado = candidato
 
-                    # Rescate 3: última frase en mayúsculas antes del bloque
-                    # (ej: "**Pollo a la Parrilla con Ensalada**")
                     if not _plato_rescatado:
                         _m_bold = re.findall(r'\*\*([A-ZÁÉÍÓÚÑ][^*\n]{5,60})\*\*', _texto_previo)
                         if _m_bold:
@@ -524,7 +461,6 @@ def parsear_respuesta_para_frontend(
 
                     if _plato_rescatado:
                         nombre_clean = _plato_rescatado.strip()
-                # Flutter: sin ** para evitar asteriscos sin renderizar
                 nombre_clean = _sin_asteriscos(nombre_clean)
                 header_inline_ings: List[str] = []
                 if tipo == "comida":
@@ -554,7 +490,6 @@ def parsear_respuesta_para_frontend(
                     "nota": footer.group(1).strip() if footer else ""
                 }
                 
-                # 🛡️ LIMPIEZA QUIRÚRGICA DE CAMPOS (v73.1): Eliminar tags que se colaron en los valores
                 for campo in ["nombre", "macros", "gasto_calorico_estimado", "nota"]:
                     val = seccion.get(campo, "")
                     if isinstance(val, str):
@@ -565,15 +500,9 @@ def parsear_respuesta_para_frontend(
                     if isinstance(lista_val, list):
                         seccion[lista_campo] = [re.sub(r'\[/?CALOFIT_[A-Z_]+.*?\]', '', item, flags=re.IGNORECASE).strip() for item in lista_val if item.strip()]
                 
-                # De-duplicación y guardado
                 if not any(s["nombre"] == seccion["nombre"] for s in resultado["secciones"]):
                     resultado["secciones"].append(seccion)
 
-        # --- FASE 3: RECONSTRUCCIÓN DE COMPVERSACIÓN (SIN RESIDUOS DE RECETAS) ---
-        # Estrategia: "Split and Select". Solo mantenemos texto que NO pertenece a un bloque HEADER.
-        # bloques_raw[0] es el texto antes del primer tag.
-        # bloques_raw[1], [3]... son los tags.
-        # bloques_raw[2], [4]... son los contenidos.
         
         texto_limpio_parts = [bloques_raw[0]]
         k = 1
@@ -581,17 +510,10 @@ def parsear_respuesta_para_frontend(
             tag = bloques_raw[k]
             content = bloques_raw[k+1] if (k+1) < len(bloques_raw) else ""
             
-            # El texto conversacional introductorio puede estar DENTRO de un bloque INTENT
-            # (entre [CALOFIT_INTENT:RECIPE/LOG/POWER] y el primer [CALOFIT_HEADER]).
-            # Ese contenido es el texto que el usuario ve como introducción — debe capturarse.
-            # HEADER y sus contenidos NO se capturan aquí (van a Cards).
             if "[CALOFIT_INTENT:" in tag.upper():
-                # Capturar el texto intro del bloque INTENT (antes de cualquier HEADER dentro de él)
-                # Limpiar cualquier tag residual que se haya colado
                 texto_sucio = re.sub(r'\[/?CALOFIT_[A-Z_]+.*?\]', '', content, flags=re.IGNORECASE)
                 texto_limpio_parts.append(texto_sucio)
             elif "[CALOFIT_HEADER]" not in tag.upper():
-                # Texto suelto fuera de cualquier tag reconocido
                 texto_sucio = re.sub(r'\[/?CALOFIT_[A-Z_]+.*?\]', '', content, flags=re.IGNORECASE)
                 texto_limpio_parts.append(texto_sucio)
             
@@ -599,33 +521,20 @@ def parsear_respuesta_para_frontend(
             
         texto_limpio = "".join(texto_limpio_parts)
         
-        # --- FASE 4: FORMATEO VISUAL (LISTAS BONITAS) ---
-        # Detectar listas pegadas (ej: "incluyen: * Tofu") y forzar saltos de línea
-        # Regex: Espacio/Punto + [bullet/numero] + espacio -> Newline + bullet
-        texto_limpio = re.sub(r'([:;.])\s*([-\*•]|\d+\.)\s+', r'\1\n\2 ', texto_limpio) # Case: "text: * Item" -> "text:\n* Item"
-        texto_limpio = re.sub(r'\s+([-\*•])\s+', r'\n\1 ', texto_limpio) # Case: "Item 1 * Item 2" -> "Item 1\n* Item 2"
-        # Evitar romper numeros en medio de texto, solo si parece una lista (num + punto)
+        texto_limpio = re.sub(r'([:;.])\s*([-\*•]|\d+\.)\s+', r'\1\n\2 ', texto_limpio)
+        texto_limpio = re.sub(r'\s+([-\*•])\s+', r'\n\1 ', texto_limpio)
         texto_limpio = re.sub(r'\s+(\d+\.)\s+', r'\n\1 ', texto_limpio) 
 
-        # Eliminar etiquetas residuales o cabeceras alucinadas (ej: "**CHAT**", "**ITEM_RECIPE**")
         texto_limpio = re.sub(r'^\s*\*\*?(CHAT|ITEM_RECIPE|ITEM_WORKOUT|ASISTENTE|RESPUESTA|INTENT|PLAN_DIET|PLAN_WORKOUT)\*\*?\s*', '', texto_limpio, flags=re.IGNORECASE)
         
-        # 🧹 LIMPIEZA FINAL: Eliminar nombres de platos/ejercicios que quedaron en texto plano
-        # Si detectamos los nombres de las secciones en el texto conversacional, los borramos
         for seccion in resultado["secciones"]:
             nombre_plato = seccion["nombre"]
-            # Eliminar el nombre si aparece literal en el texto (suele estar en mayúsculas o con formato)
-            # Casos: "TACACHO DE HUEVOS", "Tacacho de Huevos", etc.
             texto_limpio = re.sub(r'\b' + re.escape(nombre_plato) + r'\b', '', texto_limpio, flags=re.IGNORECASE)
-            # También eliminar versiones en mayúsculas completas
             texto_limpio = re.sub(r'\b' + re.escape(nombre_plato.upper()) + r'\b', '', texto_limpio)
         
-        # Limpiar espacios múltiples y saltos de línea excesivos generados por las eliminaciones
         texto_limpio = re.sub(r'\n\s*\n\s*\n+', '\n\n', texto_limpio)
         texto_limpio = re.sub(r'  +', ' ', texto_limpio)
         
-        # Flutter: eliminar
-        # 🛡️ LIMPIEZA FINAL DE CUALQUIER TAG RESIDUAl [/CALOFIT_...]
         texto_limpio = re.sub(r'\[/?CALOFIT_[A-Z_]+.*?\]', '', texto_limpio, flags=re.IGNORECASE)
         resultado["texto_conversacional"] = sanear_texto_conversacional_recipe(
             _sin_asteriscos(texto_limpio.strip())
@@ -633,18 +542,13 @@ def parsear_respuesta_para_frontend(
         _reparar_todas_las_secciones_comida(resultado)
         return resultado
 
-    # --- FASE 3: FALLBACK A PARSER ELÁSTICO (Formato Antiguo) ---
-    # v71.1: Mejorado para detectar patrones naturales como "Opción 1: Sopa de Lentejas"
     t = texto_principal.replace('***', '').strip()
     lineas = [l.strip() for l in t.split('\n') if l.strip()]
     
-    # Patrones de inicio de sección EXPANDIDOS para detectar formato natural de la IA
-    # Detecta: "plato: X", "Opción 1: X", "**Opción 1: X**", "1. X", "Receta 1: X"
     opcion_pattern = re.compile(
         r'^(?:\*{0,2})?(?:Opci[oó]n|Receta|Rutina|Plato|Opcion|Ejercicio)\s*\d*[:\.\)]\s*(.+?)(?:\*{0,2})?$',
         re.IGNORECASE
     )
-    # También detectar líneas en negritas que son títulos cortos (posibles nombres de platos)
     old_start_markers = ["plato:", "rutina:", "receta:", "nombre:", "ejercicio:", "comida:"]
     
     current_section = None
@@ -655,11 +559,9 @@ def parsear_respuesta_para_frontend(
         l_low = l.lower()
         l_clean = re.sub(r'\*\*', '', l).strip()
         
-        # Detectar inicio de sección: marcadores clásicos O "Opción N:"
         is_classic_start = any(l_low.startswith(m) for m in old_start_markers)
         opcion_match = opcion_pattern.match(l_clean)
 
-        # Decidir inicio según match
         new_section_nombre = None
         new_section_tipo = "comida"
         
@@ -683,12 +585,9 @@ def parsear_respuesta_para_frontend(
                 "nota": ""
             }
             last_key = "nombre"
-            # Esta línea es un header, va al texto conversacional NO a la card
-            # (solo si hay secciones ya o es una opción múltiple)
             continue
 
         if not current_section:
-            # AUTO-RESCATE (v71.6): Si la IA saltó directamente a los ingredientes (bullet points) sin poner un título
             if re.match(r'^[-\*•]\s+', l) and ('g' in l_low or 'cda' in l_low or 'taza' in l_low):
                 current_section = {
                     "tipo": "comida", 
@@ -699,7 +598,6 @@ def parsear_respuesta_para_frontend(
                     "macros": "", 
                     "nota": ""
                 }
-                # Seguimos procesando esta línea como si fuera un ingrediente
             elif re.match(r'^\d+[\.\)]\s+', l) and ('precalienta' in l_low or 'mezcla' in l_low or 'hornea' in l_low):
                  current_section = {
                     "tipo": "comida", 
@@ -714,7 +612,6 @@ def parsear_respuesta_para_frontend(
                 intro_lines.append(l)
                 continue
 
-        # Procesar campos dentro de sección
         if "ingredientes" in l_low or "componentes" in l_low: 
             last_key = "ingredientes"
         elif "preparaci" in l_low or "elaboraci" in l_low or "c\u00f3mo preparar" in l_low or "pasos" in l_low:
@@ -734,23 +631,19 @@ def parsear_respuesta_para_frontend(
                 current_section["macros"] = (current_section["macros"] + " " + l_clean).strip()
             elif last_key:
                 current_section[last_key] = (current_section.get(last_key, "") + " " + l_clean).strip()
-            # Auto-detectar ingredientes aunque NO haya bullet:
-            # muchos modelos devuelven ingredientes en una sola línea con "150g ... (xx kcal) 20g ...".
             elif (
                 current_section["tipo"] == "comida"
                 and _RE_LINEA_PARECE_INGREDIENTE.search(l_clean)
-                and not re.match(r'^\d+[\.\)]\s+', l_clean)  # no confundir con paso numerado
+                and not re.match(r'^\d+[\.\)]\s+', l_clean)
             ):
                 for chunk in _split_ingredientes_inline(l_clean):
                     current_section["ingredientes"].append(_sin_asteriscos(chunk))
                 last_key = "ingredientes"
-            # Auto-detectar ingredientes si la línea empieza por bullet y estamos en sección de comida
             elif re.match(r'^[-\*•]\s+', l) and current_section["tipo"] == "comida":
                 item = re.sub(r'^[-\*•]\s+', '', l).strip()
                 if item:
                     current_section["ingredientes"].append(_sin_asteriscos(item))
                     last_key = "ingredientes"
-            # Auto-detectar pasos si empieza por número
             elif re.match(r'^\d+[\.\)]\s+', l):
                 item = re.sub(r'^\d+[\.\)]\s+', '', l).strip()
                 if item:
@@ -768,10 +661,8 @@ def parsear_respuesta_para_frontend(
                 current_section["gasto_calorico_estimado"] = current_section.pop("macros")
             resultado["secciones"].append(current_section)
 
-    # El texto conversacional solo tiene las líneas de introducción
     texto_limpio = "\n".join(intro_lines).strip()
     
-    # FASE 4: Formateo visual
     texto_limpio = re.sub(r'([:;.])\s*([-\*•]|\d+\.)\s+', r'\1\n\2 ', texto_limpio)
     texto_limpio = re.sub(r'\s+([-\*•])\s+', r'\n\1 ', texto_limpio)
     texto_limpio = re.sub(r'\s+(\d+\.)\s+', r'\n\1 ', texto_limpio)

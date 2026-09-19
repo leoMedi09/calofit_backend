@@ -20,9 +20,6 @@ from app.core.utils import get_peru_date
 from app.models.nutricion import PlanDiario, PlanNutricional
 
 
-# La normalización de objetivos se centralizó en objetivo_utils.
-# _OBJ_CANON fue eliminado — los 5 valores controlados del frontend
-# se mapean ahora mediante normalizar_objetivo() a DEFICIT / MANTENIMIENTO / SUPERAVIT.
 from app.core.objetivo_utils import normalizar_objetivo as _norm_obj
 
 _NIVEL_MAP = {
@@ -71,7 +68,6 @@ def obtener_plan_hoy(perfil, edad: int, db: Session):
         .first()
     )
 
-    # ── Sin plan en BD → fallback dinámico ───────────────────────────────────
     if not plan_maestro:
         macros = _calcular_macros_dinamicos(perfil, edad)
 
@@ -91,7 +87,6 @@ def obtener_plan_hoy(perfil, edad: int, db: Session):
             True,
         )
 
-    # ── Plan existe: leer el día de la semana ─────────────────────────────────
     dia_semana = get_peru_date().isoweekday()
     plan_hoy   = (
         db.query(PlanDiario)
@@ -102,7 +97,6 @@ def obtener_plan_hoy(perfil, edad: int, db: Session):
     if not plan_hoy:
         raise ValueError("Tu plan nutricional está incompleto.")
 
-    # Datos base del plan guardado (usados para sugerencia de entrenamiento)
     plan_base = {
         "calorias_dia":              plan_hoy.calorias_dia,
         "proteinas_g":               plan_hoy.proteinas_g,
@@ -111,19 +105,12 @@ def obtener_plan_hoy(perfil, edad: int, db: Session):
         "sugerencia_entrenamiento_ia": plan_hoy.sugerencia_entrenamiento_ia,
     }
 
-    # ── Decidir si recalcular calorías/macros ────────────────────────────────
     status_plan  = (plan_maestro.status or "").strip().lower()
 
-    # Detectar cambio de objetivo usando normalización canónica — cubre los
-    # 5 valores controlados del frontend, incluyendo ganar_leve y perder_leve
-    # que el antiguo _OBJ_CANON no tenía.
     plan_obj_canon  = _norm_obj(plan_maestro.objetivo)
     perf_obj_canon  = _norm_obj(perfil.goal)
     objetivo_cambio = plan_obj_canon != perf_obj_canon
 
-    # Recalcular si:
-    #   A) El plan NO fue validado por nutricionista (fue generado por IA)
-    #   B) El objetivo del perfil cambió respecto al plan (señal explícita del cliente)
     necesita_recalculo = (status_plan != "validado") or objetivo_cambio
 
     if necesita_recalculo:

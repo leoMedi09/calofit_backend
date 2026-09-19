@@ -11,7 +11,7 @@ router = APIRouter()
 
 class DetalleAlimentoRequest(BaseModel):
     alimento: str
-    porcion_gramos: int = 100  # opcional, default 100g
+    porcion_gramos: int = 100
 
 
 @router.post("/detalle")
@@ -81,7 +81,6 @@ async def obtener_detalle_alimento(
         
         respuesta_texto = response.choices[0].message.content.strip()
         
-        # Extraer JSON
         import json
         import re
         
@@ -94,7 +93,6 @@ async def obtener_detalle_alimento(
             
     except Exception as e:
         print(f"Error generando detalle con Groq: {e}")
-        # Fallback: respuesta básica
         return {
             "nombre": request.alimento.capitalize(),
             "descripcion": "Información nutricional estimada",
@@ -138,13 +136,10 @@ async def actualizar_porcion_balance(
     from app.models.historial import ProgresoCalorias
     from datetime import date
     
-    # Obtener cliente
     cliente = db.query(Client).filter(Client.email == current_user.email).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     
-    # Calcular nuevas calorías según la porción ajustada
-    # Usar Groq para obtener calorías exactas de la nueva porción
     detalle_request = DetalleAlimentoRequest(
         alimento=alimento,
         porcion_gramos=nueva_porcion_gramos
@@ -153,7 +148,6 @@ async def actualizar_porcion_balance(
     detalle = await obtener_detalle_alimento(detalle_request, db, current_user)
     nuevas_calorias = detalle["datos_nutricionales"]["calorias"]
     
-    # Actualizar en progreso de hoy
     hoy = date.today()
     progreso = db.query(ProgresoCalorias).filter(
         ProgresoCalorias.client_id == cliente.id,
@@ -163,8 +157,6 @@ async def actualizar_porcion_balance(
     if not progreso:
         raise HTTPException(status_code=404, detail="No hay registros de hoy para actualizar")
     
-    # Nota: Esto es simplificado. En producción necesitarías un registro más detallado
-    # por ahora actualiza las calorías totales
     
     return {
         "success": True,

@@ -4,9 +4,7 @@ from typing import Any, Dict, Optional, Sequence
 
 def get_peru_now() -> datetime:
     """Retorna la fecha y hora actual en zona horaria de Perú (UTC-5)"""
-    # UTC now
     utc_now = datetime.now(timezone.utc)
-    # Peru is UTC-5
     peru_time = utc_now - timedelta(hours=5)
     return peru_time
 
@@ -54,14 +52,12 @@ def parsear_macros_de_texto(
         return None
     s = macros_str.strip()
 
-    # ── Calorías ────────────────────────────────────────────────────
     cal = (
         re.search(r'Cal(?:or[ií]as?)?:\s*([\d.,]+)', s, re.IGNORECASE) or
         re.search(r'([\d.,]+)\s*kcal', s, re.IGNORECASE) or
         re.search(r'([\d.,]+)\s*cal\b', s, re.IGNORECASE)
     )
 
-    # ── Proteínas ───────────────────────────────────────────────────
     p = (
         re.search(r'P(?:rot(?:eína?s?)?)?\s*:\s*([\d.,]+)', s, re.IGNORECASE)
         or re.search(r"(?<![A-Za-z0-9])P\s+([\d.,]+)\s*g\b", s, re.IGNORECASE)
@@ -70,7 +66,6 @@ def parsear_macros_de_texto(
         or re.search(r'prot(?:eína?s?)?\s+([\d.,]+)\s*g', s, re.IGNORECASE)
     )
 
-    # ── Carbohidratos ────────────────────────────────────────────────
     c = (
         re.search(r'C(?:arb(?:ohidrat[eo]s?)?)?\s*:\s*([\d.,]+)', s, re.IGNORECASE) or
         re.search(r'([\d.,]+)\s*g\s*(?:de\s+)?carb(?:ohidrat[eo]s?)?', s, re.IGNORECASE) or
@@ -78,7 +73,6 @@ def parsear_macros_de_texto(
         re.search(r'carb(?:ohidrat[eo]s?)?\s+([\d.,]+)\s*g', s, re.IGNORECASE)
     )
 
-    # ── Grasas ───────────────────────────────────────────────────────
     g = (
         re.search(r'G(?:ras(?:as?)?)?\s*:\s*([\d.,]+)', s, re.IGNORECASE) or
         re.search(r'([\d.,]+)\s*g\s*(?:de\s+)?gras(?:as?)?', s, re.IGNORECASE) or
@@ -97,7 +91,6 @@ def parsear_macros_de_texto(
         carb_val = to_float(c)
         gras_val = to_float(g)
 
-        # Solo kcal: mismo reparto % que CalculadorDietaAutomatica (app.core.macros_diarios)
         if cal_val > 0 and prot_val == 0 and carb_val == 0 and gras_val == 0:
             est = macros_desde_calorias_pct_clasico(cal_val, objetivo_plato)
             prot_val = est["proteinas_g"]
@@ -107,7 +100,6 @@ def parsear_macros_de_texto(
         if cal_val == 0 and prot_val == 0:
             return None
 
-        # Si el modelo dio P/C/G pero olvidó Cal, derivar kcal (Atwater aprox.).
         atwater = 4.0 * prot_val + 4.0 * carb_val + 9.0 * gras_val
         if atwater > 0 and cal_val <= 0:
             cal_val = round(atwater, 1)
@@ -122,7 +114,6 @@ def parsear_macros_de_texto(
         return None
 
 
-# Palabras en nombre/ingredientes que implican aporte proteico relevante (plato típico).
 _PALABRAS_FUENTE_PROTEINA = frozenset(
     (
         "pollo", "pechuga", "muslo", "pavo", "pato", "huevo", "huevos",
@@ -172,7 +163,6 @@ def coherenciar_macros_tarjeta(
     sugiere = _texto_plato_sugiere_proteina(nombre_plato, ingredientes)
 
     if p < 2.0 and sugiere:
-        # Energía ya «llenada» solo con C y G pero el nombre insiste en proteína: reparto mínimo creíble.
         if abs(residual) <= max(8.0, cal * 0.06):
             p_tgt = max(12.0, min(48.0, 0.22 * cal / 4.0))
             carb_kcal = max(0.0, cal - 4.0 * p_tgt - 9.0 * g)
@@ -196,24 +186,21 @@ def calcular_metabolismo_basal(cliente) -> float:
     Calcula la Tasa Metabólica Basal usando la fórmula de Harris-Benedict revisada (Mifflin-St Jeor es otra opción, pero Harris-Benedict es la estándar en el proyecto).
     """
     from datetime import date
-    # Calcular edad a partir de birth_date
     if cliente.birth_date:
         today = date.today()
         edad = today.year - cliente.birth_date.year - ((today.month, today.day) < (cliente.birth_date.month, cliente.birth_date.day))
     else:
-        edad = 30  # Valor por defecto si no hay birth_date
+        edad = 30
     
-    # Determinar género basado en el campo gender del cliente
     genero = getattr(cliente, 'gender', 'M')
     peso = cliente.weight or 75
     estatura = cliente.height or 170
     
-    if genero == 'M':  # Masculino
+    if genero == 'M':
         tmb = 88.362 + (13.397 * peso) + (4.799 * estatura) - (5.677 * edad)
-    else:  # Femenino
+    else:
         tmb = 447.593 + (9.247 * peso) + (3.098 * estatura) - (4.330 * edad)
     
-    # Factor de actividad
     nivel_map = {
         "Sedentario": 1.20,
         "Ligero": 1.375,

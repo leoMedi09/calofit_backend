@@ -28,8 +28,6 @@ from app.services.nutrition.plate.plate_builder import PlatoBuilder
 
 logger = logging.getLogger(__name__)
 
-# ─── Tokens prohibidos por condición dietética ───────────────────────────────
-# Se comparan contra el nombre del plato y sus ingredientes (lowercase).
 _CONDICION_TOKENS: dict[str, set[str]] = {
     "Vegano": {
         "pollo", "pechuga", "muslo", "gallina", "pato", "pavo", "cabrito",
@@ -61,16 +59,10 @@ _CONDICION_TOKENS: dict[str, set[str]] = {
         "galleta", "harina", "cuscuz", "cuscús",
     },
     "Diabetes": {
-        # Azúcares directas
         "azucar", "azúcar", "miel", "mermelada", "jarabe",
-        # Bebidas azucaradas
         "gaseosa", "chicha", "refresco", "jugo azucarado",
-        # Dulces y postres genéricos
         "chocolate", "caramelo", "helado", "torta", "pastel",
         "galleta", "donuts", "churro", "suspiro",
-        # Postres tradicionales peruanos — lista corta y estable (no crece con
-        # cada alimento del catálogo, solo nombres de postre ya conocidos en
-        # la gastronomía peruana). Llevan azúcar/miel aunque el nombre no lo diga.
         "picarones", "mazamorra", "alfajor", "alfajores",
         "tres leches", "cocada", "turron", "turrón", "keke", "queque",
     },
@@ -113,17 +105,12 @@ def _plato_es_apto(nombre: str, ingredientes_str: str, tokens: set[str]) -> bool
     return not any(t in texto for t in tokens)
 
 
-# Confianza mínima para mostrar un plato al usuario
 _MIN_CONFIANZA = 60
 
-# Ventana de exclusión por historial (días)
 _HISTORIAL_DIAS = 3
 
-# Número de candidatos a generar antes de filtrar
 _POOL_SIZE = 30
 
-# ─── Rangos calóricos por momento del día ────────────────────────────────────
-# (kcal_min, kcal_max) — platos fuera de rango son penalizados o descartados
 _RANGOS_MOMENTO: dict[str, tuple[float, float]] = {
     "desayuno":   (150.0,  500.0),
     "almuerzo":   (400.0,  950.0),
@@ -133,46 +120,33 @@ _RANGOS_MOMENTO: dict[str, tuple[float, float]] = {
     "cualquiera": (  0.0, 1200.0),
 }
 
-# ─── Expansión semántica de ingredientes ─────────────────────────────────────
-# Cuando el usuario pide "mariscos", hay que buscar también "camaron", "pulpo", etc.
-# en nombre e ingredientes. Clave = valor normalizado de ingrediente_clave.
 _INGREDIENTE_SINONIMOS: dict[str, list[str]] = {
-    # Mariscos: término genérico + todas las especies comunes
     "mariscos":   ["mariscos", "camaron", "camarón", "langostino", "langosta",
                    "pulpo", "calamar", "almeja", "mejillon", "choro", "cangrejo", "concha"],
-    # Pescados con nombre propio
     "salmon":     ["salmon", "salmón"],
     "atun":       ["atun", "atún"],
     "trucha":     ["trucha"],
     "caballa":    ["caballa"],
     "corvina":    ["corvina"],
-    # Carnes con sinónimos regionales
     "cerdo":      ["cerdo", "chancho", "porcino", "chicharron"],
     "res":        ["res", "ternera", "bistec", "lomo fino", "carne de res"],
     "cabrito":    ["cabrito", "cabrilla"],
     "pato":       ["pato", "pato seco"],
-    # Frutas con nombres alternativos
     "palta":      ["palta", "aguacate"],
     "platano":    ["platano", "plátano"],
     "lucuma":     ["lucuma", "lúcuma"],
-    # Legumbres
     "frejol":     ["frejol", "frijol", "frejoles", "frijoles"],
     "lenteja":    ["lenteja", "lentejas", "lentejón"],
     "arveja":     ["arveja", "arvejas", "alverjita"],
     "garbanzo":   ["garbanzo", "garbanzos"],
     "haba":       ["haba", "habas"],
-    # Cereales y granos
     "quinua":     ["quinua", "quinoa"],
     "pasta":      ["pasta", "fideos", "spaghetti", "tallarín", "tallarin", "tallarines"],
-    # Tubérculos
     "camote":     ["camote", "boniato"],
     "choclo":     ["choclo", "maiz", "maíz", "elote"],
-    # Frutos secos
     "mani":       ["mani", "maní", "mani pelado"],
     "fruto_seco": ["almendra", "nuez", "pecana", "pecanas"],
-    # Semillas
     "semilla":    ["chia", "chía", "linaza", "ajonjoli"],
-    # Lácteos
     "lacteos":    ["mantequilla", "mantequilla sin sal", "crema de leche"],
     "yogur":      ["yogur", "yogurt", "yoghurt"],
 }
@@ -185,26 +159,18 @@ def _tiene_ingrediente(nombre: str, ingredientes_str: str, ing_clave: str) -> bo
     return any(s in texto for s in sinonimos)
 
 
-# ─── Platos típicamente pesados → solo almuerzo ───────────────────────────────
-# Si el nombre normalizado del plato contiene alguna de estas palabras,
-# se excluye automáticamente de cena, desayuno y snack.
 _KEYWORDS_SOLO_ALMUERZO = frozenset({
-    # Guisos y segundos contundentes
     "arroz con pato", "arroz con cabrito", "arroz con pollo",
     "lomo saltado", "seco de res", "seco de cabrito", "seco de pollo",
     "aji de gallina", "ají de gallina",
     "pollo a la brasa", "chicharron de cerdo", "chicharrón",
     "tallarin saltado", "tallarín saltado", "sopa seca",
     "carapulcra", "pepian", "pepián",
-    # Fritos y parrillas pesadas
     "jalea", "sudado de pescado", "caldo de gallina",
-    # Cebiches y tiraditos: platos de mediodía en cultura lambayecana
     "cebiche", "ceviche", "tiradito",
-    # Causas de fondo (la causa rellena es almuerzo; snack ok en porciones pequeñas)
     "causa ferreñafana", "causa rellena",
 })
 
-# ─── Platos ligeros → válidos para cena/desayuno/snack pero NO almuerzo ──────
 _KEYWORDS_LIGEROS = frozenset({
     "sopa", "crema de", "caldo", "ensalada", "tostada", "batido",
     "fruta", "yogurt", "avena", "granola",
@@ -219,21 +185,18 @@ def _es_plato_apto_para_momento(nombre: str, kcal: float, momento: str) -> bool:
     nombre_n = nombre.lower().strip()
     momento_n = (momento or "cualquiera").lower()
 
-    # 1) Platos muy pesados → solo almuerzo
     es_solo_almuerzo = any(kw in nombre_n for kw in _KEYWORDS_SOLO_ALMUERZO)
     if es_solo_almuerzo and momento_n not in ("almuerzo", "cualquiera"):
         return False
 
-    # 2) Platos ligeros → no los recomendamos como almuerzo principal
     es_ligero = any(kw in nombre_n for kw in _KEYWORDS_LIGEROS)
     if es_ligero and momento_n == "almuerzo" and kcal < 300:
-        return False  # una sopita sola no cubre el almuerzo
-
-    # 3) Rango calórico duro por momento
-    kcal_min, kcal_max = _RANGOS_MOMENTO.get(momento_n, (0.0, 1200.0))
-    if kcal > kcal_max * 1.15:   # tolerancia 15% hacia arriba
         return False
-    if kcal < kcal_min * 0.5:    # muy por debajo del mínimo
+
+    kcal_min, kcal_max = _RANGOS_MOMENTO.get(momento_n, (0.0, 1200.0))
+    if kcal > kcal_max * 1.15:
+        return False
+    if kcal < kcal_min * 0.5:
         return False
 
     return True
@@ -252,9 +215,6 @@ class RecomendadorPlatosConfiables:
         self.db = db
         self.plate_builder = plate_builder
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # API PÚBLICA
-    # ─────────────────────────────────────────────────────────────────────────
 
     def recomendar(
         self,
@@ -287,17 +247,13 @@ class RecomendadorPlatosConfiables:
         """
         excluir = set(s.lower().strip() for s in (excluir_nombres or []))
 
-        # 1. Obtener historial reciente del cliente
         historial = self._historial_reciente(client_id, dias=_HISTORIAL_DIAS)
         excluir.update(historial)
 
-        # Tokens prohibidos por condición dietética (Vegano, Vegetariano, etc.)
         tokens_prohibidos = _tokens_prohibidos(condiciones_dieta or [])
 
-        # Pool ampliado cuando hay filtro dietético: más candidatos para compensar descartes
         _pool_efectivo = _POOL_SIZE * 3 if tokens_prohibidos else _POOL_SIZE
 
-        # 2. Candidatos desde BD (platos con macros reales)
         candidatos_bd = self._candidatos_desde_bd(
             deficit_kcal=deficit_kcal,
             deficit_proteina=deficit_proteina,
@@ -310,11 +266,9 @@ class RecomendadorPlatosConfiables:
             tokens_prohibidos=tokens_prohibidos,
         )
 
-        # 3. Mezclar con diversidad (shuffl estable por día)
         seed = self._seed_del_dia(client_id, deficit_kcal, momento_dia)
         rng = random.Random(seed)
 
-        # Separar por similitud alta vs media para garantizar variedad
         alta_similitud = [c for c in candidatos_bd if c["score"] >= 80]
         media_similitud = [c for c in candidatos_bd if 60 <= c["score"] < 80]
         baja_similitud = [c for c in candidatos_bd if c["score"] < 60]
@@ -323,13 +277,10 @@ class RecomendadorPlatosConfiables:
         rng.shuffle(media_similitud)
         rng.shuffle(baja_similitud)
 
-        # Pool mezclado: 60% alta + 30% media + 10% baja
         mezclados = alta_similitud + media_similitud + baja_similitud
 
-        # 4. Seleccionar N con diversidad de tipo
         seleccionados = self._seleccionar_con_diversidad(mezclados, n)
 
-        # 5. FALLBACK: Si no hay suficientes platos, usar LLM para crear nuevos
         if len(seleccionados) < n and self.plate_builder:
             faltantes = n - len(seleccionados)
             logger.info(f"BD pobre para este déficit. Generando {faltantes} platos nuevos vía IA...")
@@ -346,7 +297,6 @@ class RecomendadorPlatosConfiables:
             )
             seleccionados.extend(nuevos_platos)
 
-        # 6. Guardar en historial para evitar repetición
         for plato in seleccionados:
             self._guardar_recomendacion(client_id, plato)
 
@@ -357,9 +307,6 @@ class RecomendadorPlatosConfiables:
 
         return seleccionados
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # CANDIDATOS DESDE BD
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _candidatos_desde_bd(
         self,
@@ -379,7 +326,6 @@ class RecomendadorPlatosConfiables:
         Calcula score de similitud al déficit del usuario.
         """
         try:
-            # Query: platos con todos sus ingredientes teniendo macros válidas
             rows = self.db.execute(text("""
                 SELECT
                     p.id,
@@ -423,7 +369,6 @@ class RecomendadorPlatosConfiables:
                 if not _tiene_ingrediente(nombre, ingredientes_str, ing_clave_norm):
                     continue
 
-            # Filtro dietético: descartar platos con ingredientes prohibidos
             if tokens_prohibidos and not _plato_es_apto(nombre, ingredientes_str, tokens_prohibidos):
                 logger.debug("[Dieta] Plato '%s' descartado por restricción dietética", nombre)
                 continue
@@ -433,9 +378,6 @@ class RecomendadorPlatosConfiables:
             carb = float(row[5] or 0)
             gras = float(row[6] or 0)
 
-            # ── NUEVO: Filtro por momento del día ─────────────────────────────
-            # Descarta platos que no son aptos para el horario pedido.
-            # Ej: "Arroz con Pollo" (524 kcal) no aparece en cena (máx 520 kcal).
             if momento_dia != "cualquiera" and not _es_plato_apto_para_momento(
                 nombre, kcal, momento_dia
             ):
@@ -445,7 +387,6 @@ class RecomendadorPlatosConfiables:
                 )
                 continue
 
-            # Score: qué tan bien cubre el déficit (similitud coseno simplificada)
             score = self._calcular_score(
                 kcal=kcal, prot=prot, carb=carb, gras=gras,
                 d_kcal=deficit_kcal, d_prot=deficit_proteina,
@@ -473,7 +414,6 @@ class RecomendadorPlatosConfiables:
                 "score": score,
             })
 
-        # Ordenar por score desc
         candidatos.sort(key=lambda x: x["score"], reverse=True)
         return candidatos[:pool]
 
@@ -493,24 +433,22 @@ class RecomendadorPlatosConfiables:
         - Que no exceda exageradamente el déficit calórico
         """
         if d_kcal <= 0:
-            d_kcal = 400  # default razonable
+            d_kcal = 400
 
         score = 100.0
 
-        # Penalizar si el plato tiene demasiadas o pocas calorías
         ratio_kcal = kcal / d_kcal
         if ratio_kcal < 0.15:
-            score -= 40    # muy pequeño
+            score -= 40
         elif ratio_kcal < 0.25:
             score -= 20
         elif ratio_kcal <= 1.1:
-            score += 5     # buen rango
+            score += 5
         elif ratio_kcal <= 1.5:
             score -= 10
         else:
-            score -= 30    # excede mucho el déficit
+            score -= 30
 
-        # Puntuación agresiva de Proteína
         if d_prot > 5:
             ratio_prot = prot / d_prot
             if ratio_prot >= 0.8:
@@ -522,7 +460,6 @@ class RecomendadorPlatosConfiables:
             elif ratio_prot < 0.4:
                 score -= 20
             
-        # Puntuación agresiva de Carbohidratos (si el usuario pidió alto en carbos, d_carb se eleva)
         if d_carb > 20:
             ratio_carb = carb / d_carb
             if ratio_carb >= 0.8:
@@ -532,7 +469,6 @@ class RecomendadorPlatosConfiables:
             elif ratio_carb < 0.2:
                 score -= 40
                 
-        # Puntuación agresiva de Grasas (si el usuario pidió keto o alto en grasas, d_gras se eleva)
         if d_gras > 10:
             ratio_gras = gras / d_gras
             if ratio_gras >= 0.8:
@@ -542,21 +478,16 @@ class RecomendadorPlatosConfiables:
             elif ratio_gras < 0.2:
                 score -= 40
 
-        # Penalizar platos con macros extremas solo si no las pidieron
         if gras > kcal * 0.6 and d_gras < 20:
             score -= 40
         if carb < 2 and prot < 5 and d_carb < 20:
             score -= 40
 
-        # ── Penalización extra por exceso calórico para el momento ────────────
-        # Aunque el plato cubra bien el déficit acumulado del día,
-        # si excede el techo del horario (ej. 524 kcal en cena → máx 520),
-        # lo penalizamos fuertemente para que no gane el ranking.
         if momento_dia and momento_dia != "cualquiera":
             _, kcal_max_momento = _RANGOS_MOMENTO.get(momento_dia.lower(), (0.0, 1200.0))
             if kcal > kcal_max_momento:
                 exceso_pct = (kcal - kcal_max_momento) / kcal_max_momento
-                penalizacion = min(50.0, exceso_pct * 120)  # hasta -50 pts
+                penalizacion = min(50.0, exceso_pct * 120)
                 score -= penalizacion
                 logger.debug(
                     "[Score] '%s' penalizado %.1f pts por exceso calórico para %s (%.0f > %.0f kcal)",
@@ -565,9 +496,6 @@ class RecomendadorPlatosConfiables:
 
         return max(0.0, min(100.0, score))
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # DIVERSIDAD Y SELECCIÓN
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _seleccionar_con_diversidad(
         self,
@@ -582,13 +510,9 @@ class RecomendadorPlatosConfiables:
         seleccionados = []
         nombres_vistos = set()
 
-        # Categoriza por ingrediente PRINCIPAL (parte antes del primer "con"/"y"/etc.)
-        # para evitar que "Arroz con Lentejas" y "Lentejas con Verduras"
-        # caigan en la misma categoría ("verdura").
         _RE_CONECTOR = re.compile(r"\s+(?:con|y|a\s+la?|al|en\s+|de\s+)", re.I)
 
         def categoria(nombre: str) -> str:
-            # Parte primaria: antes del primer conector
             partes = _RE_CONECTOR.split(nombre.lower(), maxsplit=1)
             primaria = partes[0].strip()
             nombre_full = nombre.lower()
@@ -596,9 +520,7 @@ class RecomendadorPlatosConfiables:
             def _match(kws: list, texto: str) -> bool:
                 return any(kw in texto for kw in kws)
 
-            # ── Evaluar primaria primero, luego nombre completo ──
             for texto in (primaria, nombre_full):
-                # Proteínas animales
                 if _match(["pollo", "pechuga", "gallina"], texto): return "pollo"
                 if _match(["pescado", "caballa", "corvina", "trucha", "lisa",
                            "mero", "tollo", "cachema", "cebiche", "tiradito",
@@ -608,18 +530,12 @@ class RecomendadorPlatosConfiables:
                 if _match(["cerdo", "chancho", "chicharron"], texto): return "cerdo"
                 if _match(["pato", "pavo", "cabrito"], texto): return "ave"
                 if "huevo" in texto: return "huevo"
-                # Sopas
                 if _match(["sopa", "caldo", "crema de"], texto): return "sopa"
-                # Proteínas vegetales (legumbres)
                 if _match(["lenteja", "garbanzo", "frejol", "frijol", "haba",
                            "arveja", "pallare", "tofu", "soya"], texto): return "legumbre"
-                # Quínoa
                 if _match(["quinua", "quinoa"], texto): return "quinua"
-                # Base arroz
                 if "arroz" in texto: return "arroz"
-                # Tubérculos
                 if _match(["papa", "camote", "yuca", "causa"], texto): return "tuberculo"
-                # Ensaladas y vegetales puros
                 if _match(["ensalada", "verdura", "vegetal"], texto): return "vegetal"
             return "otro"
 
@@ -642,7 +558,6 @@ class RecomendadorPlatosConfiables:
             categorias_usadas[cat] = categorias_usadas.get(cat, 0) + 1
             seleccionados.append(candidato)
 
-        # Si no alcanzamos N, relajar restricción de categoría
         if len(seleccionados) < n:
             for candidato in candidatos:
                 if len(seleccionados) >= n:
@@ -654,9 +569,6 @@ class RecomendadorPlatosConfiables:
 
         return seleccionados
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # GENERACIÓN EN TIEMPO REAL (ENRIQUECIMIENTO DE BD)
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _generar_y_validar_nuevos_platos(
         self,
@@ -709,7 +621,6 @@ class RecomendadorPlatosConfiables:
                 "]"
             )
 
-            # Ejecutar LLM síncronamente (en un thread si estamos en async loop)
             import asyncio
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -739,7 +650,6 @@ class RecomendadorPlatosConfiables:
                         logger.warning(f"Plato LLM '{nombre}' descartado por no contener '{ingrediente_clave}'.")
                         continue
                 
-                # Construir plato (esto lo valida semánticamente y nutricionalmente, y LO GUARDA EN BD)
                 resultado = self.plate_builder.construir_plato(
                     nombre_plato=nombre,
                     ingredientes=ings,
@@ -747,7 +657,6 @@ class RecomendadorPlatosConfiables:
                     tipo_plato=momento_dia,
                 )
 
-                # Si el plato es válido, lo agregamos a la respuesta
                 if resultado.exito and resultado.confianza_global >= _MIN_CONFIANZA:
                     if isinstance(resultado.macros_totales, dict):
                         kcal = resultado.macros_totales.get('calorias', 0)
@@ -802,9 +711,6 @@ class RecomendadorPlatosConfiables:
             logger.warning(f"Error generando platos nuevos: {e}")
             return []
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # HISTORIAL Y PERSISTENCIA
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _historial_reciente(self, client_id: int, dias: int = 3) -> set:
         """Retorna nombres de platos recomendados en los últimos N días."""

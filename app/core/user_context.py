@@ -6,16 +6,14 @@ from app.core.objetivo_utils import normalizar_objetivo, MANTENIMIENTO
 class UserContext:
     perfil_id: int
     nombre: str
-    objetivo_normalizado: str  # DEFICIT, MANTENIMIENTO, SUPERAVIT
+    objetivo_normalizado: str
     condiciones_medicas: List[str] = field(default_factory=list)
     restricciones_alimentarias: List[str] = field(default_factory=list)
     
-    # Balance del día
     consumido: float = 0.0
     meta: float = 2000.0
     quemado: float = 0.0
     
-    # Plan nutricional actual
     plan_actual: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod

@@ -19,19 +19,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-# ── Bootstrapping de paths (necesario para imports dentro de Docker) ──────────
 sys.path.insert(0, "/app")
 
-# ── Imports del proyecto ──────────────────────────────────────────────────────
 from app.core.database import SessionLocal
 from app.models.client import Client
 from app.services.asistente.asistente_registro_comida import registro_comida_handler
 from app.services.ia_service import ia_engine
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Constantes de presentación
-# ══════════════════════════════════════════════════════════════════════════════
 
 SEP  = "─" * 80
 SEP2 = "═" * 80
@@ -42,30 +36,22 @@ STATUS_ERROR = "ERROR"
 STATUS_SKIP  = "SKIP "
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Definición de casos de prueba
-# ══════════════════════════════════════════════════════════════════════════════
-
 @dataclass
 class TestCase:
     test_id: str
     grupo: str
     mensaje: str
 
-    # Expectativas de ÉXITO (comida registrada)
-    expect_registro: bool = True          # True → debe registrarse (success+kcal>0)
+    expect_registro: bool = True
     kcal_min: float = 0.0
     kcal_max: float = 9999.0
-    foods_min: int = 0                    # mínimo de alimentos detectados en result["alimentos"]
-    foods_max: int = 99                   # máximo de alimentos detectados
+    foods_min: int = 0
+    foods_max: int = 99
 
-    # Expectativa de BLOQUEO (no debe registrarse)
-    expect_blocked: bool = False          # True → debe ser bloqueado (no_alimento, ficcion, etc.)
+    expect_blocked: bool = False
 
-    # Etiqueta descriptiva
     descripcion: str = ""
 
-    # Resultado real (rellenado durante la ejecución)
     resultado: Optional[dict] = field(default=None, repr=False)
     status: str = ""
     detalle: str = ""
@@ -74,11 +60,8 @@ class TestCase:
     duracion_s: float = 0.0
 
 
-# ── Definición de todos los casos ─────────────────────────────────────────────
-
 CASOS: list[TestCase] = [
 
-    # ── GRUPO 1: Alimentos individuales con/sin gramos ────────────────────────
 
     TestCase(
         test_id="G1-01",
@@ -131,7 +114,6 @@ CASOS: list[TestCase] = [
         descripcion="Manzana — porción entera ~120g, ~50-80 kcal",
     ),
 
-    # ── GRUPO 2: Platos compuestos (registro único) ───────────────────────────
 
     TestCase(
         test_id="G2-06",
@@ -164,7 +146,6 @@ CASOS: list[TestCase] = [
         descripcion="Avena con leche — debe registrarse como un solo item",
     ),
 
-    # ── GRUPO 3: Concatenación (varios alimentos en un mensaje) ───────────────
 
     TestCase(
         test_id="G3-09",
@@ -197,7 +178,6 @@ CASOS: list[TestCase] = [
         descripcion="Pechuga 200g + arroz 100g — dos gramajes explícitos",
     ),
 
-    # ── GRUPO 4: Alimentos nuevos / complejos ─────────────────────────────────
 
     TestCase(
         test_id="G4-12",
@@ -230,7 +210,6 @@ CASOS: list[TestCase] = [
         descripcion="Batido plátano+avena — smoothie 200-500 kcal",
     ),
 
-    # ── GRUPO 5: Anti-fraude / no-alimentos ───────────────────────────────────
 
     TestCase(
         test_id="G5-15",
@@ -258,15 +237,13 @@ CASOS: list[TestCase] = [
     ),
 ]
 
-# ── Grupo 6: suma acumulativa (dos registros separados) ───────────────────────
-# Se definen como casos especiales procesados por _run_grupo6()
 
 CASO_SUM_A = TestCase(
     test_id="G6-18",
     grupo="Suma",
     mensaje="comí 100g de arroz blanco",
     expect_registro=True,
-    kcal_min=70,    # arroz blanco COCIDO 100g = 97 kcal (INS/CENAN)
+    kcal_min=70,
     kcal_max=160,
     foods_min=1,
     descripcion="Arroz blanco 100g — Paso 1 de suma (~97 kcal cocido)",
@@ -289,10 +266,6 @@ CASO_SUM_VERIFY = TestCase(
 )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Motor de ejecución
-# ══════════════════════════════════════════════════════════════════════════════
-
 async def _ejecutar_caso(caso: TestCase, perfil, plan_hoy_data: dict, db) -> None:
     """Ejecuta un único caso de prueba y rellena caso.status / caso.detalle."""
     t0 = time.perf_counter()
@@ -313,7 +286,6 @@ async def _ejecutar_caso(caso: TestCase, perfil, plan_hoy_data: dict, db) -> Non
     caso.duracion_s = time.perf_counter() - t0
     caso.resultado = result
 
-    # Extraer campos clave del resultado
     success       = result.get("success", False)
     tipo          = result.get("tipo_detectado", "")
     datos         = result.get("datos") or {}
@@ -324,9 +296,7 @@ async def _ejecutar_caso(caso: TestCase, perfil, plan_hoy_data: dict, db) -> Non
     caso.kcal_real  = kcal
     caso.foods_real = alimentos
 
-    # ── Evaluación: casos esperados como BLOQUEADOS ───────────────────────────
     if caso.expect_blocked:
-        # Un bloqueo correcto implica: success=False Y kcal=0
         is_blocked = (not success) and (kcal == 0)
         if is_blocked:
             caso.status  = STATUS_PASS
@@ -339,7 +309,6 @@ async def _ejecutar_caso(caso: TestCase, perfil, plan_hoy_data: dict, db) -> Non
             )
         return
 
-    # ── Evaluación: casos esperados como REGISTRO ─────────────────────────────
     if caso.expect_registro:
         problemas = []
 
@@ -364,7 +333,6 @@ async def _ejecutar_caso(caso: TestCase, perfil, plan_hoy_data: dict, db) -> Non
             caso.detalle = " | ".join(problemas) + f" | alimentos={alimentos}"
         return
 
-    # Caso sin expectativa definida → marcar skip
     caso.status  = STATUS_SKIP
     caso.detalle = "Sin expectativa definida"
 
@@ -390,11 +358,9 @@ async def _run_grupo6(perfil, plan_hoy_data: dict, db) -> TestCase:
     if CASO_SUM_B.status not in (STATUS_PASS,):
         problemas.append(f"G6-19 no pasó: {CASO_SUM_B.status} — {CASO_SUM_B.detalle}")
     if not problemas:
-        # Verificar que ambas kcal sean razonables individualmente
         if kcal_a <= 0 or kcal_b <= 0:
             problemas.append(f"Una de las kcal es 0: kcal_A={kcal_a}, kcal_B={kcal_b}")
         else:
-            # La suma debe estar dentro del rango combinado esperado
             sum_min = CASO_SUM_A.kcal_min + CASO_SUM_B.kcal_min
             sum_max = CASO_SUM_A.kcal_max + CASO_SUM_B.kcal_max
             if suma < sum_min - 5 or suma > sum_max + 5:
@@ -414,10 +380,6 @@ async def _run_grupo6(perfil, plan_hoy_data: dict, db) -> TestCase:
 
     return CASO_SUM_VERIFY
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Presentación de resultados
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _print_caso_inline(caso: TestCase) -> None:
     """Imprime una línea de resultado para la tabla de resumen."""
@@ -454,17 +416,12 @@ def _print_detalle_caso(caso: TestCase) -> None:
     print(f"  Duracion  : {caso.duracion_s:.2f}s")
     print(f"  Detalle   : {caso.detalle}")
 
-    # Mostrar la respuesta del asistente si está disponible
     if caso.resultado:
         msg = caso.resultado.get("mensaje") or ""
         if msg:
             msg_short = msg[:160] + ("..." if len(msg) > 160 else "")
             print(f"  Respuesta : {msg_short}")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Main asíncrono
-# ══════════════════════════════════════════════════════════════════════════════
 
 async def main_async() -> int:
     """
@@ -479,7 +436,6 @@ async def main_async() -> int:
     print(f"  Modo   : Directo al service layer (sin HTTP)")
     print(SEP2)
 
-    # ── Obtener perfil de prueba ──────────────────────────────────────────────
     db = SessionLocal()
     try:
         perfil = db.query(Client).filter(Client.id == 55).first()
@@ -492,7 +448,6 @@ async def main_async() -> int:
         print(f"  Email: {perfil.email}")
         print(f"  Peso: {perfil.weight}kg | Altura: {perfil.height}cm")
 
-        # Plan del día mínimo (requerido por el handler)
         plan_hoy_data = {
             "calorias_dia":       2000,
             "proteinas_g":        150,
@@ -500,7 +455,6 @@ async def main_async() -> int:
             "grasas_g":            55,
         }
 
-        # ── Ejecutar G1–G5 ────────────────────────────────────────────────────
         print(f"\n{SEP}")
         print("  EJECUTANDO CASOS G1–G5 (casos individuales + anti-fraude)")
         print(SEP)
@@ -513,7 +467,6 @@ async def main_async() -> int:
             _print_caso_inline(caso)
             todos_los_casos.append(caso)
 
-        # ── Ejecutar G6 (suma acumulativa) ────────────────────────────────────
         print(f"\n{SEP}")
         print("  EJECUTANDO GRUPO 6 — Suma acumulativa (2 registros separados)")
         print(SEP)
@@ -532,7 +485,6 @@ async def main_async() -> int:
         _print_caso_inline(CASO_SUM_VERIFY)
         todos_los_casos.append(CASO_SUM_VERIFY)
 
-        # ── Tabla de resumen completa ─────────────────────────────────────────
         print(f"\n{SEP2}")
         print("  TABLA DE RESULTADOS DETALLADA")
         print(SEP2)
@@ -551,7 +503,6 @@ async def main_async() -> int:
                 f"{kcal_s:>6} | {nfoods:>7} | {caso.status}"
             )
 
-        # ── Diagnóstico de casos fallidos ─────────────────────────────────────
         fallidos = [c for c in todos_los_casos if c.status in (STATUS_FAIL, STATUS_ERROR)]
         if fallidos:
             print(f"\n{SEP2}")
@@ -559,7 +510,6 @@ async def main_async() -> int:
             for caso in fallidos:
                 _print_detalle_caso(caso)
 
-        # ── Conteo final ──────────────────────────────────────────────────────
         total   = len(todos_los_casos)
         n_pass  = sum(1 for c in todos_los_casos if c.status == STATUS_PASS)
         n_fail  = sum(1 for c in todos_los_casos if c.status == STATUS_FAIL)

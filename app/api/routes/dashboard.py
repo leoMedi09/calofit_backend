@@ -23,7 +23,6 @@ async def get_daily_summary(
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     
-    # 1. Obtener datos de consumo real del historial
     hoy = get_peru_date()
     progreso_hoy = db.query(ProgresoCalorias).filter(
         ProgresoCalorias.client_id == cliente_id,
@@ -37,7 +36,6 @@ async def get_daily_summary(
         "grasas": progreso_hoy.grasas_consumidas if progreso_hoy else 0.0
     }
     
-    # 2. Obtener el plan nutricional activo
     plan_maestro = db.query(PlanNutricional).filter(
         PlanNutricional.client_id == cliente_id
     ).order_by(PlanNutricional.fecha_creacion.desc()).first()
@@ -69,7 +67,6 @@ async def get_daily_summary(
             
             mensaje_cliente = ""
             if estado_frontend == "validado" and es_condicion_critica:
-                # Aprobado + condición crítica: seguimiento especial activo
                 mensaje_cliente = "✅ Plan aprobado. Tu nutricionista te acompaña con seguimiento especial por tu condición médica."
             elif estado_frontend == "validado":
                 mensaje_cliente = "✅ Tu nutricionista ha validado tu plan. ¡Sigue así!"
@@ -100,7 +97,6 @@ async def get_daily_summary(
                 "ai_strategic_focus": cliente.ai_strategic_focus
             }
     else:
-        # FALLBACK: Usar el cálculo centralizado de utils.py
         calorias_fallback = calcular_metabolismo_basal(cliente)
         _goal = (cliente.goal or "").lower().strip()
         if "perder" in _goal:
@@ -141,7 +137,6 @@ async def get_daily_summary(
             "ai_strategic_focus": cliente.ai_strategic_focus
         }
 
-    # 3. Generar Insight
     meta_calorias = plan_objetivo["calorias_objetivo"]
     consumido = consumo_actual["calorias"]
     if consumido == 0:

@@ -7,15 +7,9 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
-# Subcadenas: si alguna aparece en el nombre del alimento (lowercased) → bloquear.
-# Criterios: artifacts OCR de INS/CENAN, fauna exótica andina/amazónica no consumida
-# en la costa lambayecana, algas andinas, y vísceras extremas inapropiadas para un
-# contexto de nutrición deportiva.
 BLOQUE_SUBCADENAS_ALIMENTO: tuple[str, ...] = (
-    # OCR artifacts INS/CENAN
     "eledón",
     "eledon",
-    # Fauna exótica andina/amazónica — no disponible en Lambayeque
     "llama",
     "alpaca",
     "venado",
@@ -28,35 +22,29 @@ BLOQUE_SUBCADENAS_ALIMENTO: tuple[str, ...] = (
     "paiche",
     "aska",
     "ziqui",
-    "cuy, carne",   # "cuy" solo false-positiva con "maracuyá" → ver BLOQUE_EXACTO_ALIMENTO
-    "rana, carne",  # "rana" solo false-positiva con "granada"/"granadilla"
-    # Algas andinas
+    "cuy, carne",
+    "rana, carne",
     "cushuro",
     "nostoc",
-    # Vísceras extremas — confusas en recomendaciones deportivas
     "sesos",
     "criadilla",
     "sangre",
     "ubre",
     "bofe",
-    # Legumbres/granos de regiones amazónicas o andinas remotas — no reconocibles
-    # en Lambayeque y generan nombres de plato extraños cuando el LLM los usa literalmente
-    "poroto de cumbasa",   # Ucayali
-    "frejol ucayalino",    # Amazonía
-    "frejol shimpe",       # variedad amazónica
-    "frejol tarhui",       # Andino (chocho crudo/harina)
-    "frejol vacapaleta",   # variedad regional remota
-    "frejol terciopelo",   # Mucuna pruriens — legumbre forrajera, no alimentaria cotidiana
-    "frejol zarandaja",    # variedad andina poco conocida
-    "frejol nucya",        # variedad andina poco conocida
-    "hemico leguminoso",   # nombre técnico de laboratorio, no es un alimento cotidiano
-    "chocho",              # tarwi crudo — amargo, requiere preparación especial
+    "poroto de cumbasa",
+    "frejol ucayalino",
+    "frejol shimpe",
+    "frejol tarhui",
+    "frejol vacapaleta",
+    "frejol terciopelo",
+    "frejol zarandaja",
+    "frejol nucya",
+    "hemico leguminoso",
+    "chocho",
 )
 
-# Nombres exactos (lowercased, stripped) que no son capturables de forma segura
-# por BLOQUE_SUBCADENAS sin producir falsos positivos.
 BLOQUE_EXACTO_ALIMENTO: frozenset[str] = frozenset({
-    "cuy",  # entrada standalone en catálogo KNN; "cuy" sola matchea "maracuyá"
+    "cuy",
 })
 
 

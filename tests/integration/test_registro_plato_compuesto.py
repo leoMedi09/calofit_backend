@@ -54,7 +54,6 @@ class TestRegistroPlatoCompuesto:
             "Me metí un poco de arroz con lentejas", sample_client, plan_hoy, db, ia_engine
         )
         assert resultado["success"] is True
-        # Solo el plato completo, nunca sus componentes por separado.
         assert resultado["alimentos"] == ["Arroz con lentejas"]
 
         filas = (

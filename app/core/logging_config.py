@@ -17,13 +17,11 @@ def get_logger(name: str) -> logging.Logger:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # File handler — WARNING+ to logs/error.log (5 MB, 3 backups)
     fh = RotatingFileHandler(_LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
     fh.setLevel(logging.WARNING)
     fh.setFormatter(fmt)
     logger.addHandler(fh)
 
-    # Console handler — DEBUG+ (dev visibility, silenced in prod by log level)
     ch = logging.StreamHandler()
     ch.setLevel(logging.DEBUG)
     ch.setFormatter(fmt)

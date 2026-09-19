@@ -30,8 +30,6 @@ MODEL_DIR = Path("app/models/ai_models")
 DATA_DIR = Path("scripts/data")
 
 
-# ─── RF (supervisado) ────────────────────────────────────────────────────────
-
 def evaluar_rf():
     print("\n" + "=" * 65)
     print("EVALUACIÓN RF — perfil_adherencia.pkl (modelo SUPERVISADO)")
@@ -43,11 +41,11 @@ def evaluar_rf():
         return
 
     bundle = joblib.load(clf_path)
-    if hasattr(bundle, "modelo"):  # soporte legacy (clase serializada)
+    if hasattr(bundle, "modelo"):
         rf = bundle.modelo
         features = bundle.features
         label_map = {1: "PERFIL_C", 2: "PERFIL_B", 3: "PERFIL_A"}
-    else:  # formato dict (recomendado)
+    else:
         rf = bundle["rf_model"]
         features = bundle["features"]
         label_map = bundle["label_map"]
@@ -63,7 +61,6 @@ def evaluar_rf():
     df["Perfil"] = df["Experience_Level"].map({1: "PERFIL_C", 2: "PERFIL_B", 3: "PERFIL_A"})
     df = df.dropna(subset=["Perfil"])
 
-    # Reconstruir las features exactamente como en entrenar_perfil_adherencia.py
     df["Gender_Enc"] = (df["Gender"] == "Male").astype(int)
     df["Height_cm"] = df["Height (m)"] * 100
     if "Workout_Type" in df.columns:
@@ -99,8 +96,6 @@ def evaluar_rf():
         print("  ⚠ Por debajo del umbral — considerar reentrenar (retrain_rf_calofit.py).")
 
 
-# ─── KNN (no supervisado) ──────────────────────────────────────────────────────
-
 def _cargar_knn():
     knn_path = MODEL_DIR / "recomendador_knn.pkl"
     if not knn_path.exists():
@@ -121,7 +116,6 @@ def _evaluar_estructura_espacio(knn, scaler, df):
     features = ["calorias_100g", "proteina_100g", "carbohindratos_100g", "grasas_100g"]
     X_scaled = scaler.transform(df[features].values)
 
-    # Distancia al vecino más cercano (columna 0 es el propio punto, dist=0)
     distancias, _ = knn.kneighbors(X_scaled, n_neighbors=2)
     dist_vecino = distancias[:, 1]
     print(f"  Distancia coseno promedio al vecino más cercano: {dist_vecino.mean():.4f}")
@@ -129,9 +123,6 @@ def _evaluar_estructura_espacio(knn, scaler, df):
     print("  (cercano a 0 = el catálogo tiene 'vecinos' nutricionales densos;")
     print("   cercano a 1 = alimentos aislados, sin equivalentes cercanos)")
 
-    # Silhouette score sobre clusters K-Means en el mismo espacio escalado.
-    # No usa las predicciones del KNN — solo valida si las features
-    # (kcal, prot, carb, gras escalados) tienen estructura separable.
     from sklearn.cluster import KMeans
     from sklearn.metrics import davies_bouldin_score, silhouette_score
 
@@ -205,7 +196,6 @@ def _evaluar_diversidad_cobertura(n_consultas: int = 100):
             vistos.add(r["alimento"].lower().strip())
             todas_recos.append(r["alimento"])
 
-        # ILD — distancia coseno promedio entre pares dentro de la lista
         if len(recos) >= 2:
             item_vecs = []
             for r in recos:
@@ -360,8 +350,6 @@ def evaluar_knn():
     print("  - Anti-repetición: los 3 platos finales del LLM se persisten en")
     print("    HistorialRecomendacion (plato_id=NULL) para excluirlos en las próximas 48h.")
 
-
-# ─── Main ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     evaluar_rf()

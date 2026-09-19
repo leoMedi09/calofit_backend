@@ -40,10 +40,6 @@ def plan_hoy():
     return {"calorias_dia": 2616, "proteinas_g": 160, "carbohidratos_g": 240, "grasas_g": 60}
 
 
-# ════════════════════════════════════════════════════════════════════════
-# SECCIÓN 1 — Consistencia matemática (Groq mockeado: necesita números
-# controlados, no creatividad del LLM).
-# ════════════════════════════════════════════════════════════════════════
 @pytest.mark.integration
 class TestConsistenciaMatematica:
 
@@ -77,9 +73,6 @@ class TestConsistenciaMatematica:
     async def test_cantidad_multiplica_macros_correctamente(self, db, sample_client, plan_hoy):
         async def mock_groq(prompt, max_tokens=800, temp=0.7, model=None):
             if "extrae todos los alimentos" in prompt.lower():
-                # 3 huevos, macros POR UNIDAD (convención ya documentada en
-                # el código: prot_g/carb_g/grasa_g son por unidad cuando
-                # cantidad > 1).
                 return json.dumps({"alimentos": [
                     {"nombre": "Huevo", "es_real": True, "cantidad": 3,
                      "porcion_g": 50, "kcal": 70, "prot_g": 6, "carb_g": 0.5, "grasa_g": 5},
@@ -96,20 +89,13 @@ class TestConsistenciaMatematica:
         assert len(filas) == 3, f"Se esperaban 3 filas (una por huevo), hay {len(filas)}"
 
         prog = _progreso_de_hoy(db, sample_client.id)
-        # 3 huevos × (4*6 + 4*0.5 + 9*5) = 3 × 71 = 213 kcal
         kcal_esperado_por_unidad = 4 * 6 + 4 * 0.5 + 9 * 5
         assert abs(prog.calorias_consumidas - kcal_esperado_por_unidad * 3) < 2, (
             f"El total no refleja 3 huevos multiplicados: {prog.calorias_consumidas} "
             f"(esperado ~{kcal_esperado_por_unidad * 3})"
         )
 
-    # test_correccion_reemplaza_no_acumula (2→3 huevos) removido: mismo escenario
-    # cubierto por test_correccion_registro_nutricional.py::test_correccion_actualiza_sin_duplicar.
 
-
-# ════════════════════════════════════════════════════════════════════════
-# SECCIÓN 2 — Aislamiento de _macro_cache entre usuarios distintos.
-# ════════════════════════════════════════════════════════════════════════
 @pytest.mark.integration
 class TestAislamientoCache:
 
@@ -124,13 +110,10 @@ class TestAislamientoCache:
         comportamiento actual para que quede documentado, no asumido."""
         from app.services.llm_registro import cache_macros, _buscar_en_cache
 
-        # Cliente A registra con un valor MUY específico (ej. de una etiqueta)
         cache_macros("Yogur griego marca X", {
             "nombre": "Yogur griego marca X", "kcal": 999, "prot_g": 50, "carb_g": 1, "grasa_g": 1,
         })
 
-        # Si otro "usuario" (en código, simplemente otra llamada) menciona
-        # el mismo nombre normalizado, antes de que expire el TTL...
         encontrado = _buscar_en_cache("Comí un yogur griego marca x")
         if encontrado and abs(encontrado.get("kcal", 0) - 999) < 1:
             pytest.xfail(

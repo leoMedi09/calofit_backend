@@ -18,7 +18,6 @@ class IngredienteDTO(BaseModel):
     fingerprint: Optional[str] = None
 
 
-# Alias para compatibilidad con código que importe ValidationResultDTO
 ValidationResultDTO = ValidationResult
 
 
@@ -41,11 +40,9 @@ class PlatoConstructionResultDTO(BaseModel):
     ingredientes: List[IngredienteDTO]
     macros_totales: MacrosDTO
 
-    # Validaciones — usa ValidationResult directamente (sin conversión)
     validacion_semantica: ValidationResult
     validacion_nutricional: ValidationResult
 
-    # Metadata
     fingerprint: str
     confianza_global: int = Field(ge=0, le=100)
     cached: bool = False

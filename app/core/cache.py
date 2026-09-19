@@ -12,7 +12,6 @@ from typing import Any, Optional
 from app.core.config import settings
 
 _lock = threading.Lock()
-# key -> (expiry_epoch_seconds, json_str)
 _store: dict[str, tuple[float, str]] = {}
 
 _CACHE_PREFIX = "calofit"

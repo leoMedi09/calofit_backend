@@ -15,7 +15,6 @@ valor, hazlo aquí — nunca a mano en el prompt.
 
 from typing import Dict
 
-# ── Cardio (con variantes de intensidad para que el LLM elija desde texto libre) ──
 METS_CARDIO: Dict[str, float] = {
     "caminata lenta": 3.0,
     "caminata rápida": 4.5,
@@ -38,7 +37,6 @@ METS_CARDIO: Dict[str, float] = {
     "remo maquina": 7.0,
 }
 
-# ── Fuerza (gym) ──────────────────────────────────────────────────────────
 METS_FUERZA: Dict[str, float] = {
     "press banca": 5.0,
     "press militar": 5.0,
@@ -68,7 +66,6 @@ METS_FUERZA: Dict[str, float] = {
     "fondos en paralelas": 8.0,
 }
 
-# ── Funcional / HIIT ──────────────────────────────────────────────────────
 METS_FUNCIONAL: Dict[str, float] = {
     "burpees": 10.0,
     "box jumps": 10.0,
@@ -82,7 +79,6 @@ METS_FUNCIONAL: Dict[str, float] = {
     "mountain climbers": 8.0,
 }
 
-# ── Deportes ──────────────────────────────────────────────────────────────
 METS_DEPORTES: Dict[str, float] = {
     "fútbol": 7.0,
     "futbol": 7.0,
@@ -94,11 +90,6 @@ METS_DEPORTES: Dict[str, float] = {
     "boxeo sparring": 9.0,
 }
 
-# ── Alias y catálogo extendido — SOLO para matching del registro manual.
-# No aparecen en el prompt del LLM (no hace falta, el LLM ya razona variantes
-# y sinónimos); existen aquí para que el lookup por substring del Constructor
-# de Rutinas reconozca nombres cortos o coloquiales ("nadar", "sentadilla",
-# "remo", "gym", etc.) y caiga en el MET correcto de las tablas de arriba.
 METS_EXTRA: Dict[str, float] = {
     "pesas": 5.0,
     "pesa": 5.0,
@@ -185,9 +176,7 @@ METS_EXTRA: Dict[str, float] = {
     "pilates": 3.5,
     "stretching": 2.5,
     "estiramientos": 2.5,
-    # ponytail: promedio recreativa(6.0)/intensa(10.0) — el registro manual no
-    # captura intensidad como el LLM; si se agrega un selector, usar las claves
-    # específicas de METS_CARDIO en su lugar.
+    # ponytail: promedio recreativa(6.0)/intensa(10.0); si se agrega un selector de intensidad, usar METS_CARDIO
     "natación": 7.0,
     "natacion": 7.0,
     "nadar": 7.0,

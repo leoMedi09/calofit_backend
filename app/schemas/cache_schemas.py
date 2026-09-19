@@ -6,8 +6,6 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 
-# ─── AppCacheAlimentos ────────────────────────────────────────────────────────
-
 class AppCacheAlimentosCreate(BaseModel):
     food_normalized: str
     user_id:         Optional[int] = None
@@ -26,8 +24,6 @@ class AppCacheAlimentosResponse(AppCacheAlimentosCreate):
         from_attributes = True
 
 
-# ─── AppCachePlatos ───────────────────────────────────────────────────────────
-
 class AppCachePlatosCreate(BaseModel):
     plato_normalized: str
     user_id:          Optional[int] = None
@@ -44,8 +40,6 @@ class AppCachePlatosResponse(AppCachePlatosCreate):
     class Config:
         from_attributes = True
 
-
-# ─── AlimentoSinResolver ─────────────────────────────────────────────────────
 
 class AlimentoSinResolverCreate(BaseModel):
     nombre_original:    str

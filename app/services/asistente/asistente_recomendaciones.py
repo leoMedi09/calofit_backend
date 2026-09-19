@@ -22,7 +22,6 @@ from app.services.ml_service import ml_perfil, ml_recomendador
 class RecomendacionesHandler:
     """Orquesta las recomendaciones nutricionales usando KNN + historial."""
 
-    # ── API pública ──────────────────────────────────────────────────────────
 
     def preparar_features_rf(self, perfil, db: Session) -> Dict[str, Any]:
         """
@@ -38,7 +37,6 @@ class RecomendacionesHandler:
         hoy     = get_peru_date()
         semana  = hoy - timedelta(days=7)
 
-        # Frecuencia de entrenamiento real (registros de progreso con quemadas > 0)
         registros_activos = (
             db.query(ProgresoCalorias)
             .filter(
@@ -49,7 +47,6 @@ class RecomendacionesHandler:
             .count()
         )
 
-        # Promedio de calorías quemadas por día activo
         from sqlalchemy import func as _f
         avg_quemadas = (
             db.query(_f.avg(ProgresoCalorias.calorias_quemadas))
@@ -67,7 +64,6 @@ class RecomendacionesHandler:
         altura_cm   = float(getattr(perfil, "height", None) or 170.0)
         session_h   = float(getattr(perfil, "session_duration", None) or 1.0)
         _wt_raw     = str(getattr(perfil, "workout_type", "") or "").strip()
-        # Traducir valores en español a los nombres exactos del dataset Kaggle
         _WT_MAP = {
             "fuerza": "Strength", "pesas": "Strength", "musculacion": "Strength",
             "cardio": "Cardio",
@@ -84,10 +80,10 @@ class RecomendacionesHandler:
             "workout_freq":  registros_activos,
             "session_hours": session_h,
             "calories":      round(float(avg_quemadas), 1),
-            "fat_pct":       25.0,   # no disponible en BD → default seguro
-            "water":         2.0,    # no disponible en BD → default seguro
-            "avg_bpm":       140.0,  # no disponible en BD → default seguro
-            "resting_bpm":   65.0,   # no disponible en BD → default seguro
+            "fat_pct":       25.0,
+            "water":         2.0,
+            "avg_bpm":       140.0,
+            "resting_bpm":   65.0,
             "workout_type":  workout_type,
         }
 
@@ -137,7 +133,6 @@ class RecomendacionesHandler:
         excluir += list(getattr(perfil, "forbidden_foods", None) or [])
 
         recommended = list(getattr(perfil, "recommended_foods", None) or [])
-        # Fetch extra candidates: 4× when dietary filter active, 2× for boosting preferred
         _hay_dieta = bool(condiciones_dieta)
         n_fetch = n * 4 if _hay_dieta else (n * 2 if recommended else n)
 
@@ -150,7 +145,6 @@ class RecomendacionesHandler:
             excluir_nombres    = excluir,
         )
 
-        # Filtrar por restricciones dietéticas (Vegano / Vegetariano / Lactosa / Celíaco / Diabetes)
         if _hay_dieta:
             try:
                 from app.services.recomendador_platos import _tokens_prohibidos
@@ -166,7 +160,6 @@ class RecomendacionesHandler:
             except Exception:
                 pass
 
-        # Boost foods the nutritionist explicitly recommended → move to front
         if recommended and len(recs) > n:
             rec_norm = {r.lower() for r in recommended}
             preferred = [r for r in recs if any(
@@ -204,7 +197,6 @@ class RecomendacionesHandler:
         )
         db.commit()
 
-    # ── Privados ─────────────────────────────────────────────────────────────
 
     def _nombres_historial_reciente(
         self, client_id: int, db: Session, dias: int = 7

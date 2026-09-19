@@ -32,7 +32,6 @@ async def generar_tecnica(nombre: str) -> str:
     prompt = PROMPT_TECNICA.format(nombre=nombre)
     try:
         resp = await ia_engine._llamar_groq(prompt=prompt, max_tokens=200, temp=0.3)
-        # Verificar que tenga al menos un paso numerado
         if "1." in resp:
             return resp.strip()
     except Exception as e:
@@ -67,7 +66,6 @@ async def main():
             print("SKIP (sin respuesta)")
             errores += 1
 
-        # Pausa para no saturar rate limit de Groq
         if (i + 1) % 10 == 0:
             print("  [pausa 3s para rate limit...]")
             await asyncio.sleep(3)

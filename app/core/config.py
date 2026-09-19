@@ -2,8 +2,6 @@ import os
 import warnings
 from dotenv import load_dotenv
 
-# Cargar variables de entorno desde .env
-# Preservamos DATABASE_URL original del contenedor si existe
 _orig_db_url = os.getenv("DATABASE_URL")
 load_dotenv(override=True)
 if _orig_db_url is not None:
@@ -28,29 +26,22 @@ class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GROQ_BACKUP_API_KEY: str = os.getenv("GROQ_BACKUP_API_KEY", "")
-    # Timeout HTTP hacia api.groq.com (lectura; prompts largos + 1200 tokens pueden tardar).
     GROQ_TIMEOUT_SEC: float = float(os.getenv("GROQ_TIMEOUT_SEC", "180"))
     GROQ_MAX_RETRIES: int = int(os.getenv("GROQ_MAX_RETRIES", "2"))
-    # Si es true, no se llama a Groq para clasificar modo antes de ``consultar`` (solo heurística local).
     CALOFIT_DISABLE_CLASIFICAR_MODO_LLM: bool = os.getenv(
         "CALOFIT_DISABLE_CLASIFICAR_MODO_LLM", ""
     ).strip().lower() in ("1", "true", "yes", "on")
     FATSECRET_CLIENT_ID: str = os.getenv("FATSECRET_CLIENT_ID", "")
     FATSECRET_CLIENT_SECRET: str = os.getenv("FATSECRET_CLIENT_SECRET", "")
-    # USDA FoodData Central (fallback de alimentos no encontrados en BD local)
     USDA_API_KEY: str = os.getenv("USDA_API_KEY", "")
-    # Si es true, no se llama a FatSecret aunque existan credenciales (pruebas / fallback local).
     DISABLE_FATSECRET: bool = os.getenv("DISABLE_FATSECRET", "").lower() in ("1", "true", "yes")
     DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
     
-    # Email Configuration (Resend)
     RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
     SENDER_EMAIL: str = os.getenv("SENDER_EMAIL", "onboarding@resend.dev")
     
-    # Firebase Configuration
     FIREBASE_API_KEY: str = os.getenv("FIREBASE_API_KEY", "")
     FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "calofit-c8c24")
-    # Cloudinary Configuration
     CLOUDINARY_CLOUD_NAME: str = os.getenv("CLOUDINARY_CLOUD_NAME", "")
     CLOUDINARY_API_KEY: str = os.getenv("CLOUDINARY_API_KEY", "")
     CLOUDINARY_API_SECRET: str = os.getenv("CLOUDINARY_API_SECRET", "")

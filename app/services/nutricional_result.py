@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from typing import Literal, Optional
 
 
-# ─── Rangos calóricos esperados por tipo/momento ────────────────────────────
 KCAL_RANGES: dict[str, tuple[int, int]] = {
     "cebiche":            (150,  450),
     "tiradito":           (150,  400),
@@ -27,7 +26,6 @@ KCAL_RANGES: dict[str, tuple[int, int]] = {
     "default":            ( 80, 1100),
 }
 
-# Palabras clave que implican proteína animal en el nombre del plato
 _PROTEIN_KEYWORDS: frozenset[str] = frozenset({
     "pollo", "res", "carne", "cerdo", "chancho", "pato", "cabrito",
     "pavo", "cordero", "pescado", "atun", "atún", "salmon", "salmón",
@@ -35,7 +33,6 @@ _PROTEIN_KEYWORDS: frozenset[str] = frozenset({
     "pulpo", "calamar", "jalea", "chicharron", "chicharrón",
 })
 
-# Score de confianza por fuente de datos del alimento
 _FUENTE_SCORE: dict[str, float] = {
     "USDA (auto-aprendido)":      0.8,
     "FatSecret (auto-aprendido)": 0.8,
@@ -44,8 +41,6 @@ _FUENTE_SCORE: dict[str, float] = {
     # Todo lo no listado (INS/CENAN, catálogo) → 1.0 (default)
 }
 
-
-# ─── Dataclass principal ─────────────────────────────────────────────────────
 
 @dataclass
 class ResultadoNutricional:
@@ -89,8 +84,6 @@ class ResultadoNutricional:
             f"confianza={self.confianza:.2f} modo={self.modo_resolucion})"
         )
 
-
-# ─── Funciones helper ────────────────────────────────────────────────────────
 
 def confidence_score(fuentes: list[str]) -> float:
     """
@@ -172,9 +165,6 @@ def validar_macros_atwater(
             f"(Atwater produce {kcal_calculada:.1f} kcal)"
         )
     desviacion = abs(kcal - kcal_calculada) / kcal
-    # Tolerancia ampliada al 30%: la fórmula Atwater es una aproximación.
-    # Mariscos, legumbres, fibra, alcohol y alimentos procesados pueden superar
-    # el 15% sin ser datos inválidos. Rechazar al 30% cubre solo errores reales.
     if desviacion > 0.30:
         return False, (
             f"inconsistencia nutricional: kcal_bd={kcal:.1f} "

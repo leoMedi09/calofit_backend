@@ -33,14 +33,12 @@ class TestConversacionNatural:
         user = setup_user['user']
         db = setup_user['db']
         
-        # Inicializar condiciones limpias
         client.medical_conditions = []
         db.commit()
         
         asistente = AsistenteService()
         historial = []
         
-        # Turno 1: Hoy desayuné avena con leche
         resp1 = await asistente.consultar(
             mensaje="Hoy desayuné avena con leche",
             db=db,
@@ -51,7 +49,6 @@ class TestConversacionNatural:
         historial.append({"role": "user", "content": "Hoy desayuné avena con leche"})
         historial.append({"role": "assistant", "content": resp1["respuesta_ia"]})
         
-        # Turno 2: Pero soy intolerante a la lactosa
         resp2 = await asistente.consultar(
             mensaje="Pero soy intolerante a la lactosa",
             db=db,
@@ -61,11 +58,9 @@ class TestConversacionNatural:
         historial.append({"role": "user", "content": "Pero soy intolerante a la lactosa"})
         historial.append({"role": "assistant", "content": resp2["respuesta_ia"]})
         
-        # Simulamos que la app actualiza el perfil con la nueva condición declarada
         client.medical_conditions = ["Intolerancia a la Lactosa"]
         db.commit()
         
-        # Turno 3: ¿Qué puedo cenar?
         resp3 = await asistente.consultar(
             mensaje="¿Qué puedo cenar?",
             db=db,
@@ -74,11 +69,9 @@ class TestConversacionNatural:
         )
         
         resp_text = resp3["respuesta_ia"].lower()
-        # Verificar que recuerda la restricción y no recomienda lácteos
         assert "leche" not in resp_text
         assert "yogur" not in resp_text
         assert "queso" not in resp_text
-        # Pero sigue recomendando cena (debería sugerir opciones sin lácteos)
         assert len(resp_text) > 10
 
     @pytest.mark.asyncio
@@ -94,7 +87,6 @@ class TestConversacionNatural:
         asistente = AsistenteService()
         historial = []
         
-        # Turno 1: Comí dos huevos con arroz
         resp1 = await asistente.consultar(
             mensaje="Comí dos huevos con arroz",
             db=db,
@@ -105,7 +97,6 @@ class TestConversacionNatural:
         historial.append({"role": "user", "content": "Comí dos huevos con arroz"})
         historial.append({"role": "assistant", "content": resp1["respuesta_ia"]})
         
-        # Turno 2: ah no, eran tres huevos
         resp2 = await asistente.consultar(
             mensaje="ah no, eran tres huevos",
             db=db,
@@ -114,7 +105,6 @@ class TestConversacionNatural:
         )
         
         resp_text = resp2["respuesta_ia"].lower()
-        # Verificar que se corrige correctamente
         assert "3" in resp_text or "tres" in resp_text
         assert "huevo" in resp_text
 
@@ -131,7 +121,6 @@ class TestConversacionNatural:
         asistente = AsistenteService()
         historial = []
         
-        # Turno 1: Me duele la rodilla
         resp1 = await asistente.consultar(
             mensaje="Me duele la rodilla",
             db=db,
@@ -141,7 +130,6 @@ class TestConversacionNatural:
         historial.append({"role": "user", "content": "Me duele la rodilla"})
         historial.append({"role": "assistant", "content": resp1["respuesta_ia"]})
         
-        # Turno 2: Dame rutina de pierna
         resp2 = await asistente.consultar(
             mensaje="Dame rutina de pierna",
             db=db,
@@ -150,7 +138,6 @@ class TestConversacionNatural:
         )
         
         resp_text = resp2["respuesta_ia"].lower()
-        # Evitar ejercicios problemáticos (como sentadillas)
         assert "sentadilla" not in resp_text
 
     @pytest.mark.asyncio
@@ -163,11 +150,9 @@ class TestConversacionNatural:
         user = setup_user['user']
         db = setup_user['db']
         
-        # Configurar perfil de ganancia
         client.goal = "ganar_leve"
         db.commit()
         
-        # Asegurar MetaUsuario de ganancia
         meta = db.query(MetaUsuario).filter(MetaUsuario.client_id == client.id).first()
         if not meta:
             meta = MetaUsuario(
@@ -180,7 +165,6 @@ class TestConversacionNatural:
             db.add(meta)
             db.commit()
             
-        # Simular exceso de calorías consumidas hoy
         prog = db.query(ProgresoCalorias).filter(
             ProgresoCalorias.client_id == client.id,
             ProgresoCalorias.fecha == date.today()
@@ -188,7 +172,7 @@ class TestConversacionNatural:
         if not prog:
             prog = ProgresoCalorias(client_id=client.id, fecha=date.today())
             db.add(prog)
-        prog.calorias_consumidas = 3100  # Excede la meta de 2800
+        prog.calorias_consumidas = 3100
         db.commit()
         
         asistente = AsistenteService()
@@ -200,7 +184,6 @@ class TestConversacionNatural:
         )
         
         resp_text = resp["respuesta_ia"].lower()
-        # Debe informar contextualmente del objetivo sin tratarlo como error o prohibición de comer
         assert "ganar" in resp_text or "músculo" in resp_text or "masa" in resp_text or "superávit" in resp_text
 
     @pytest.mark.asyncio
@@ -238,11 +221,9 @@ class TestConversacionNatural:
         )
         
         resp_text = resp["respuesta_ia"].lower()
-        # 1. Vegano: no productos animales
         assert "pollo" not in resp_text
         assert "carne" not in resp_text
         assert "pescado" not in resp_text
         assert "huevo" not in resp_text
         assert "leche" not in resp_text
-        # 2. Proteína + Control glucémico: sugiere tofu, quinua, legumbres
         assert any(w in resp_text for w in ["tofu", "quinua", "lenteja", "soya", "frijol", "legumbre", "garbanzo", "proteína"])

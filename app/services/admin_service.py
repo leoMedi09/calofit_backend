@@ -17,7 +17,6 @@ class AdminIAService:
         Cerebro Gerencial para Administradores.
         Enfoque: KPIs globales, rendimiento del staff, volumen de pacientes y alertas críticas.
         """
-        # 1. Obtener estadísticas globales para contexto
         stats_globales = self._obtener_stats_sistema(db)
         
         nombre_admin = current_user.first_name if hasattr(current_user, 'first_name') else "Administrador"
@@ -66,13 +65,10 @@ class AdminIAService:
             func.date(AlertaSalud.fecha_deteccion) == hoy
         ).count()
         
-        # Calcular adherencia media simple de hoy
         progresos_hoy = db.query(ProgresoCalorias).filter(ProgresoCalorias.fecha == hoy).all()
         adherencia_media = 0
         if progresos_hoy:
-             # Heurística simple: promedio de calorias consumidas vs meta
-             # (En un prod real se cruzaría con el plan)
-             adherencia_media = 85.5 # Mock para el prompt si no hay suficiente data histórica procesada
+             adherencia_media = 85.5
              
         return {
             "total_pacientes": total_pacientes,

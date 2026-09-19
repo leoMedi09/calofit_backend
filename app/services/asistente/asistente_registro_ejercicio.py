@@ -27,18 +27,13 @@ from app.core.utils import get_peru_date
 from app.models.historial import ProgresoCalorias
 from app.services.ejercicios_service import ejercicios_service
 
-# ── Muletillas de voz a eliminar antes de procesar ────────────────────────────
 _RE_MULETILLAS = re.compile(
     r"(?i)\b(mm+h?|eeh?|aah?|uh+|uhm+|hmm+|o\s+sea(\s+que)?|como\s+que"
     r"|bueno\s+pues|pues\s+(?=\w)|la\s+verdad\s+(es\s+)?(que\s+)?"
     r"|y\s+este\s+|este\s+que\s+|este\s+(?=mm|este|o\s+sea|como\s+que))\b[,.]?\s*"
 )
-# "este"/"pues"/"bueno"/"oye" solos al inicio (muy común al hablar)
 _RE_INICIO_MULETILLA = re.compile(r"(?i)^(este|pues|bueno|oye\s+pues)\s*[,.]?\s*")
 
-# ── Números en palabras → dígitos ─────────────────────────────────────────────
-# Soporta: unidades, decenas, "X y Y" (setenta y cinco → 75),
-# centenas (doscientos, quinientos…) y fracciones ("y medio" → .5).
 _CENTENAS_MAP: dict[str, int] = {
     "cien": 100, "ciento": 100,
     "doscientos": 200, "doscientas": 200,
@@ -70,13 +65,9 @@ _FRACCION_MAP: dict[str, str] = {
     "y cuarto": ".25", "y tres cuartos": ".75",
 }
 
-# "un/uno/una" como artículo NO debe convertirse a "1" cuando aparece solo.
-# Solo se usa en compuestos ("treinta y uno", "veintiún").
-# "con un peso de 50" → NO normalizar (sino "con 1 peso de 50" confunde el LLM).
 _UNIDADES_STANDALONE = {k: v for k, v in _UNIDADES_MAP.items()
                          if k not in ("un", "uno", "una")}
 
-# Regex para capturar números compuestos en español hablado
 _RE_NUMERO_COMPUESTO = re.compile(
     r"(?i)\b("
     + "|".join(sorted(_CENTENAS_MAP, key=len, reverse=True))
@@ -94,7 +85,6 @@ _RE_NUMERO_COMPUESTO = re.compile(
 def _resolver_numero_compuesto(m: re.Match) -> str:
     """Convierte grupos capturados de número compuesto a dígito."""
     g = [x.lower().strip() if x else None for x in m.groups()]
-    # Grupo centena+decena+unidad+fraccion (grupos 0-3)
     if g[0] and g[0] in {k.lower() for k in _CENTENAS_MAP}:
         val = _CENTENAS_MAP.get(g[0], 0)
         if g[1]:
@@ -103,14 +93,12 @@ def _resolver_numero_compuesto(m: re.Match) -> str:
             val += _UNIDADES_MAP.get(g[2], 0)
         frac = _FRACCION_MAP.get(g[3] or "", "")
         return str(val) + frac
-    # Grupo decena+unidad+fraccion (grupos 4-6)
     if g[4] and g[4] in {k.lower() for k in _DECENAS_MAP}:
         val = _DECENAS_MAP.get(g[4], 0)
         if g[5]:
             val += _UNIDADES_MAP.get(g[5], 0)
         frac = _FRACCION_MAP.get(g[6] or "", "")
         return str(val) + frac
-    # Grupo unidad+fraccion (grupos 7-8)
     if g[7] and g[7] in {k.lower() for k in _UNIDADES_MAP}:
         val = _UNIDADES_MAP.get(g[7], 0)
         frac = _FRACCION_MAP.get(g[8] or "", "")
@@ -135,7 +123,6 @@ def _normalizar_voz(texto: str) -> str:
     return t
 
 
-# Intensidad por MET
 def _met_a_intensity(met: float) -> str:
     if met >= 8.0:
         return "Alta"
@@ -147,7 +134,6 @@ def _met_a_intensity(met: float) -> str:
 class RegistroEjercicioHandler:
     """Persistencia de logs de entrenamiento (sin follow-up conversacional)."""
 
-    # ── workout_logs con ML sync ─────────────────────────────────────────────
 
     def _registrar_workout_log_completo(
         self,

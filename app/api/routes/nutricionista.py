@@ -37,23 +37,20 @@ def calcular_progreso_paciente(client: Client) -> float:
     Calcula el progreso real (%) basado en la tendencia de peso y el objetivo.
     """
     if not client.historial_peso or len(client.historial_peso) < 1:
-        return 50.0  # Punto neutro si no hay historial
+        return 50.0
 
-    # Encontramos el peso más antiguo para comparar
     historial_ordenado = sorted(client.historial_peso, key=lambda x: x.fecha_registro)
     peso_inicial = historial_ordenado[0].peso_kg
     peso_actual = client.weight or peso_inicial
     objetivo = (client.goal or "Mantener peso").lower()
 
     if "perder" in objetivo:
-        # Si bajó de peso respecto al inicio, progreso > 50
         cambio = peso_inicial - peso_actual
         return min(100.0, max(0.0, 50.0 + (cambio * 2)))
     elif "ganar" in objetivo:
         cambio = peso_actual - peso_inicial
         return min(100.0, max(0.0, 50.0 + (cambio * 2)))
     else:
-        # Mantener: Estabilidad (variación < 1kg es 100%)
         variacion = abs(peso_actual - peso_inicial)
         return max(0.0, 100.0 - (variacion * 5))
 
@@ -69,7 +66,6 @@ def create_express_patient(
     """
     check_is_nutri(current_user)
     
-    # 1. Comprobar si el correo ya existe — en clients Y en users (login único)
     if db.query(Client).filter(Client.email == client_data.email).first():
         raise HTTPException(
             status_code=400,
@@ -81,7 +77,6 @@ def create_express_patient(
             detail="Este correo ya está registrado como staff en el sistema."
         )
 
-    # 1.5 Comprobar si el DNI ya existe
     if db.query(Client).filter(Client.dni == client_data.dni).first():
         raise HTTPException(
             status_code=400,
@@ -89,9 +84,7 @@ def create_express_patient(
         )
 
 
-    # 2. Generar el usuario incompleto y vincular con Firebase
     try:
-        # Importación rápida para evitar dependencias circulares
         from app.core.firebase import auth as firebase_admin_auth
         
         fb_user = firebase_admin_auth.create_user(
@@ -106,7 +99,6 @@ def create_express_patient(
         error_msg = str(e)
         print(f"❌ Error al crear usuario en Firebase: {error_msg}")
         
-        # Validación Estricta: Si ya existe en la base de datos central de Firebase
         if "EMAIL_EXISTS" in error_msg:
             raise HTTPException(
                 status_code=400, 
@@ -118,7 +110,6 @@ def create_express_patient(
                 detail=f"Error validando la cuenta: {error_msg}"
             )
 
-    # 3. Guardar en Base de Datos
     hashed_dni = security.hash_password(client_data.dni)
     
     nuevo_paciente = Client(
@@ -142,7 +133,6 @@ def create_express_patient(
     db.commit()
     db.refresh(nuevo_paciente)
 
-    # 4. Enviar Correo de Credenciales vía Brevo
     from app.services.email_service import EmailService
     EmailService.send_welcome_credentials_brevo(
         email_to=client_data.email,
@@ -163,18 +153,13 @@ def get_assigned_patients(
     role = str(getattr(current_user, "role_name", "")).lower()
 
     if role in {"nutricionista", "nutritionist", "nutri"}:
-        # Nutri: solo sus asignados (incluye perfiles incompletos para que pueda gestionarlos)
         query = query.filter(Client.assigned_nutri_id == current_user.id)
     elif role in {"coach", "entrenador", "trainer"}:
-        # Coach: solo los asignados a él y que ya completaron su perfil (primer login hecho)
         query = query.filter(
             Client.assigned_coach_id == current_user.id,
             Client.is_profile_complete == True,
         )
-    # Admin: sin filtro — ve todos
 
-    # Eager-load de relaciones usadas dentro del bucle (evita N+1:
-    # progreso_calorias, historial_peso y planes_nutricionales por cliente)
     clients = query.options(
         selectinload(Client.progreso_calorias),
         selectinload(Client.historial_peso),
@@ -186,7 +171,6 @@ def get_assigned_patients(
     
     result = []
     for c in clients:
-        # Lógica de adherencia real: Contar días con registros en los últimos 7 días
         registros_recientes = [r for r in c.progreso_calorias if r.fecha >= seven_days_ago.date()]
         num_registros = len(registros_recientes)
 
@@ -195,10 +179,6 @@ def get_assigned_patients(
 
         alerta_data = ia_service.generar_alerta_fuzzy(adherencia, progreso)
 
-        # Check-in mensual de peso (independiente del estado del plan)
-        # Misma regla que /clientes/checkin-status: 30 días de gracia desde el
-        # registro del cliente, no desde el día 1 del mes calendario — evita que
-        # un usuario recién registrado salga "SIN PESO" sin haber tenido chance.
         now_naive = now.replace(tzinfo=None)
         created = c.created_at.replace(tzinfo=None) if c.created_at else None
         days_since_creation = (now_naive - created).days if created else 31
@@ -268,16 +248,12 @@ def get_patient_progress(
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
         
-    # Verificar que el nutri/coach tenga acceso
-    # (El coach tiene permiso de lectura total en el gimnasio)
     if current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"] and client.assigned_nutri_id != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para ver este paciente")
 
-    # Obtener historial de peso, imc y progreso calórico
     historial_peso = [{"fecha": h.fecha_registro, "valor": h.peso_kg} for h in client.historial_peso]
     historial_imc = [{"fecha": h.fecha_registro, "valor": h.imc} for h in client.historial_imc]
 
-    # ── Resumen del día actual (lo que ve el nutricionista en "RESUMEN ENERGÉTICO HOY") ──
     from app.models.historial import ProgresoCalorias
     from app.core.utils import get_peru_date
     hoy = get_peru_date()
@@ -292,9 +268,7 @@ def get_patient_progress(
         "carbos":              round(float(progreso_hoy.carbohidratos_consumidos or 0), 1) if progreso_hoy else 0.0,
         "grasas":              round(float(progreso_hoy.grasas_consumidas        or 0), 1) if progreso_hoy else 0.0,
     }
-    # ─────────────────────────────────────────────────────────────────────────────────────
     
-    # Obtener alertas de salud (v80.0)
     alertas = [{
         "id": a.id,
         "tipo": a.tipo,
@@ -304,11 +278,8 @@ def get_patient_progress(
         "fecha": a.fecha_deteccion
     } for a in client.alertas_salud]
 
-    # ✨ Sincronización Metabólica (v80.0)
-    # Proporcionamos la misma base que ve el cliente en su dashboard
     tmb_estimada = calcular_metabolismo_basal(client)
     
-    # Calorias ajustadas según objetivo (cubre todos los valores del dropdown)
     _GOAL_FACTOR = {
         "perder peso": 0.85, "perder_leve": 0.90,
         "ganar masa": 1.10, "ganar_leve": 1.05,
@@ -328,19 +299,17 @@ def get_patient_progress(
 
     return {
         "id": client.id,
-        "nombre": f"{client.first_name} {client.last_name_paternal} {client.last_name_maternal}", # Adjusted to match existing full_name format
+        "nombre": f"{client.first_name} {client.last_name_paternal} {client.last_name_maternal}",
         "objetivo": client.goal,
-        "focus_objetivo": client.ai_strategic_focus, # Renamed from client.focus_objetivo to client.ai_strategic_focus
+        "focus_objetivo": client.ai_strategic_focus,
         "semana_status": _calcular_mes_status(client, db),
         "plan_validated_at": str(ultimo_plan_prog.validated_at) if ultimo_plan_prog and ultimo_plan_prog.validated_at else None,
         "historial_peso": historial_peso,
         "historial_imc": historial_imc,
         "alertas_salud": alertas,
-        # Guía Estratégica (Misión Semanal)
         "ai_strategic_focus": client.ai_strategic_focus,
         "is_strategic_guide_validated": client.is_strategic_guide_validated,
         "is_validated": client.is_strategic_guide_validated,
-        # Sincronización v80.0
         "metabolismo_estimado": {
             "tmb": round(tmb_estimada),
             "calorias_objetivo": recomendacion_ia["calorias"],
@@ -437,7 +406,6 @@ async def suggest_strategic_guide(
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
         
-    # Recopilar alertas recientes (últimos 15 días) para contexto
     date_limit = datetime.utcnow() - timedelta(days=15)
     alertas_recent = [a for a in client.alertas_salud if a.fecha_deteccion >= date_limit]
     
@@ -447,19 +415,16 @@ async def suggest_strategic_guide(
         "severidad": a.severidad
     } for a in alertas_recent]
     
-    # Calcular IMC actual
     imc = 0
     if client.weight and client.height:
         height_m = client.height / 100
         imc = round(client.weight / (height_m * height_m), 1)
 
-    # Calcular edad
     edad = 0
     if client.birth_date:
         today = datetime.now()
         edad = today.year - client.birth_date.year - ((today.month, today.day) < (client.birth_date.month, client.birth_date.day))
 
-    # Obtener historial de peso para tendencia
     historial_peso = [{"fecha": h.fecha_registro, "valor": h.peso_kg} for h in client.historial_peso]
 
     perfil = {
@@ -494,7 +459,6 @@ def update_strategic_guide(
     if current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"] and client.assigned_nutri_id != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para modificar este paciente")
 
-    # Actualización estratégica (v80.0)
     if guide.ai_strategic_focus is not None:
         client.ai_strategic_focus = guide.ai_strategic_focus
     if guide.recommended_foods is not None:
@@ -510,7 +474,6 @@ def update_strategic_guide(
     if guide.session_duration is not None:
         client.session_duration = guide.session_duration
 
-    # Actualizar validated_at del plan activo para que el badge del cliente muestre fecha
     plan_activo = (
         db.query(PlanNutricional)
         .filter(PlanNutricional.client_id == id)
@@ -537,12 +500,8 @@ def validate_plan(
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
         
-    # La validación nutricional no depende del check-in mensual.
-    # Se valida el último plan disponible del cliente.
     plan = db.query(PlanNutricional).filter(PlanNutricional.client_id == id).order_by(PlanNutricional.fecha_creacion.desc()).first()
     if not plan:
-        # Flujo express: si el cliente ya está en activos pero aún no hay plan persistido,
-        # creamos uno base para permitir validación inmediata en consulta semanal/quincenal.
         plan = PlanNutricional(
             client_id=id,
             genero=1 if (client.gender or "M") == "M" else 2,
@@ -593,7 +552,6 @@ def get_client_plan(
     
     if not plan:
         print(f"📡 Generando vista previa de plan para cliente nuevo {id}")
-        # Retornamos un plan vacío estructurado para que el Frontend no explote
         return {
             "id": 0,
             "client_id": id,
@@ -632,7 +590,6 @@ def update_client_plan(
     
     if not plan:
         print(f"✨ Creando primer plan para cliente {id} (Probablemente Express)")
-        # Crear esqueleto de plan
         plan = PlanNutricional(
             client_id=id,
             genero=1 if (client.gender or "M") == "M" else 2,
@@ -641,12 +598,11 @@ def update_client_plan(
             talla=client.height or 170.0,
             nivel_actividad=1.55,
             objetivo=client.goal or "Mantener peso",
-            status="draft", # Empezamos en borrador
+            status="draft",
             calorias_ia_base=0
         )
         db.add(plan)
         db.flush() 
-        # Crear 7 días vacíos por defecto
         for i in range(1, 8):
             dia = PlanDiario(
                 plan_id=plan.id,
@@ -693,7 +649,6 @@ def get_nutri_stats(
     _ROLES_NUTRI  = {"nutricionista", "nutritionist", "nutri"}
     _ROLES_COACH  = {"coach", "entrenador", "trainer"}
 
-    # ── Bug 1 & 2: filtro correcto por rol ───────────────────────────────
     role  = str(getattr(current_user, "role_name", "")).lower()
     query = db.query(Client)
     if role in _ROLES_NUTRI:
@@ -703,10 +658,7 @@ def get_nutri_stats(
             Client.assigned_coach_id == current_user.id,
             Client.is_profile_complete == True,
         )
-    # Admin: sin filtro
 
-    # Eager-load de relaciones usadas dentro del bucle (evita N+1:
-    # progreso_calorias y historial_peso por paciente)
     pacientes = query.options(
         selectinload(Client.progreso_calorias),
         selectinload(Client.historial_peso),
@@ -724,13 +676,11 @@ def get_nutri_stats(
             "alertas_recientes": [],
         }
 
-    # ── Validaciones pendientes ───────────────────────────────────────────
     validaciones_pendientes = db.query(PlanNutricional).join(Client).filter(
         Client.id.in_(paciente_ids),
         PlanNutricional.status == "provisional_ia",
     ).count()
 
-    # ── Bug 3: alertas de BD solo de los últimos 30 días ─────────────────
     thirty_days_ago = datetime.now() - timedelta(days=30)
     seven_days_ago  = datetime.now() - timedelta(days=7)
 
@@ -742,11 +692,10 @@ def get_nutri_stats(
         )
         .join(Client)
         .filter(Client.id.in_(paciente_ids))
-        .options(selectinload(AlertaSalud.cliente))  # evita N+1 en a.cliente
+        .options(selectinload(AlertaSalud.cliente))
     )
     alertas_db_count = alertas_db_query.count()
 
-    # IDs de pacientes que ya tienen alerta en BD (para no duplicar con IA)
     pacientes_con_alerta_db = {
         a.cliente.id for a in alertas_db_query.all() if a.cliente
     }
@@ -768,7 +717,6 @@ def get_nutri_stats(
         for a in alertas_recientes_objs
     ]
 
-    # ── Alertas IA: solo pacientes SIN alerta en BD (evita doble conteo) ─
     alertas_ia = 0
     for c in pacientes:
         if c.id in pacientes_con_alerta_db:
@@ -792,7 +740,6 @@ def get_nutri_stats(
 
     total_alertas = alertas_db_count + alertas_ia
 
-    # ── Adherencia media y tendencia (últimos 7 días) ─────────────────────
     tendencia     = []
     total_adh_sum = 0.0
     for i in range(6, -1, -1):
@@ -817,9 +764,6 @@ def get_nutri_stats(
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════
-#  ELIMINAR CLIENTE (Firebase Auth + PostgreSQL)
-# ═══════════════════════════════════════════════════════════════════════
 @router.delete("/cliente/{id}")
 def delete_client(
     id: int,
@@ -838,12 +782,10 @@ def delete_client(
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado.")
 
-    # Nutricionistas solo pueden eliminar sus propios pacientes
     if current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"]:
         if client.assigned_nutri_id != current_user.id:
             raise HTTPException(status_code=403, detail="No tienes permiso para eliminar este paciente.")
 
-    # 1. Eliminar de Firebase Authentication
     flutter_uid = client.flutter_uid
     if flutter_uid:
         try:
@@ -853,15 +795,12 @@ def delete_client(
         except Exception as e:
             print(f"⚠️ Firebase: No se pudo eliminar el usuario ({e}). Continuando con la BD...")
 
-    # 2. Borrar PlanDiario y PlanNutricional manualmente ANTES que el cliente
-    #    (SQLAlchemy hace UPDATE client_id=None en vez de DELETE cuando hay referencias activas)
     planes = db.query(PlanNutricional).filter(PlanNutricional.client_id == id).all()
     for plan in planes:
         db.query(PlanDiario).filter(PlanDiario.plan_id == plan.id).delete(synchronize_session=False)
     db.query(PlanNutricional).filter(PlanNutricional.client_id == id).delete(synchronize_session=False)
     db.flush()
 
-    # 3. Ahora eliminar el cliente (el resto de relaciones sí tienen cascade correcto)
     db.delete(client)
     db.commit()
 

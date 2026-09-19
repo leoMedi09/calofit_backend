@@ -70,7 +70,6 @@ class PlatoBuilder:
         
         logger.info(f"Construyendo plato: {nombre_plato} para cliente {client_id}")
         
-        # 1. Verificar si está en caché
         nombre_norm = nombre_plato.lower().strip()
         resultado_cache = self._buscar_en_cache(nombre_norm, client_id)
         if resultado_cache:
@@ -78,24 +77,20 @@ class PlatoBuilder:
             resultado_cache.cached = True
             return resultado_cache
         
-        # 2. Resolver ingredientes
         ingredientes_resueltos = self.food_resolver.resolver_ingredientes_lote(
             ingredientes=ingredientes,
             user_id=client_id,
         )
         
-        # Verificar si todos se resolvieron
         ingredientes_fallidos = [
             ing for ing in ingredientes_resueltos if not ing['exito']
         ]
         if ingredientes_fallidos:
             logger.warning(f"⚠️ {len(ingredientes_fallidos)} ingredientes no resueltos")
         
-        # 3. Calcular macros totales
         macros_totales = self._calcular_macros_totales(ingredientes_resueltos)
         peso_total = sum(ing.get('gramos', 0) for ing in ingredientes)
         
-        # 4. Validar semántica
         validacion_semantica = self.semantic_validator.validar({
             'nombre_plato': nombre_plato,
             'ingredientes': [
@@ -104,7 +99,6 @@ class PlatoBuilder:
             'client_id': client_id,
         })
         
-        # 5. Validar nutricional
         meta = self.db.query(MetaUsuario).filter(MetaUsuario.client_id == client_id).first()
         tdee = meta.calorias_objetivo if meta else None
         
@@ -119,7 +113,6 @@ class PlatoBuilder:
             'momento_dia': tipo_plato,
         })
         
-        # 6. Generar fingerprint
         fingerprint = FingerprintGenerator.generar_fingerprint_plato(
             nombre=nombre_plato,
             ingredientes=[
@@ -129,7 +122,6 @@ class PlatoBuilder:
             macros=macros_totales,
         )
         
-        # 7. Calcular confianza global
         confianza_global = self._calcular_confianza_global(
             validacion_semantica.confianza,
             validacion_nutricional.confianza,
@@ -137,17 +129,14 @@ class PlatoBuilder:
             len(ingredientes),
         )
         
-        # 8. Crear o actualizar plato en BD
         plato_id = self._guardar_plato(nombre_plato, ingredientes_resueltos)
         
-        # 9. Cachear resultado
         self._cachear_resultado(
             nombre_norm=nombre_norm,
             plato_id=plato_id,
             client_id=client_id,
         )
         
-        # 10. Construir DTO de respuesta
         es_valido = (
             validacion_semantica.es_valido and
             validacion_nutricional.es_valido and
@@ -199,8 +188,6 @@ class PlatoBuilder:
                 self.db.commit()
                 return None
 
-            # Reconstrucción completa requeriría re-ejecutar el pipeline;
-            # retornar None para que el caller reconstruya y actualice caché.
             return None
 
         except Exception as exc:
@@ -236,10 +223,8 @@ class PlatoBuilder:
         total_ingredientes: int,
     ) -> int:
         """Calcula confianza global."""
-        # Promedio ponderado
         confianza = (conf_semantica + conf_nutricional) / 2
         
-        # Penalizar por ingredientes fallidos
         if total_ingredientes > 0:
             porcentaje_fallidos = (ingredientes_fallidos / total_ingredientes) * 100
             confianza -= porcentaje_fallidos * 0.5
@@ -259,7 +244,6 @@ class PlatoBuilder:
         try:
             nombre_norm = nombre_plato.lower().strip()
 
-            # ── Guard: filtrar sólo ingredientes resueltos con alimento_id ─────
             ingredientes_validos = [
                 ing for ing in ingredientes_resueltos
                 if ing.get('exito') and ing.get('alimento_id')
@@ -271,7 +255,6 @@ class PlatoBuilder:
                 )
                 return None
 
-            # Buscar plato existente
             plato = self.db.query(Plato).filter(
                 Plato.nombre_normalizado == nombre_norm
             ).first()
@@ -284,9 +267,8 @@ class PlatoBuilder:
                     origen='llm',
                 )
                 self.db.add(plato)
-                self.db.flush()  # obtiene plato.id — aún en la misma transacción
+                self.db.flush()
 
-            # Reemplazar ingredientes anteriores (actualización limpia)
             self.db.query(PlatoIngrediente).filter(
                 PlatoIngrediente.plato_id == plato.id
             ).delete()
@@ -299,7 +281,7 @@ class PlatoBuilder:
                     orden=idx + 1,
                 ))
 
-            self.db.commit()  # único commit — plato + ingredientes atómicos
+            self.db.commit()
             logger.info("Plato '%s' persistido id=%s con %d ingredientes",
                         nombre_plato, plato.id, len(ingredientes_validos))
             return plato.id

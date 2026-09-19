@@ -2,7 +2,6 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List
 from datetime import date, datetime
 
-# --- TUS ESQUEMAS EXISTENTES ---
 
 class ClientCreate(BaseModel):
     first_name: str
@@ -42,8 +41,8 @@ class ClientResponse(BaseModel):
     gender: Optional[str] = 'M'
     activity_level: Optional[str] = 'Sedentario'
     goal: Optional[str] = 'Mantener peso'
-    workout_type: Optional[str] = 'Cardio'        # 🆕 Para ML Random Forest
-    session_duration: Optional[float] = 1.0        # 🆕 Para ML Random Forest (en horas)
+    workout_type: Optional[str] = 'Cardio'
+    session_duration: Optional[float] = 1.0
     medical_conditions: List[str] = []
     assigned_coach_id: Optional[int]
     assigned_nutri_id: Optional[int]
@@ -67,11 +66,11 @@ class ClientUpdate(BaseModel):
     medical_conditions: Optional[List[str]] = None
     activity_level: Optional[str] = None
     goal: Optional[str] = None
-    workout_type: Optional[str] = None             # 🆕 Para ML Random Forest
-    session_duration: Optional[float] = None       # 🆕 Para ML Random Forest (en horas)
+    workout_type: Optional[str] = None
+    session_duration: Optional[float] = None
     profile_picture_url: Optional[str] = None
-    is_profile_complete: Optional[bool] = None  # 🆕 El onboarding lo marca como True al terminar
-    terms_accepted_at: Optional[datetime] = None  # 🆕 Fecha de aceptación de Términos y Privacidad
+    is_profile_complete: Optional[bool] = None
+    terms_accepted_at: Optional[datetime] = None
 
 
 class AdminCreateClient(BaseModel):
@@ -93,18 +92,17 @@ class ChangePassword(BaseModel):
     new_password: str = Field(..., min_length=6)
     confirm_password: str = Field(..., min_length=6)
 
-# --- 🚀 NUEVOS ESQUEMAS ESTRATÉGICOS (v80.0) ---
 
 class StrategicGuideUpdate(BaseModel):
     """Para que el nutri guíe a la IA desde el expediente"""
     ai_strategic_focus: Optional[str] = None
     recommended_foods: Optional[List[str]] = None
     forbidden_foods: Optional[List[str]] = None
-    medical_conditions: Optional[List[str]] = None  # Nutri también puede ajustar
+    medical_conditions: Optional[List[str]] = None
     is_strategic_guide_validated: Optional[bool] = None
     nutri_weekly_note: Optional[str] = None
-    workout_type: Optional[str] = None        # RF feature — nutri puede ajustar
-    session_duration: Optional[float] = None  # RF feature — nutri puede ajustar
+    workout_type: Optional[str] = None
+    session_duration: Optional[float] = None
 
 class ResetPasswordRequest(BaseModel):
     """Para cuando el usuario ingresa su email para recibir el código"""

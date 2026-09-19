@@ -44,7 +44,5 @@ class TestFiltrarComponentesDePlatoCompuesto:
             {"nombre": "Pollo con arroz", "kcal": 600},
             {"nombre": "Tallarines con pollo", "kcal": 550},
         ]
-        # Ninguno es subconjunto completo del otro ("arroz" vs "tallarines"
-        # no coinciden) — ambos deben conservarse.
         resultado = _filtrar_componentes_de_plato_compuesto(alimentos)
         assert len(resultado) == 2

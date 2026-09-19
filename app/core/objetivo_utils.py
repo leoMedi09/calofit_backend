@@ -43,14 +43,10 @@ Uso:
 """
 from __future__ import annotations
 
-# ── Conceptos internos (3 estados energéticos) ────────────────────────────────
-DEFICIT       = "DEFICIT"        # déficit calórico — perder peso en cualquier ritmo
-MANTENIMIENTO = "MANTENIMIENTO"  # sin superávit ni déficit objetivo
-SUPERAVIT     = "SUPERAVIT"      # superávit calórico — ganar masa (ganar_leve o ganar masa)
-#                                  Ver nota en docstring sobre semántica y casos de extensión.
+DEFICIT       = "DEFICIT"
+MANTENIMIENTO = "MANTENIMIENTO"
+SUPERAVIT     = "SUPERAVIT"
 
-# ── Mapa cerrado: los 5 valores reales de la app ─────────────────────────────
-# Fuente: onboarding_profile_screen.dart y edit_profile_screen.dart
 _GOAL_MAP: dict[str, str] = {
     "perder peso":   DEFICIT,
     "perder_leve":   DEFICIT,

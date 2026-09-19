@@ -66,7 +66,7 @@ _RE_LEX_GYM = re.compile(
     r"rowing|adduct|abd\w*|bis\w*|tris\w*|hip\s*thrust|kettle|snatch|clean|thruster|"
     r"fondos?|paralelas?|apertur|lunges?|"
     r"ejercicio|entreno|fuerza|aer[óo]bic)"
-    r"|(?<!a la )(?<!la )\bplancha\b"  # 'plancha' solo si NO es 'a la plancha' (cocción)
+    r"|(?<!a la )(?<!la )\bplancha\b"
 )
 
 
@@ -155,7 +155,6 @@ def procesar_secciones_ejercicio(respuesta_estructurada: Dict[str, Any], perfil:
         haystack = " ".join(partes).lower()
         _, met = resolver_met_mets_gym(haystack)
         if met is None or met <= 0:
-            # Tarjeta POWER ya es ejercicio; a veces el título no coincide con claves MET
             met = 5.0
 
         dur = parse_duracion_minutos(haystack, default=45.0)

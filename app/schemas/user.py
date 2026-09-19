@@ -6,7 +6,7 @@ class UserLogin(BaseModel):
     password: str
     remember_me: bool = False
     firebase_uid: Optional[str] = None
-    user_type: Optional[str] = None # 'client' o 'staff'
+    user_type: Optional[str] = None
 
 
 class ResetPassword(BaseModel):
@@ -27,7 +27,7 @@ class ForgotPasswordRequest(BaseModel):
 class ValidateResetCodeRequest(BaseModel):
     """Schema para validar código y cambiar contraseña"""
     email: EmailStr
-    reset_code: str  # Código de 6 dígitos
+    reset_code: str
     new_password: str
 
 class PasswordUpdate(BaseModel):

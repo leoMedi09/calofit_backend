@@ -15,7 +15,6 @@ import sys
 import unicodedata
 from pathlib import Path
 
-# Permitir imports desde app/
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import create_engine, text
@@ -28,26 +27,18 @@ except Exception:
     DATABASE_URL = "postgresql://postgres:leomeflo09@localhost:5432/BD_Calofit"
 
 _IGNORADOS: frozenset[str] = frozenset({
-    # conectores y artículos
     "con", "sin", "del", "los", "las", "una", "unos", "unas",
-    # descriptores de preparación
     "horno", "plancha", "parrilla", "vapor", "frito", "cocido", "asado",
     "ligera", "ligero", "saludable", "natural", "fresco", "fresca",
     "estilo", "tipo", "especial", "peruano", "peruana", "casero", "casera",
     "salsa", "estofado", "guiso", "sudado", "saltado",
-    # tipos de plato — no son ingredientes
     "ensalada", "tostada", "tortilla", "sandwich", "sandwi",
     "ceviche", "cebiche", "tiradito", "causa", "crema", "sopa",
     "batido", "licuado", "smoothi",
-    # categorías genéricas
     "verduras", "frutas", "fruta",
-    # sinónimos
     "aguacate",
-    # pasta (en BD se llama "pasta cocida")
     "tallarines", "fideos", "espagueti", "fettuccine",
-    # descriptores adicionales
     "porcion", "controlada", "rellena", "relleno",
-    # términos regionales
     "canchita", "serrana", "serrano",
 })
 
@@ -74,11 +65,8 @@ def main() -> None:
         inconsistentes = []
 
         for plato_id, nombre, nombre_norm in platos:
-            # Normalizar nombre_norm fresco para evitar falsos positivos por tildes
-            # almacenadas en nombre_normalizado del DB (ej: "plátano" vs "platano")
             nombre_norm = _norm(nombre or "")
 
-            # Ingredientes resueltos del plato
             ings = db.execute(text(
                 "SELECT a.nombre, a.nombre_normalizado "
                 "FROM plato_ingredientes pi "
@@ -94,7 +82,6 @@ def main() -> None:
                 })
                 continue
 
-            # Tokens del nombre ≥5 chars, no ignorados
             tokens_nombre = [
                 t for t in (nombre_norm or "").split()
                 if len(t) >= 5 and t not in _IGNORADOS and not t.isdigit()
@@ -102,7 +89,6 @@ def main() -> None:
             if len(tokens_nombre) < 2:
                 continue
 
-            # Índice de tokens de ingredientes
             ings_tokens: set[str] = set()
             for _, ing_norm in ings:
                 for tok in (ing_norm or "").split():
@@ -139,7 +125,6 @@ def main() -> None:
 
         print(f"\nTotal: {len(inconsistentes)} platos requieren revisión manual.")
 
-        # Detalle extendido
         if "--fix-report" in sys.argv:
             print("\n" + "=" * 90)
             print("DETALLE EXTENDIDO:")

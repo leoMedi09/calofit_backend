@@ -20,18 +20,14 @@ async def subir_foto_perfil(
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="El archivo debe ser una imagen")
     
-    # 1. Leer archivo
     file_bytes = await file.read()
     
-    # 2. Borrar foto anterior
     if current_user.profile_picture_url:
         local_storage.delete_file(current_user.profile_picture_url)
     
-    # 3. Guardar Localmente
     relative_path = local_storage.save_file(file_bytes, file.filename)
     public_url = local_storage.get_public_url(relative_path)
     
-    # 4. Actualizar base de datos
     current_user.profile_picture_url = public_url
     db.commit()
     
@@ -63,7 +59,6 @@ async def registrar_usuario(
     db.commit()
     db.refresh(nuevo_usuario)
 
-    # ✉️ Correo de bienvenida al nuevo miembro del equipo
     try:
         from app.services.email_service import EmailService
         admin_name = f"{current_user.first_name} {current_user.last_name_paternal}".strip()
@@ -90,7 +85,7 @@ async def leer_mi_perfil(current_user: User = Depends(get_current_user)):
             "apellido_paterno": current_user.last_name_paternal,
             "apellido_materno": current_user.last_name_maternal,
             "email": current_user.email,
-            "foto_perfil": current_user.profile_picture_url # ✅ Añadido para el rediseño premium
+            "foto_perfil": current_user.profile_picture_url
         },
         "fisico": {
             "edad": getattr(current_user, "age", None),

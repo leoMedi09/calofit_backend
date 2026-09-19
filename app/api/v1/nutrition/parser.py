@@ -66,7 +66,6 @@ async def parse_ingredients(
                 advertencia="No identifiqué ese alimento. Intenta con más detalle.",
             )
 
-        # Filtrar ficticios (es_real: false)
         items_reales = [a for a in datos["alimentos"] if a.get("es_real", True) is not False]
         if not items_reales:
             return ParseIngredientsResponse(
@@ -83,7 +82,6 @@ async def parse_ingredients(
             p   = float(item.get("prot_g",  0) or 0)
             c   = float(item.get("carb_g",  0) or 0)
             g   = float(item.get("grasa_g", 0) or 0)
-            # Calcular kcal desde macros (consistente con el resto del sistema)
             k   = round(4 * p + 4 * c + 9 * g, 1) or float(item.get("kcal", 0) or 0)
             grm = float(item.get("porcion_g", 100) or 100)
 

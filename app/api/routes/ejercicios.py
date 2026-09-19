@@ -21,8 +21,6 @@ from app.services.rutina_service import generar_rutina_inteligente
 router = APIRouter()
 
 
-# ── Schemas ───────────────────────────────────────────────────────────────────
-
 class RutinaRequest(BaseModel):
     zonas_objetivo: List[str] = Field(
         ...,
@@ -41,8 +39,6 @@ class LogSeriesRequest(BaseModel):
     met:             float = Field(default=5.0, ge=1.0, le=20.0)
     duracion_min:    float = Field(default=45.0, ge=1.0, le=240.0)
 
-
-# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/")
 async def listar_ejercicios(

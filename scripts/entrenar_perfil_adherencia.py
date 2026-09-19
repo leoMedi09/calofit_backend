@@ -35,9 +35,6 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                               accuracy_score, f1_score)
 from sklearn.preprocessing import LabelEncoder
 
-# ─────────────────────────────────────────────────────────────────────
-# RUTAS
-# ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
 CSV_PATH    = os.path.join(SCRIPT_DIR, "data", "gym_members_exercise_tracking.csv")
@@ -46,7 +43,6 @@ OUTPUT_PATH = os.path.join(OUTPUT_DIR, "perfil_adherencia.pkl")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Mapeo de etiquetas para el Asistente
 LABEL_MAP = {1: "PERFIL_C", 2: "PERFIL_B", 3: "PERFIL_A"}
 LABEL_DESC = {
     "PERFIL_A": "Disciplinado — Alto compromiso, retos avanzados",
@@ -54,9 +50,6 @@ LABEL_DESC = {
     "PERFIL_C": "Necesita Guía — Hábitos básicos, acompañamiento constante",
 }
 
-# ═══════════════════════════════════════════════════════════════════════
-# FASE 1 — BUSINESS UNDERSTANDING
-# ═══════════════════════════════════════════════════════════════════════
 print("\n" + "═" * 65)
 print("  FASE 1: BUSINESS UNDERSTANDING")
 print("═" * 65)
@@ -78,9 +71,6 @@ print("""
     alcanzable. Te propongo registrar 3 comidas hoy."
 """)
 
-# ═══════════════════════════════════════════════════════════════════════
-# FASE 2 — DATA UNDERSTANDING
-# ═══════════════════════════════════════════════════════════════════════
 print("═" * 65)
 print("  FASE 2: DATA UNDERSTANDING")
 print("═" * 65)
@@ -114,45 +104,35 @@ stats = df_raw.groupby("Perfil")[
 ].mean().round(2)
 print(stats.to_string())
 
-# ═══════════════════════════════════════════════════════════════════════
-# FASE 3 — DATA PREPARATION
-# ═══════════════════════════════════════════════════════════════════════
 print("\n" + "═" * 65)
 print("  FASE 3: DATA PREPARATION")
 print("═" * 65)
 
 df = df_raw.copy()
 
-# 3.1 Codificar género (Male=1, Female=0)
 df["Gender_Enc"] = (df["Gender"] == "Male").astype(int)
 print("\n  ✅ Gender codificado: Male=1, Female=0")
 
-# 3.2 Codificar tipo de entrenamiento (one-hot)
 workout_dummies = pd.get_dummies(df["Workout_Type"], prefix="Workout")
 df = pd.concat([df, workout_dummies], axis=1)
 workout_cols = list(workout_dummies.columns)
 print(f"  ✅ Workout_Type codificado: {workout_cols}")
 
-# 3.3 Feature Engineering: Ratio de eficiencia calórica
 df["Cal_por_hora"] = df["Calories_Burned"] / df["Session_Duration (hours)"].replace(0, 1)
 print("  ✅ Feature creado: Cal_por_hora (calorías/hora de sesión)")
 
-# 3.4 Normalizar altura a cm (el dataset la tiene en metros, la app la usa en cm)
 df["Height_cm"]   = df["Height (m)"] * 100
 print("  ✅ Height convertida de metros a cm (compatibilidad con app)")
 
-# 3.5 Seleccionar features finales
-#     NOTA: Estas son exclusivamente las features que obtenemos en la App real
-#     garantizando consistencia absoluta con la base de datos (Tabla clients).
 FEATURES = [
-    "Age",                              # Edad del cliente
-    "Gender_Enc",                       # Género (0=F, 1=M)
-    "Weight (kg)",                      # Peso
-    "Height_cm",                        # Estatura en cm
-    "BMI",                              # IMC calculado
-    "Workout_Frequency (days/week)",    # Mapeado desde 'activity_level'
-    "Session_Duration (hours)",         # Duración de sesión (nueva pregunta onboarding)
-] + workout_cols                        # Tipo de entrenamiento preferido (nueva pregunta onboarding)
+    "Age",
+    "Gender_Enc",
+    "Weight (kg)",
+    "Height_cm",
+    "BMI",
+    "Workout_Frequency (days/week)",
+    "Session_Duration (hours)",
+] + workout_cols
 
 TARGET = "Experience_Level"
 
@@ -163,15 +143,11 @@ print(f"\n  📊 Features seleccionadas: {len(FEATURES)}")
 print(f"  📊 Total muestras: {len(X)}")
 print(f"  📊 Valores nulos en X: {df[FEATURES].isnull().sum().sum()}")
 
-# Train / Test split estratificado
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.20, random_state=42, stratify=y
 )
 print(f"\n  Train: {len(X_train)} muestras | Test: {len(X_test)} muestras")
 
-# ═══════════════════════════════════════════════════════════════════════
-# FASE 4 — MODELING
-# ═══════════════════════════════════════════════════════════════════════
 print("\n" + "═" * 65)
 print("  FASE 4: MODELING — Random Forest Classifier")
 print("═" * 65)
@@ -186,22 +162,19 @@ print("""
 """)
 
 modelo = RandomForestClassifier(
-    n_estimators=200,      # 200 árboles de decisión
-    max_depth=8,           # Reducido de 10→8 para minimizar overfitting
-    min_samples_split=8,   # Aumentado para evitar sobreajuste en nodos pequeños
-    min_samples_leaf=4,    # Aumentado para regularización adicional
-    class_weight="balanced",  # Maneja desbalance de clases
+    n_estimators=200,
+    max_depth=8,
+    min_samples_split=8,
+    min_samples_leaf=4,
+    class_weight="balanced",
     random_state=42,
-    n_jobs=-1              # Usa todos los núcleos disponibles
+    n_jobs=-1
 )
 
 print("  ⚙️  Entrenando Random Forest...")
 modelo.fit(X_train, y_train)
 print("  ✅ Entrenamiento completado.")
 
-# ═══════════════════════════════════════════════════════════════════════
-# FASE 5 — EVALUATION
-# ═══════════════════════════════════════════════════════════════════════
 print("\n" + "═" * 65)
 print("  FASE 5: EVALUATION")
 print("═" * 65)
@@ -215,7 +188,6 @@ print(f"  Accuracy  : {acc * 100:.2f}%")
 print(f"  F1-Score  : {f1 * 100:.2f}% (weighted)")
 
 print(f"\n  ━━━ Reporte por Clase (Perfil) ━━━")
-# Mapear etiquetas numéricas a nombres de perfil para el reporte
 target_names = [LABEL_MAP[i] for i in sorted(set(y))]
 print(classification_report(
     y_test, y_pred,
@@ -231,7 +203,6 @@ print(f"\n  Filas=Real | Columnas=Predicho\n")
 print(cm_df.to_string())
 print(f"\n  (Diagonal principal = predicciones correctas)")
 
-# Validación cruzada estratificada (5-fold)
 print(f"\n  ━━━ Validación Cruzada Estratificada (5-Fold) ━━━")
 skf      = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 cv_scores = cross_val_score(modelo, X, y, cv=skf, scoring="accuracy")
@@ -245,7 +216,6 @@ elif acc >= 0.75:
 else:
     print(f"\n  ⚠️  Accuracy < 75%. Revisa el balanceo de clases.")
 
-# Feature Importance
 print(f"\n  ━━━ Importancia de Features ━━━")
 importances = modelo.feature_importances_
 fi_df = pd.DataFrame({
@@ -264,9 +234,6 @@ print(f"     es '{top_feature}', lo que confirma que la")
 print(f"     frecuencia/intensidad del entrenamiento determina")
 print(f"     el nivel de compromiso del cliente.")
 
-# ═══════════════════════════════════════════════════════════════════════
-# FASE 6 — DEPLOYMENT
-# ═══════════════════════════════════════════════════════════════════════
 print("\n" + "═" * 65)
 print("  FASE 6: DEPLOYMENT")
 print("═" * 65)
@@ -287,7 +254,7 @@ class ModeloPerfil:
         self.modelo       = rf_model
         self.features     = features
         self.label_map    = label_map
-        self.workout_types = workout_types   # columnas one-hot del Workout_Type
+        self.workout_types = workout_types
 
     def predecir_cliente(self, datos: dict) -> str:
         """
@@ -312,25 +279,21 @@ class ModeloPerfil:
         """
         import pandas as pd
 
-        # Encoding básico
         gender_enc = 1 if str(datos.get("gender", "M")).upper() in ["M", "MALE"] else 0
         height_cm  = float(datos.get("height", 170))
         weight_kg  = float(datos.get("weight", 70))
         bmi        = weight_kg / ((height_cm / 100) ** 2)
 
-        # Calories por hora
         sess_h    = float(datos.get("session_hours", 1)) or 1
         cal       = float(datos.get("calories", 500))
         cal_hora  = cal / sess_h
 
-        # One-hot Workout_Type
         wt_data   = {col: 0 for col in self.workout_types}
         wt_input  = datos.get("workout_type", "")
         wt_col    = f"Workout_{wt_input}"
         if wt_col in wt_data:
             wt_data[wt_col] = 1
 
-        # Construir fila de entrada
         wt_data  = {col: 0 for col in self.workout_types}
         wt_col   = f"Workout_{datos.get('workout_type', '')}"
         if wt_col in wt_data:
@@ -369,7 +332,6 @@ class ModeloPerfil:
         return self.predecir_cliente(datos)
 
 
-# Guardar modelo como DICCIONARIO para evitar problemas de serialización en FastAPI
 guardado = {
     "rf_model":      modelo,
     "features":      FEATURES,
@@ -382,14 +344,10 @@ size_kb = os.path.getsize(OUTPUT_PATH) / 1024
 print(f"\n  💾 Modelo guardado en : {OUTPUT_PATH}")
 print(f"     Tamaño             : {size_kb:.1f} KB")
 
-# ═══════════════════════════════════════════════════════════════════════
-# DEMO — Verificación del modelo guardado
-# ═══════════════════════════════════════════════════════════════════════
 print("\n" + "═" * 65)
 print("  DEMO — Predicciones del modelo en clientes tipo World Light Gym")
 print("═" * 65)
 
-# Cargar el diccionario guardado
 modelo_test = joblib.load(OUTPUT_PATH)
 rf_test = modelo_test["rf_model"]
 
@@ -412,14 +370,9 @@ casos_demo = [
 
 for caso in casos_demo:
     nombre = caso.pop("nombre")
-    # Predicción simple directa sobre las métricas principales para el demo
-    # (En producción el ml_service se encarga del encoding completo)
     print(f"\n  👤 {nombre}")
     print(f"     → Descripción extraída con éxito")
 
-# ═══════════════════════════════════════════════════════════════════════
-# RESUMEN FINAL PARA TESIS
-# ═══════════════════════════════════════════════════════════════════════
 print("\n" + "═" * 65)
 print("  RESUMEN PARA TESIS — Sección Metodología ML")
 print("═" * 65)

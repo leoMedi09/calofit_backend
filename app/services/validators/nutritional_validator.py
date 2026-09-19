@@ -4,17 +4,14 @@ Validador nutricional: coherencia de macros y densidad calórica.
 from typing import Dict, Any, List, Optional
 from app.services.validators.base_validator import BaseValidator, ValidationResult
 
-# Atwater factors
 _KCAL_PROT  = 4.0
 _KCAL_CARB  = 4.0
 _KCAL_GRAS  = 9.0
-_TOLERANCIA = 0.15   # ±15%
+_TOLERANCIA = 0.15
 
-# Densidad calórica kcal/100g
 _DENSIDAD_MIN  =  20.0
 _DENSIDAD_MAX  = 800.0
 
-# Porcentajes máximos por momento del día (fracción del TDEE)
 _TDEE_PCT: Dict[str, float] = {
     "desayuno": 0.30,
     "almuerzo": 0.40,
@@ -56,7 +53,6 @@ class NutritionalValidator(BaseValidator):
         sugerencias:  List[str] = []
         confianza = 100
 
-        # 1. Valores negativos
         for campo, val in [("Calorías", kcal), ("Proteína", prot),
                            ("Carbohidratos", carb), ("Grasas", gras)]:
             if val < 0:
@@ -64,11 +60,9 @@ class NutritionalValidator(BaseValidator):
         if errores:
             return self._crear_resultado(False, 0, errores=errores)
 
-        # 2. Todos en cero
         if kcal == 0 and prot == 0 and carb == 0 and gras == 0:
             return self._crear_resultado(False, 0, errores=["Todos los macros son 0"])
 
-        # 3. Atwater
         kcal_calc = prot * _KCAL_PROT + carb * _KCAL_CARB + gras * _KCAL_GRAS
         if kcal_calc > 0:
             desv = abs(kcal - kcal_calc) / kcal_calc
@@ -79,7 +73,6 @@ class NutritionalValidator(BaseValidator):
                 )
                 confianza -= 10
 
-        # 4. Densidad calórica
         if peso > 0:
             densidad = kcal / peso * 100
             if densidad < _DENSIDAD_MIN:
@@ -95,7 +88,6 @@ class NutritionalValidator(BaseValidator):
         else:
             advertencias.append("Peso total no informado — no se puede calcular densidad")
 
-        # 5. Proporciones de macros
         if kcal > 0:
             pct_prot = prot * _KCAL_PROT / kcal * 100
             pct_carb = carb * _KCAL_CARB / kcal * 100
@@ -108,7 +100,6 @@ class NutritionalValidator(BaseValidator):
         else:
             pct_prot = pct_carb = pct_gras = 0.0
 
-        # 6. Contexto TDEE
         if tdee > 0:
             pct_tdee = kcal / tdee * 100
             limite   = _TDEE_PCT.get(momento, 0.40) * 100

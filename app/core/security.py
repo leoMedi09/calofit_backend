@@ -22,7 +22,7 @@ class Security:
         if expires_delta:
             expire = datetime.utcnow() + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(hours=24)  # ✅ CAMBIADO: 24 horas en lugar de 30 minutos
+            expire = datetime.utcnow() + timedelta(hours=24)
         
         to_encode.update({"exp": expire})
         

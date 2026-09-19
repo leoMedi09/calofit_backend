@@ -17,7 +17,6 @@ class AlertaSaludResponse(BaseModel):
     fecha_atencion: Optional[datetime] = None
     created_at: datetime
     
-    # Información adicional del cliente
     cliente_nombre: Optional[str] = None
     atendido_por_nombre: Optional[str] = None
     

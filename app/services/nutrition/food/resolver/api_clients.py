@@ -46,7 +46,6 @@ class USDAClient(FoodAPIClient):
             }
         """
         # TODO: Implementar con requests
-        # Este es un stub para la estructura
         logger.info(f"Buscando en USDA: {nombre}")
         return None
     

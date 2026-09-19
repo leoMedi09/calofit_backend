@@ -69,8 +69,6 @@ class TestFiltrosNoRompenRegistrosNormales:
         diag = await _registrar_real("Comí un batido de avena", sample_client, plan_hoy, db)
         assert diag["success"] is True
         nombres_norm = [n.lower() for n in diag["alimentos"]]
-        # No debe haber MÁS de un ítem que mencione "avena" — si "avena" y
-        # "batido de avena" coexisten, son la misma cosa contada 2 veces.
         items_avena = [n for n in nombres_norm if "avena" in n or "batido" in n]
         assert len(items_avena) <= 1, (
             f"Posible doble conteo de avena/batido: {diag['alimentos']} ({diag['kcal']} kcal)"
@@ -81,8 +79,6 @@ class TestFiltrosNoRompenRegistrosNormales:
         diag = await _registrar_real("Comí arroz con pollo", sample_client, plan_hoy, db)
         assert diag["success"] is True
         nombres_norm = [n.lower() for n in diag["alimentos"]]
-        # Debe quedar UN plato que mencione ambos, o ambos ingredientes
-        # presentes en algún lugar de la lista — nunca deben perderse los dos.
         menciona_arroz = any("arroz" in n for n in nombres_norm)
         menciona_pollo = any("pollo" in n for n in nombres_norm)
         assert menciona_arroz and menciona_pollo, (
@@ -99,11 +95,6 @@ class TestFiltrosNoRompenRegistrosNormales:
         )
         assert diag["success"] is True
         nombres_norm = [n.lower() for n in diag["alimentos"]]
-        # Si pollo/palta NO están duplicados como ítems sueltos junto a un
-        # nombre de ensalada que YA los menciona, no debe perderse información:
-        # debe quedar O bien "ensalada..." con pollo/palta en el nombre, O
-        # bien pollo Y palta como ítems propios (nunca los 3 a la vez, eso
-        # sería duplicado real).
         assert len(diag["alimentos"]) <= 2, (
             f"Demasiados ítems para una sola ensalada — posible duplicado: {diag['alimentos']}"
         )

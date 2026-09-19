@@ -11,7 +11,6 @@ from app.api import api_router
 
 Base.metadata.create_all(bind=engine)
 
-# MIGRACIONES MANUALES: Columnas añadidas post-creación inicial
 from sqlalchemy import text
 with engine.connect() as connection:
     try:
@@ -23,7 +22,6 @@ with engine.connect() as connection:
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS notificaciones_activas BOOLEAN DEFAULT TRUE;"))
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP;"))
         connection.execute(text("DROP TABLE IF EXISTS platos_recomendados CASCADE;"))
-        # Memoria conversacional persistida
         connection.execute(text("""
             CREATE TABLE IF NOT EXISTS chat_historial (
                 id SERIAL PRIMARY KEY,
@@ -54,16 +52,13 @@ app.add_middleware(
 
 app.include_router(api_router)
 
-# Incluir router general de API v1 (PASO 6)
 from app.api.v1 import router as api_v1_router
 app.include_router(api_v1_router)
 
-# Crear directorio de subidas si no existe
 UPLOAD_DIR = "app/uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
-# Servir archivos estáticos
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 

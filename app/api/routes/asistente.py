@@ -41,10 +41,10 @@ class RegistroManualAlimentoRequest(BaseModel):
     proteinas_g: float = 0
     carbohidratos_g: float = 0
     grasas_g: float = 0
-    porcion_g: float = 0  # gramos por porción (si lo sabes). si 0, se asume 100g.
+    porcion_g: float = 0
     categoria: str = "manual"
-    unidad: str | None = None  # "botella", "vaso", "taza", "porción"
-    gramos_por_unidad: float | None = None  # si unidad existe, cuantos gramos equivale 1 unidad
+    unidad: str | None = None
+    gramos_por_unidad: float | None = None
 
 
 class CalcularEjercicioRequest(BaseModel):
@@ -52,7 +52,7 @@ class CalcularEjercicioRequest(BaseModel):
     series: int = 0
     reps:   int = 0
     peso_kg: float = 0.0
-    duracion_min: float = 0.0  # cardio: minutos directos, sin series/reps
+    duracion_min: float = 0.0
 
 
 class RegistroRutinaManualRequest(BaseModel):
@@ -64,15 +64,13 @@ class ConfirmarRegistroRequest(BaseModel):
 
 
 class GuardarSugerenciaRequest(BaseModel):
-    tipo: str           # 'comida' o 'ejercicio'
+    tipo: str
     nombre: str
     ingredientes: list = []
     preparacion: list = []
     macros: str = ""
     nota: str = ""
 
-
-# ── helpers de memoria conversacional ──────────────────────────────────────
 
 def _cargar_historial_bd(client_id: int, db: Session, limite: int = 8) -> list:
     """
@@ -84,7 +82,6 @@ def _cargar_historial_bd(client_id: int, db: Session, limite: int = 8) -> list:
     from sqlalchemy import text as _t
     from datetime import datetime, timezone, timedelta
 
-    # Verificar cuándo fue el último mensaje
     last_row = db.execute(_t(
         "SELECT created_at FROM chat_historial "
         "WHERE client_id = :cid ORDER BY created_at DESC LIMIT 1"
@@ -93,13 +90,12 @@ def _cargar_historial_bd(client_id: int, db: Session, limite: int = 8) -> list:
     if not last_row:
         return []
 
-    # Usar UTC para comparar (la BD guarda en UTC)
     last_ts = last_row.created_at
     if last_ts.tzinfo is None:
         last_ts = last_ts.replace(tzinfo=timezone.utc)
     now_utc = datetime.now(timezone.utc)
     if (now_utc - last_ts) > timedelta(hours=2):
-        return []  # Sesión expirada — no contaminar con contexto viejo
+        return []
 
     rows = db.execute(_t(
         "SELECT rol, contenido FROM chat_historial "
@@ -118,7 +114,6 @@ def _guardar_turno_bd(client_id: int, mensaje_user: str, texto_asistente: str, d
         db.execute(_t(
             "INSERT INTO chat_historial (client_id, rol, contenido) VALUES (:cid, :rol, :cont)"
         ), {"cid": client_id, "rol": "assistant", "cont": texto_asistente[:2000]})
-        # Mantener solo los últimos 100 mensajes por usuario (50 turnos)
         db.execute(_t(
             "DELETE FROM chat_historial WHERE client_id = :cid AND id NOT IN ("
             "  SELECT id FROM chat_historial WHERE client_id = :cid "
@@ -139,11 +134,6 @@ async def consultar_asistente(
     try:
         cliente = db.query(Client).filter(Client.email == current_user.email).first()
 
-        # Si Flutter envía historial (chat activo): usarlo tal cual.
-        # Si Flutter no envía nada (chat borrado, primera apertura, nueva sesión):
-        # recuperar los últimos turnos de la BD (ventana de 2h) como fallback.
-        # Usar BD solo como fallback evita el problema anterior de duplicar contexto
-        # (que causaba que el LLM dijera "como recordarás...").
         historial_sesion = request.historial or []
         historial_combinado = historial_sesion or (
             _cargar_historial_bd(cliente.id, db) if cliente else []
@@ -159,7 +149,6 @@ async def consultar_asistente(
             consulta_id=request.consulta_id,
         )
 
-        # Persistir el nuevo turno en BD (no guardar turnos bloqueados por guardia)
         if cliente and not resultado.get("_blocked"):
             texto_resp = (
                 resultado.get("respuesta_estructurada", {}).get("texto_conversacional", "")
@@ -199,12 +188,6 @@ async def obtener_historial_chat(
         }
         for r in reversed(rows)
     ]
-
-
-# /log-inteligente (NLP de comida/ejercicio por voz, arquitectura vieja) se
-# eliminó: el frontend migró a "todo va por /consultar" (ver comentario en
-# chat_screen.dart) y registrarPorVoz() quedó sin ningún caller. Confirmado
-# sin referencias en todo lib/ antes de borrar.
 
 
 @router.post("/log-manual")
@@ -274,7 +257,6 @@ async def registrar_macros_directos(
     grasa_total = round(sum(a.grasas_g      for a in body.alimentos), 1)
 
     try:
-        # 1. Actualizar progreso_calorias (crear la fila si es el primer registro del día)
         prog = db.query(ProgresoCalorias).filter(
             ProgresoCalorias.client_id == perfil.id,
             ProgresoCalorias.fecha == hoy,
@@ -287,7 +269,6 @@ async def registrar_macros_directos(
         prog.carbohidratos_consumidos = round((prog.carbohidratos_consumidos or 0) + carb_total, 1)
         prog.grasas_consumidas        = round((prog.grasas_consumidas or 0)      + grasa_total, 1)
 
-        # 2. Insertar cada ingrediente en comida_registros
         for item in body.alimentos:
             db.add(ComidaRegistro(
                 client_id=perfil.id,
@@ -307,7 +288,7 @@ async def registrar_macros_directos(
         from app.core.notification_scheduler import notificar_si_excede_meta
         from app.services.asistente.asistente_plan import obtener_meta_calorica_hoy
         notificar_si_excede_meta(perfil, prog, obtener_meta_calorica_hoy(perfil, db))
-        db.commit()  # persiste alerta_exceso_enviada si se marcó
+        db.commit()
 
         return {
             "success": True,
@@ -397,8 +378,6 @@ async def confirmar_registro_con_consulta_id(
         raise HTTPException(status_code=500, detail="Error interno al confirmar el registro")
 
 
-# ═══ PART C: Guardar Sugerencias (Recetario Personal) ═══
-
 @router.post("/guardar-sugerencia")
 async def guardar_sugerencia(
     body: GuardarSugerenciaRequest,
@@ -427,11 +406,9 @@ async def guardar_sugerencia(
         db.commit()
         db.refresh(nueva)
 
-        # ── Sincronizar con Favoritos cuando es una comida ────────────────
         if body.tipo == "comida" and body.nombre:
             nombre_lower = body.nombre.lower().strip()
 
-            # Parsear macros del string "Cal: 252.9kcal | P: 26.4g | C: 13.5g | G: 13.3g"
             def _parse_macro(pattern: str, text: str) -> float:
                 m = _re.search(pattern, text or "")
                 return float(m.group(1)) if m else 0.0
@@ -586,7 +563,6 @@ async def mi_racha(
         hoy = get_peru_date()
         registrado_hoy = bool(fechas and fechas[0] == hoy)
 
-        # Racha actual: cuenta días consecutivos hacia atrás desde hoy
         racha_actual = 0
         referencia = hoy
         for f in fechas:
@@ -596,7 +572,6 @@ async def mi_racha(
             elif f < referencia - timedelta(days=1):
                 break
 
-        # Mejor racha histórica
         mejor_racha, racha_tmp, prev = 0, 0, None
         for f in sorted(fechas):
             if prev is None or f == prev + timedelta(days=1):
@@ -606,7 +581,6 @@ async def mi_racha(
             mejor_racha = max(mejor_racha, racha_tmp)
             prev = f
 
-        # Mapa últimos 7 días para los puntos del widget Flutter
         set_fechas = set(fechas)
         ultimos_7 = [
             {

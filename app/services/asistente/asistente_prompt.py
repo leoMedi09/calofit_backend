@@ -13,8 +13,6 @@ import re
 from app.services.response_parser import sanear_texto_conversacional_recipe
 
 
-# ── Post-procesado de respuesta ───────────────────────────────────────────────
-
 def clasificar_intencion_respuesta(respuesta_estructurada: dict, mensaje: str) -> None:
     """Clasifica si la respuesta debe mostrarse como tarjeta (card) o texto plano."""
     msg_low    = mensaje.lower()
@@ -77,9 +75,7 @@ def clasificar_intencion_respuesta(respuesta_estructurada: dict, mensaje: str) -
 
 def limpiar_tags_calofit(respuesta_estructurada: dict) -> None:
     """Elimina residuos de tags CALOFIT del texto y secciones."""
-    # Con corchetes: [CALOFIT_INTENT:LOG] / [/CALOFIT_HEADER]
     _re = re.compile(r'\[/?CALOFIT_[A-Z_:]*.*?\]', re.IGNORECASE)
-    # Sin corchetes: cuando el LLM filtra el texto dentro de un HEADER
     _re_bare = re.compile(
         r'\bCALOFIT_(?:INTENT|HEADER|LIST|ACTION|STATS|QUESTION_TYPE)'
         r'(?:\s*[:/]\s*\w+)?\b',
@@ -135,8 +131,6 @@ def detectar_intencion_principal(respuesta_estructurada: dict, mensaje: str) -> 
     return intent_ai if intent_ai in ("INFO", "RECIPE", "POWER", "PROGRESS", "SUCCESS", "DANGER") else "INFO"
 
 
-# ── Rescue NLP (LOG sin tarjeta) ─────────────────────────────────────────────
-
 async def rescue_nlp_log(
     resp_est: dict, mensaje: str, perfil, ia_engine, db
 ) -> None:
@@ -146,10 +140,6 @@ async def rescue_nlp_log(
     """
     if str(resp_est.get("intent") or "").upper() != "LOG":
         return
-    # Saltar solo si alguna sección realmente proviene del mensaje del usuario
-    # (marcada con _origen_usuario en procesar_secciones_comida).
-    # Sugerencias proactivas del LLM (ej. "Palta ensalada" cuando el usuario
-    # dijo "comí pan con pollo") no tienen _origen_usuario → rescue sigue.
     if any(
         s.get("tipo") == "comida" and s.get("_origen_usuario")
         for s in (resp_est.get("secciones") or [])

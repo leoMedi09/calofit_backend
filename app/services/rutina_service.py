@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 
 from app.services.asistente.asistente_recomendaciones import RecomendacionesHandler
 
-# ── Configuración de sustituciones por lesión ──────────────────────────────────
 
 _LESIONES_SUSTITUCION: Dict[str, Dict[str, Any]] = {
     "rodilla": {
@@ -53,11 +52,6 @@ _LESIONES_SUSTITUCION: Dict[str, Dict[str, Any]] = {
         "keywords": ["codo", "epicóndilo", "codo de tenista", "codo de golfista", "tendinitis codo"],
         "grupos_restringidos": ["Bíceps", "Tríceps"],
         "sustituir": {
-            # Antes solo tenía "default" — el guard nunca podía bloquear nada
-            # concreto porque _ejercicios_riesgosos quedaba vacío (el loop
-            # excluye la clave "default" al construir el set). Se agregan los
-            # movimientos de flexo-extensión bajo carga, que son justo los que
-            # sobrecargan el codo (epicondilitis/codo de tenista).
             "curl de biceps":   ("isometria_antebrazo", "Isometría de antebrazo (sin carga)"),
             "extension triceps": ("estiramiento_triceps", "Estiramiento de tríceps (sin carga)"),
             "press":            ("face_pull",  "Face Pull (carga ligera, sin extensión forzada del codo)"),
@@ -69,7 +63,6 @@ _LESIONES_SUSTITUCION: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# ── Nombres creativos por zona ─────────────────────────────────────────────────
 
 _NOMBRES_RUTINA: Dict[str, List[str]] = {
     "Piernas":         ["Piernas de Acero", "Tormenta de Cuádriceps", "Rey de Sentadillas", "Leyenda del Tren Inferior"],
@@ -84,7 +77,6 @@ _NOMBRES_RUTINA: Dict[str, List[str]] = {
     "Cuerpo Completo": ["Bestia Total", "Full Body Extremo", "Guerrero Completo", "Máquina Humana"],
 }
 
-# ── Series/reps por perfil ─────────────────────────────────────────────────────
 
 _CONFIG_PERFIL: Dict[str, Dict[str, Any]] = {
     "PERFIL_A": {
@@ -101,11 +93,7 @@ _CONFIG_PERFIL: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# ── Mapeo workout_type → zonas musculares ──────────────────────────────────────
-# Claves: primera palabra del campo workout_type en minúsculas.
-# "Fuerza (Pesas, Gym)" → "fuerza" → zonas de fuerza.
 _WORKOUT_TYPE_TO_ZONES: Dict[str, List[str]] = {
-    # Español (valores del dropdown Flutter)
     "fuerza":    ["Pecho", "Espalda", "Hombros", "Piernas"],
     "cardio":    ["Cardio"],
     "hiit":      ["Cardio", "Core", "Piernas"],
@@ -113,7 +101,6 @@ _WORKOUT_TYPE_TO_ZONES: Dict[str, List[str]] = {
     "yoga":      ["Core", "Glúteos", "Piernas"],
     "pilates":   ["Core", "Glúteos", "Piernas"],
     "mixto":     ["Pecho", "Espalda", "Cardio", "Core"],
-    # Inglés (valores guardados por el pipeline ML — _WT_MAP en asistente_recomendaciones.py)
     "strength":  ["Pecho", "Espalda", "Hombros", "Piernas"],
 }
 
@@ -126,13 +113,11 @@ def zonas_desde_workout_type(workout_type: Optional[str]) -> List[str]:
     return _WORKOUT_TYPE_TO_ZONES.get(primera, ["Cuerpo Completo"])
 
 
-# ── Calculadora de ejercicios por tiempo ──────────────────────────────────────
-
 def _ejercicios_por_tiempo(tiempo_min: int, series: int, reps: int, descanso_seg: int) -> int:
     """Estima cuántos ejercicios caben en el tiempo disponible."""
     seg_por_rep = 3
     seg_por_set = reps * seg_por_rep + descanso_seg
-    seg_por_ejercicio = series * seg_por_set + 30  # 30s transición
+    seg_por_ejercicio = series * seg_por_set + 30
     return max(2, min(8, tiempo_min * 60 // seg_por_ejercicio))
 
 
@@ -148,20 +133,14 @@ def _detectar_lesiones(medical_conditions: List[str]) -> List[str]:
     return activas
 
 
-# ── Estado de la lesión: ¿sigue activa o el usuario ya se recuperó? ──────────
-# No es una lista de frases completas ("ya estoy recuperado") porque cualquier
-# usuario real lo dice de muchas formas distintas. Son raíces/conceptos: si
-# aparecen en el mismo turno que menciona la zona, ese turno fija el estado
-# más reciente de esa lesión. El historial se recorre cronológicamente y el
-# turno MÁS RECIENTE que mencione la zona decide — no "se mencionó alguna vez".
 _ESTADO_RECUPERADO_STEMS = (
-    "recuper",                          # recuperado/a, recuperación, recuperé
-    "sanad", "sane", "sano ya", "ya sano", "ya sana",  # sanado/a, sané
-    "curad", "ya cure", "ya curé",       # curado/a, curé
+    "recuper",
+    "sanad", "sane", "sano ya", "ya sano", "ya sana",
+    "curad", "ya cure", "ya curé",
     "sin dolor", "sin molestia", "no tengo dolor", "no tengo molestia",
     "ningun dolor", "ningún dolor", "ninguna molestia",
     "no me duele", "ya no duele", "ya no me duele",
-    "desaparecio", "desaparec",          # desapareció, desapareciendo
+    "desaparecio", "desaparec",
     "ya paso", "ya pasó", "ya pase", "ya pasé",
     "estoy bien", "me siento bien", "entren normal", "entreno normal",
     "sin problema",
@@ -170,10 +149,6 @@ _ESTADO_ACTIVO_STEMS = (
     "duele", "dolor", "molesta", "molestia", "inflamad",
     "lesion", "lesión", "lastimad", "me lastime", "me lastimé",
 )
-# Cuando el usuario no repite ninguna zona por su nombre pero se refiere a
-# "todas" las que están en la conversación (ej. "ya no tengo molestias en
-# ninguna de las dos") — sin esto, un mensaje así queda ambiguo y no actualiza
-# ninguna zona.
 _INDICADORES_TODAS_LAS_ZONAS = (
     "ambas", "ambos", "las dos", "los dos", "ninguna de las dos",
     "ninguno de los dos", "todas", "todos",
@@ -196,8 +171,8 @@ def filtrar_lesiones_activas(
     ]
     turnos.append(mensaje_actual or "")
 
-    estados: dict[str, str] = {}       # clave -> "activa" | "recuperada"
-    vistas: set[str] = set()           # zonas mencionadas explícitamente hasta ahora
+    estados: dict[str, str] = {}
+    vistas: set[str] = set()
 
     for turno in turnos:
         t = turno.lower()
@@ -210,16 +185,10 @@ def filtrar_lesiones_activas(
         if zonas_en_turno:
             zonas_objetivo = zonas_en_turno
         elif any(ind in t for ind in _INDICADORES_TODAS_LAS_ZONAS) and vistas:
-            # "ya no tengo molestias en ninguna de las dos" → aplica a todas
-            # las zonas ya mencionadas, no solo a la última.
             zonas_objetivo = list(vistas)
         elif len(vistas) == 1:
-            # Solo una zona en juego — un comentario sin nombrarla ("ya estoy
-            # recuperado") obviamente se refiere a ella.
             zonas_objetivo = list(vistas)
         else:
-            # 2+ zonas en juego y el turno no nombra ninguna ni dice "ambas":
-            # ambiguo. Más seguro no tocar ningún estado que adivinar mal.
             zonas_objetivo = []
 
         if not zonas_objetivo:
@@ -263,10 +232,8 @@ def _sustituir_ejercicio(
     return nuevo_id, nuevo_nombre, just
 
 
-# Tipos que NO pertenecen a una rutina de gym/pesas — siempre excluidos.
 _TIPOS_EXCLUIDOS_BASE: List[str] = ["Strongman", "Cardio Ligero"]
 
-# Tipos extra excluidos según el workout_type del perfil.
 _TIPOS_EXCLUIDOS_POR_WORKOUT: Dict[str, List[str]] = {
     "fuerza":    ["Cardio", "Metabólico/HIIT"],
     "strength":  ["Cardio", "Metabólico/HIIT"],
@@ -333,8 +300,6 @@ def _nombre_rutina(zonas: List[str], perfil: str, lesiones: List[str]) -> str:
     return nombre
 
 
-# ── API pública ────────────────────────────────────────────────────────────────
-
 async def generar_rutina_inteligente(
     user_id: int,
     zonas_objetivo: List[str],
@@ -365,27 +330,22 @@ async def generar_rutina_inteligente(
     if not perfil_obj:
         return {"error": f"Usuario {user_id} no encontrado"}
 
-    # Clasificar perfil A/B/C
     handler = RecomendacionesHandler()
     perfil_str, confianza = handler.predecir_perfil(perfil_obj, db)
     cfg = _CONFIG_PERFIL.get(perfil_str, _CONFIG_PERFIL["PERFIL_B"])
 
-    # Detectar lesiones
     conditions = list(perfil_obj.medical_conditions or [])
     lesiones_activas = _detectar_lesiones(conditions)
     grupos_bloqueados = _grupos_restringidos(lesiones_activas)
 
-    # Filtrar zonas seguras
     zonas_seguras    = [z for z in zonas_objetivo if z not in grupos_bloqueados]
     zonas_restringidas = [z for z in zonas_objetivo if z in grupos_bloqueados]
 
     n_ejercicios = _ejercicios_por_tiempo(tiempo_min, cfg["series"], cfg["reps"], cfg["descanso_seg"])
 
-    # Tipos excluidos según el workout_type del perfil
     _wt_primera  = (perfil_obj.workout_type or "").strip().lower().split()[0] if perfil_obj.workout_type else ""
     _tipos_extra = _TIPOS_EXCLUIDOS_POR_WORKOUT.get(_wt_primera, [])
 
-    # Distribuir ejercicios entre zonas seguras
     if zonas_seguras:
         n_por_zona = max(1, n_ejercicios // len(zonas_seguras))
         ejercicios_raw = []
@@ -394,10 +354,8 @@ async def generar_rutina_inteligente(
                 _consultar_ejercicios([zona], cfg["nivel_filtro"], n_por_zona, db, tipos_excluidos=_tipos_extra)
             )
     else:
-        # Todas las zonas tienen lesión → dar rutina de core o upper-body seguro
         ejercicios_raw = _consultar_ejercicios(["Core"], cfg["nivel_filtro"], n_ejercicios, db, tipos_excluidos=_tipos_extra)
 
-    # Aplicar sustituciones para zonas restringidas
     advertencias = []
     sustituciones_aplicadas = []
 
@@ -405,10 +363,9 @@ async def generar_rutina_inteligente(
         for lesion in lesiones_activas:
             if zona in _LESIONES_SUSTITUCION[lesion]["grupos_restringidos"]:
                 just = _LESIONES_SUSTITUCION[lesion]["justificacion"]
-                # Añadir 1-2 ejercicios de sustitución
                 nuevo_id, nuevo_nombre = list(
                     _LESIONES_SUSTITUCION[lesion]["sustituir"].values()
-                )[-1]  # default
+                )[-1]
                 row = db.execute(_sql(
                     "SELECT id, nombre, musculo_principal, tipo, nivel, met, tecnica, tipo_metrica, grupo_padre "
                     "FROM ejercicios WHERE id = :eid LIMIT 1"
@@ -429,7 +386,6 @@ async def generar_rutina_inteligente(
 
     ejercicios_final = ejercicios_raw[:n_ejercicios] + sustituciones_aplicadas
 
-    # Calcular tiempo estimado
     seg_por_ejercicio = (
         cfg["series"] * (cfg["reps"] * 3 + cfg["descanso_seg"]) + 30
     )

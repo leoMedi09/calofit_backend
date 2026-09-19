@@ -27,10 +27,8 @@ class EjerciciosService:
                 for item in lista_ejercicios:
                     nombre = item.get("nombre")
                     if nombre:
-                        # Indexar por nombre y por ID
                         self._ejercicios_db[nombre.lower()] = item
                         self._ejercicios_db[item["id"].lower()] = item
-                        # También por alias si existen
                         for alias in item.get("alias", []):
                             self._ejercicios_db[alias.lower()] = item
             
@@ -42,11 +40,9 @@ class EjerciciosService:
         """Busca un ejercicio por nombre, id o alias."""
         consulta = consulta.lower().strip()
         
-        # 1. Búsqueda exacta
         if consulta in self._ejercicios_db:
             return self._ejercicios_db[consulta]
         
-        # 2. Búsqueda parcial
         for key, data in self._ejercicios_db.items():
             if key in consulta or consulta in key:
                 return data
@@ -59,5 +55,4 @@ class EjerciciosService:
         """
         return (met * 3.5 * peso_kg / 200) * minutos
 
-# Instancia global
 ejercicios_service = EjerciciosService()

@@ -86,9 +86,6 @@ def _aislar_cache_por_test():
 @pytest.mark.external
 class TestAuditoriaRegistroReal:
 
-    # ════════════════════════════════════════════════════════════════════
-    # CASO 1 — Plato compuesto tipo contenedor + ingredientes
-    # ════════════════════════════════════════════════════════════════════
     @pytest.mark.asyncio
     async def test_caso1_batido_contenedor_e_ingredientes(self, db, sample_client, plan_hoy):
         diag = await _registrar(
@@ -110,9 +107,6 @@ class TestAuditoriaRegistroReal:
             f"kcal_total={diag['kcal']}"
         )
 
-    # ════════════════════════════════════════════════════════════════════
-    # CASO 2 — Alimento inexistente / alucinación ("umas")
-    # ════════════════════════════════════════════════════════════════════
     @pytest.mark.asyncio
     async def test_caso2_alimento_inexistente_umas(self, db, sample_client, plan_hoy):
         diag = await _registrar(
@@ -127,9 +121,6 @@ class TestAuditoriaRegistroReal:
             f"prot_g={diag['prot_g']}"
         )
 
-    # ════════════════════════════════════════════════════════════════════
-    # CASO 3 — Palabras de momento del día registradas como comida
-    # ════════════════════════════════════════════════════════════════════
     @pytest.mark.asyncio
     @pytest.mark.parametrize("mensaje", [
         "Hoy en el desayuno comí avena",
@@ -147,9 +138,6 @@ class TestAuditoriaRegistroReal:
             f"alimentos={diag['alimentos']}"
         )
 
-    # ════════════════════════════════════════════════════════════════════
-    # CASO 4 — Consistencia del mismo mensaje (con y sin caché entre llamadas)
-    # ════════════════════════════════════════════════════════════════════
     @pytest.mark.asyncio
     async def test_caso4a_consistencia_sin_limpiar_cache_entre_llamadas(self, db, sample_client, plan_hoy):
         """Replica exactamente lo que pasa en la app real: el caché de macros
@@ -202,9 +190,6 @@ class TestAuditoriaRegistroReal:
             f"Causa probable: no-determinismo del LLM, no el caché."
         )
 
-    # ════════════════════════════════════════════════════════════════════
-    # CASO 5 — Gramaje explícito → piso mínimo de macros razonable
-    # ════════════════════════════════════════════════════════════════════
     @pytest.mark.asyncio
     async def test_caso5_gramaje_explicito_macros_razonables(self, db, sample_client, plan_hoy):
         diag = await _registrar(
@@ -213,9 +198,6 @@ class TestAuditoriaRegistroReal:
         )
         kcal = diag["kcal"] or 0
         prot = diag["prot_g"] or 0
-        # Pisos conservadores: 200g de arroz cocido (~130kcal/100g) + 200g de
-        # cerdo (mínimo realista ~150kcal/100g en corte magro) ya dan >550kcal
-        # y >25g de proteína solo entre esos dos, sin contar palta/pepinillo.
         assert kcal >= 400, (
             f"BUG CONFIRMADO (Caso 5): 200g arroz + 200g cerdo + palta + pepinillo "
             f"dieron solo {kcal} kcal — muy por debajo del piso realista (>=400). "
@@ -227,9 +209,6 @@ class TestAuditoriaRegistroReal:
             f"de cerdo (mínimo realista >=15g solo del cerdo). alimentos={diag['alimentos']}"
         )
 
-    # ════════════════════════════════════════════════════════════════════
-    # CASO 6 — Multiplicador de cantidad
-    # ════════════════════════════════════════════════════════════════════
     @pytest.mark.asyncio
     async def test_caso6_multiplicador_cantidad_dos_mandarinas(self, db, sample_client, plan_hoy):
         diag = await _registrar("comí dos mandarinas", sample_client, plan_hoy, db)

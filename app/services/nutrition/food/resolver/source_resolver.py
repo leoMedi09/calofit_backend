@@ -47,7 +47,7 @@ class FoodSourceResolver:
         self.cache_manager = cache_manager
         self.usda_client = usda_client
         self.fatsecret_client = fatsecret_client
-        self._llm = llm_service  # Inyectado opcionalmente
+        self._llm = llm_service
 
     def resolver_ingrediente(
         self,
@@ -74,10 +74,8 @@ class FoodSourceResolver:
         nombre_norm = self._normalizar_nombre(nombre_ingrediente)
         logger.info(f"Resolviendo ingrediente: {nombre_norm} ({gramos}g)")
 
-        # 1. Caché
         resultado_cache = self._buscar_cache(nombre_norm, user_id)
         if resultado_cache:
-            # resultado_cache es {"macros": {...}, "alimento_id": N} o macros directo (compat.)
             if isinstance(resultado_cache, dict) and "macros" in resultado_cache:
                 cached_macros = resultado_cache["macros"]
                 cached_alimento_id = resultado_cache.get("alimento_id")
@@ -95,7 +93,6 @@ class FoodSourceResolver:
                     alimento_id=cached_alimento_id,
                 )
 
-        # 2. BD local
         resultado_bd = self._buscar_bd_local(nombre_norm)
         if resultado_bd:
             logger.info(f"✅ BD local: {nombre_norm}")
@@ -115,23 +112,16 @@ class FoodSourceResolver:
                 confianza=95,
             )
 
-        # 3. USDA API (Bypassed - Relying on LLM Estimation)
-        # 4. FatSecret API (Bypassed - Relying on LLM Estimation)
-        # Bypassing external APIs as requested by the user to avoid missing items/American database mismatch.
 
-
-        # 5. ★ LLM Estimación (NUEVO FALLBACK) ★
         resultado_llm = self._estimar_con_llm(nombre_norm, nombre_ingrediente)
         if resultado_llm:
             logger.info(f"✅ LLM estimado: {nombre_norm} — guardando en BD para consistencia")
-            # Persistir en BD para que futuras consultas sean deterministas
             alimento_id = self._persistir_en_bd(
                 nombre=nombre_ingrediente,
                 nombre_norm=nombre_norm,
                 macros=resultado_llm,
                 source='LLM_Estimado',
             )
-            # También cachear
             self.cache_manager.guardar_en_cache(
                 food_normalized=nombre_norm,
                 user_id=user_id,
@@ -152,7 +142,6 @@ class FoodSourceResolver:
                 ],
             )
 
-        # 6. Fallback final: registrar como pendiente
         logger.warning(f"❌ Sin resolver: {nombre_norm}")
         self._registrar_sin_resolver(nombre=nombre_norm, user_id=user_id)
 
@@ -187,9 +176,6 @@ class FoodSourceResolver:
             for ing in ingredientes
         ]
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # NUEVO: LLM Fallback
-    # ──────────────────────────────────────────────────────────────────────────
 
     def _estimar_con_llm(
         self,
@@ -230,7 +216,6 @@ class FoodSourceResolver:
                 "Los valores deben ser científicamente realistas para ese alimento específico."
             )
 
-            # Llamar al LLM de forma síncrona
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
@@ -253,7 +238,6 @@ class FoodSourceResolver:
             if not respuesta:
                 return None
 
-            # Extraer JSON de la respuesta
             macros = self._extraer_json_macros(respuesta)
             if macros and self._validar_macros_estimadas(macros):
                 logger.info(
@@ -272,7 +256,6 @@ class FoodSourceResolver:
         import json as json_lib
         import re
 
-        # Intentar parsear directamente
         texto = texto.strip()
         try:
             data = json_lib.loads(texto)
@@ -280,7 +263,6 @@ class FoodSourceResolver:
         except Exception:
             pass
 
-        # Buscar JSON dentro del texto (a veces viene con explicación)
         match = re.search(r'\{[^{}]+\}', texto, re.DOTALL)
         if match:
             try:
@@ -300,7 +282,6 @@ class FoodSourceResolver:
         if not required.issubset(data.keys()):
             return None
 
-        # Asegurarse de que todos los valores son float y >= 0
         try:
             return {
                 'calorias_100g': max(0.0, float(data.get('calorias_100g') or 0)),
@@ -323,7 +304,6 @@ class FoodSourceResolver:
         carb = macros.get('carbohidratos_100g', 0)
         gras = macros.get('grasas_100g', 0)
 
-        # Valores imposibles
         if kcal < 0 or kcal > 900:
             return False
         if prot < 0 or carb < 0 or gras < 0:
@@ -331,7 +311,6 @@ class FoodSourceResolver:
         if prot + carb + gras > 100:
             return False
 
-        # Chequeo Atwater mínimo
         kcal_calc = 4 * prot + 4 * carb + 9 * gras
         if kcal_calc > 0:
             ratio = kcal / kcal_calc
@@ -356,7 +335,6 @@ class FoodSourceResolver:
         Retorna el ID del alimento creado o None si falla.
         """
         try:
-            # Verificar si ya existe (doble chequeo por race condition)
             existente = self.db.query(Alimento).filter(
                 Alimento.nombre_normalizado == nombre_norm
             ).first()
@@ -403,9 +381,6 @@ class FoodSourceResolver:
             logger.warning(f"LLMService no disponible: {exc}")
             return None
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Búsqueda en fuentes
-    # ──────────────────────────────────────────────────────────────────────────
 
     def _normalizar_nombre(self, nombre: str) -> str:
         """Normaliza nombre para búsqueda."""
@@ -450,8 +425,6 @@ class FoodSourceResolver:
             if not tokens:
                 return None
 
-            # Cada token debe aparecer como palabra completa (límite de palabra),
-            # insensible a acentos vía unaccent().
             conds = " AND ".join([
                 f"unaccent(lower(nombre_normalizado)) ~* "
                 f"('(^| )' || unaccent(lower(:t{i})) || '( |$)')"
@@ -470,7 +443,6 @@ class FoodSourceResolver:
             if row:
                 return _row_to_dict(row)
 
-            # Buscar en alias
             alias = self.db.query(AlimentoAlias).filter(
                 AlimentoAlias.alias == nombre_norm
             ).first()
@@ -525,9 +497,6 @@ class FoodSourceResolver:
             self.db.rollback()
             return False
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Construcción de resultado
-    # ──────────────────────────────────────────────────────────────────────────
 
     def _construir_resultado(
         self,

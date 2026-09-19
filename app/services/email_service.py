@@ -93,7 +93,6 @@ class EmailService:
             print("Faltan credenciales GMAIL_SENDER o GMAIL_APP_PASSWORD en el archivo .env")
             return None
 
-        # Construir el Mensaje HTML premium
         msg = MIMEMultipart("alternative")
         msg["Subject"] = "¡Bienvenido a CaloFit! Tu nutricionista te ha registrado"
         msg["From"] = f"CaloFit <{gmail_user}>"
@@ -127,7 +126,6 @@ class EmailService:
         msg.attach(parte_html)
 
         try:
-            # Conectar a Gmail SMTP por el puerto 465 (Seguro SSL)
             server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
             server.login(gmail_user, gmail_password)
             server.sendmail(gmail_user, email_to, msg.as_string())

@@ -11,22 +11,18 @@ class LocalStorage:
         Sube un archivo a Firebase Storage y retorna la URL pública válida.
         """
         try:
-            # Generar un nombre único para el archivo
             ext = os.path.splitext(original_filename)[1]
             if not ext:
                 ext = ".jpg"
             
-            # Ruta en Firebase: profiles/UUID.ext
             remote_path = f"profiles/{uuid.uuid4()}{ext}"
             
-            # Detectar tipo de contenido
             content_type = "image/jpeg"
             if ext.lower() == ".png":
                 content_type = "image/png"
             elif ext.lower() == ".webp":
                 content_type = "image/webp"
                 
-            # Usar el servicio de Firebase ya existente
             public_url = upload_to_firebase(file_bytes, remote_path, content_type=content_type)
             
             if public_url:
@@ -62,7 +58,6 @@ class LocalStorage:
             return False
             
         try:
-            # Si es una URL de Cloudinary o Firebase, no intentamos borrar de local
             if any(domain in public_url for domain in ["cloudinary.com", "firebasestorage.googleapis.com", "storage.googleapis.com"]):
                 return True
 
@@ -72,7 +67,6 @@ class LocalStorage:
             else:
                 return False
 
-            # Convertir ruta relativa a ruta de sistema
             system_path = os.path.join("app", relative_path.lstrip("/"))
             
             if os.path.exists(system_path) and os.path.isfile(system_path):

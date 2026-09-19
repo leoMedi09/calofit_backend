@@ -27,18 +27,15 @@ async def listar_alertas_mis_clientes(
     - **Autenticación:** Solo staff (Nutritionist/Trainer)
     - **Filtros opcionales:** estado, severidad
     """
-    # Obtener usuario staff completo
     staff = db.query(User).filter(User.email == current_user.email).first()
     if not staff:
         raise HTTPException(status_code=404, detail="Usuario staff no encontrado")
     
-    # Obtener IDs de clientes asignados según el rol
     if staff.role_name == "nutritionist":
         clientes_ids = db.query(Client.id).filter(Client.assigned_nutri_id == staff.id).all()
     elif staff.role_name == "coach":
         clientes_ids = db.query(Client.id).filter(Client.assigned_coach_id == staff.id).all()
     else:
-        # Admin puede ver todas las alertas
         clientes_ids = db.query(Client.id).all()
     
     clientes_ids = [c[0] for c in clientes_ids]
@@ -46,26 +43,21 @@ async def listar_alertas_mis_clientes(
     if not clientes_ids:
         return []
     
-    # Construir query base
     query = db.query(AlertaSalud).filter(AlertaSalud.client_id.in_(clientes_ids))
     
-    # Aplicar filtros opcionales
     if estado:
         query = query.filter(AlertaSalud.estado == estado)
     if severidad:
         query = query.filter(AlertaSalud.severidad == severidad)
     
-    # Ordenar por fecha (más recientes primero)
     alertas = query.order_by(AlertaSalud.fecha_deteccion.desc()).all()
 
-    # Resolver Client y User en 1 solo query por tipo (evita N+1 por alerta)
     clientes = {c.id: c for c in db.query(Client).filter(Client.id.in_(clientes_ids)).all()}
     atendido_ids = {a.atendido_por_id for a in alertas if a.atendido_por_id}
     usuarios = {
         u.id: u for u in db.query(User).filter(User.id.in_(atendido_ids)).all()
     } if atendido_ids else {}
 
-    # Enriquecer con información del cliente y quien atendió
     resultado = []
     for alerta in alertas:
         cliente = clientes.get(alerta.client_id)
@@ -107,7 +99,6 @@ async def obtener_detalle_alerta(
     if not alerta:
         raise HTTPException(status_code=404, detail="Alerta no encontrada")
     
-    # Verificar que el staff tenga acceso al cliente
     staff = db.query(User).filter(User.email == current_user.email).first()
     cliente = db.query(Client).filter(Client.id == alerta.client_id).first()
     
@@ -121,7 +112,6 @@ async def obtener_detalle_alerta(
         if not tiene_acceso:
             raise HTTPException(status_code=403, detail="No tienes acceso a esta alerta")
     
-    # Obtener información adicional
     atendido_por = None
     if alerta.atendido_por_id:
         atendido_por = db.query(User).filter(User.id == alerta.atendido_por_id).first()
@@ -160,7 +150,6 @@ async def actualizar_alerta(
     if not alerta:
         raise HTTPException(status_code=404, detail="Alerta no encontrada")
     
-    # Verificar acceso
     staff = db.query(User).filter(User.email == current_user.email).first()
     cliente = db.query(Client).filter(Client.id == alerta.client_id).first()
     
@@ -174,14 +163,12 @@ async def actualizar_alerta(
         if not tiene_acceso:
             raise HTTPException(status_code=403, detail="No tienes acceso a esta alerta")
     
-    # Actualizar campos
     if update_data.estado:
         alerta.estado = update_data.estado
         if update_data.estado == "en_proceso" and not alerta.atendido_por_id:
             alerta.atendido_por_id = staff.id
     
     if update_data.notas:
-        # Agregar nueva nota con timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         nueva_nota = f"[{timestamp} - {staff.first_name}] {update_data.notas}"
         if alerta.notas:
@@ -217,7 +204,6 @@ async def marcar_alerta_atendida(
     if not alerta:
         raise HTTPException(status_code=404, detail="Alerta no encontrada")
     
-    # Verificar acceso
     staff = db.query(User).filter(User.email == current_user.email).first()
     cliente = db.query(Client).filter(Client.id == alerta.client_id).first()
     
@@ -231,12 +217,10 @@ async def marcar_alerta_atendida(
         if not tiene_acceso:
             raise HTTPException(status_code=403, detail="No tienes acceso a esta alerta")
     
-    # Marcar como atendida
     alerta.estado = "atendida"
     alerta.atendido_por_id = staff.id
     alerta.fecha_atencion = datetime.now()
     
-    # Agregar notas finales
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     nota_final = f"[{timestamp} - {staff.first_name}] ATENDIDA: {atencion_data.notas}"
     if alerta.notas:
@@ -267,7 +251,6 @@ async def listar_alertas_por_cliente(
     
     - **Autenticación:** Solo staff con acceso al cliente
     """
-    # Verificar acceso
     staff = db.query(User).filter(User.email == current_user.email).first()
     cliente = db.query(Client).filter(Client.id == cliente_id).first()
     
@@ -284,12 +267,10 @@ async def listar_alertas_por_cliente(
         if not tiene_acceso:
             raise HTTPException(status_code=403, detail="No tienes acceso a este cliente")
     
-    # Obtener todas las alertas del cliente
     alertas = db.query(AlertaSalud).filter(
         AlertaSalud.client_id == cliente_id
     ).order_by(AlertaSalud.fecha_deteccion.desc()).all()
     
-    # Enriquecer con información (User en 1 solo query, evita N+1 por alerta)
     atendido_ids = {a.atendido_por_id for a in alertas if a.atendido_por_id}
     usuarios = {
         u.id: u for u in db.query(User).filter(User.id.in_(atendido_ids)).all()

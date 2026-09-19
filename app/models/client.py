@@ -11,7 +11,7 @@ class Client(Base):
     first_name = Column(String, nullable=True)
     last_name_paternal = Column(String, nullable=True)
     last_name_maternal = Column(String, nullable=True)
-    dni = Column(String, unique=True, index=True, nullable=True) # 🆕 Documento de identidad (DNI)
+    dni = Column(String, unique=True, index=True, nullable=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     planes_nutricionales = relationship(
@@ -20,33 +20,32 @@ class Client(Base):
         cascade="all, delete-orphan",
     )
     
-    flutter_uid = Column(String, unique=True, nullable=True, index=True)  # ✅ UID de Firebase/Flutter para vincular usuario con perfil de salud
-    fcm_token = Column(String, nullable=True)  # 🆕 Token de push notifications (Firebase Cloud Messaging)
-    notificaciones_activas = Column(Boolean, nullable=True, default=True)  # 🆕 Switch para recordatorios diarios
+    flutter_uid = Column(String, unique=True, nullable=True, index=True)
+    fcm_token = Column(String, nullable=True)
+    notificaciones_activas = Column(Boolean, nullable=True, default=True)
     
-    birth_date = Column(Date, nullable=True)  # Fecha de nacimiento
-    weight = Column(Float)  # Peso actual (kg)
-    height = Column(Float)  # Altura (cm) - ESTANDARIZADA A CENTÍMETROS
-    gender = Column(String(1), default='M', nullable=False)  # 'M' (Hombre) o 'F' (Mujer) - NECESARIO para fórmula Harris-Benedict
+    birth_date = Column(Date, nullable=True)
+    weight = Column(Float)
+    height = Column(Float)
+    gender = Column(String(1), default='M', nullable=False)
     medical_conditions = Column(ARRAY(String), nullable=True, default=[])
-    activity_level = Column(String, nullable=True, default='Moderado')  # Nivel de actividad física: Sedentario, Ligero, Moderado, Intenso, Muy intenso
-    goal = Column(String, nullable=True, default='Mantener peso')  # Objetivo principal: Perder peso, Mantener peso, Ganar masa
-    workout_type = Column(String, nullable=True, default='Cardio')  # 🆕 Tipo de ejercicio preferido (para ML Random Forest)
-    session_duration = Column(Float, nullable=True, default=1.0)   # 🆕 Duración de sesión en horas (para ML Random Forest)
+    activity_level = Column(String, nullable=True, default='Moderado')
+    goal = Column(String, nullable=True, default='Mantener peso')
+    workout_type = Column(String, nullable=True, default='Cardio')
+    session_duration = Column(Float, nullable=True, default=1.0)
     
     assigned_coach_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     assigned_nutri_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     
-    # --- CAMPOS ESTRATÉGICOS IA (v80.0) ---
-    ai_strategic_focus = Column(String, nullable=True)       # Foco semanal sugerido por Nutri
-    recommended_foods = Column(ARRAY(String), nullable=True, default=[])  # Lista Blanca
-    forbidden_foods = Column(ARRAY(String), nullable=True, default=[])    # Lista Negra
+    ai_strategic_focus = Column(String, nullable=True)
+    recommended_foods = Column(ARRAY(String), nullable=True, default=[])
+    forbidden_foods = Column(ARRAY(String), nullable=True, default=[])
     nutri_weekly_note = Column(Text, nullable=True)
     coach_notes = Column(Text, nullable=True)
-    is_strategic_guide_validated = Column(Boolean, default=False)         # ✅ Indica si el Nutri ya validó la estrategia
-    profile_picture_url = Column(String, nullable=True) # ✅ URL de la foto de perfil en Firebase Storage
-    is_profile_complete = Column(Boolean, default=False)  # 🆕 False hasta que el cliente llene sus datos en el Onboarding
-    terms_accepted_at = Column(DateTime, nullable=True)  # 🆕 Fecha en que aceptó Términos y Privacidad (Onboarding paso 4)
+    is_strategic_guide_validated = Column(Boolean, default=False)
+    profile_picture_url = Column(String, nullable=True)
+    is_profile_complete = Column(Boolean, default=False)
+    terms_accepted_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -54,14 +53,12 @@ class Client(Base):
     coach = relationship("User", foreign_keys="[Client.assigned_coach_id]", back_populates="clients_as_coach")
     nutritionist = relationship("User", foreign_keys="[Client.assigned_nutri_id]", back_populates="clients_as_nutri")
 
-    # Nuevas relaciones para historial
     historial_peso = relationship("HistorialPeso", back_populates="cliente", cascade="all, delete-orphan")
     historial_imc = relationship("HistorialIMC", back_populates="cliente", cascade="all, delete-orphan")
     progreso_calorias = relationship("ProgresoCalorias", back_populates="cliente", cascade="all, delete-orphan")
     alertas_salud = relationship("AlertaSalud", back_populates="cliente", cascade="all, delete-orphan")
     sugerencias_guardadas = relationship("SugerenciaGuardada", back_populates="cliente", cascade="all, delete-orphan")
     
-    # Relaciones para sistema de aprendizaje de preferencias
     preferencias_alimentos = relationship("PreferenciaAlimento", back_populates="cliente", cascade="all, delete-orphan")
     preferencias_ejercicios = relationship("PreferenciaEjercicio", back_populates="cliente", cascade="all, delete-orphan")
 

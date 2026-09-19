@@ -37,8 +37,6 @@ class TestCacheManager:
 
         resultado = cache.obtener_del_cache("arroz blanco", sample_client.id)
         assert resultado is not None
-        # obtener_del_cache() devuelve {"macros": {...}, "alimento_id": ...}
-        # (contrato actual de cache_manager.py) — no los macros planos.
         assert resultado["macros"]["calorias_100g"] == 130.0
         assert resultado["macros"]["proteina_100g"] == 2.7
 
@@ -78,13 +76,12 @@ class TestCacheManager:
         from app.models import AppCacheAlimentos
         import json
 
-        # Insertar entrada con expiración pasada
         entry = AppCacheAlimentos(
             food_normalized="alimento_viejo",
             user_id=sample_client.id,
             source="BD",
             raw_response=json.dumps({"macros": macros_arroz, "source": "BD"}),
-            expires_at=datetime.now(timezone.utc) - timedelta(days=1),  # Expirado
+            expires_at=datetime.now(timezone.utc) - timedelta(days=1),
         )
         db.add(entry)
         db.commit()

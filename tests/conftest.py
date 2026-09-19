@@ -23,16 +23,10 @@ def _get_test_db_url() -> str:
     db_url = os.getenv("DATABASE_URL", "")
 
     if "db:5432" in db_url:
-        # Entorno Docker: host=db, puerto=5432
         return "postgresql://postgres:leomeflo09@db:5432/test_calofit"
 
-    # Entorno Windows local con Docker en puerto 5433
     return "postgresql://postgres:leomeflo09@localhost:5433/test_calofit"
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Engine y sesión — se crean de forma lazy dentro de fixtures
-# ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="session")
 def test_db_url():
@@ -49,23 +43,17 @@ def test_engine(test_db_url):
     engine = create_engine(test_db_url, echo=False, pool_pre_ping=True)
     logger.info(f"[TEST] Conectando a BD de test: {test_db_url}")
 
-    # BD_Calofit (producción/desarrollo real) ya tiene estas extensiones
-    # activas; test_calofit se crea desde cero y no las trae — sin esto,
-    # cualquier query que use unaccent()/similaridad de texto (varias en
-    # app/services/) falla con UndefinedFunction y aborta la transacción.
     with engine.connect() as _conn_ext:
         _conn_ext.execute(text("CREATE EXTENSION IF NOT EXISTS unaccent"))
         _conn_ext.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         _conn_ext.commit()
 
-    # Crear todas las tablas (importando los modelos primero para que se registren en la metadata)
     import app.models
     Base.metadata.create_all(bind=engine)
     logger.info("[TEST] Tablas creadas correctamente.")
 
     yield engine
 
-    # Limpieza al final de la sesión
     Base.metadata.drop_all(bind=engine)
     engine.dispose()
     logger.info("[TEST] BD de test limpiada.")
@@ -95,10 +83,6 @@ def db(test_engine, TestingSessionLocal):
     connection.close()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Aislamiento de estado global entre tests
-# ─────────────────────────────────────────────────────────────────────────────
-
 @pytest.fixture(autouse=True)
 def _limpiar_macro_cache():
     """_macro_cache (llm_registro.py) es un dict en memoria de proceso, sin
@@ -112,10 +96,6 @@ def _limpiar_macro_cache():
     yield
     _macro_cache.clear()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Fixtures de datos de prueba
-# ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def sample_role(db):
@@ -316,10 +296,6 @@ def sample_meta_usuario(db, sample_client):
     return meta
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Mocks de servicios externos
-# ─────────────────────────────────────────────────────────────────────────────
-
 @pytest.fixture
 def mock_llm_service():
     """Mock de LLMService para tests sin IA real."""
@@ -373,10 +349,6 @@ def mock_fatsecret_client():
 
     return MockFatSecretClient()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Configuración de markers
-# ─────────────────────────────────────────────────────────────────────────────
 
 def pytest_configure(config):
     """Registra markers personalizados."""

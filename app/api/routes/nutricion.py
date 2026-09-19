@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-# Asegúrate de importar PlanDiario
 from app.models.nutricion import PlanNutricional, PlanDiario
 from app.schemas.nutricion import PlanNutricionalCreate, PlanNutricionalResponse, TestIARequest
 from typing import List, Optional, Any, Dict
@@ -14,7 +13,6 @@ logger = get_logger("api.nutricion")
 
 router = APIRouter()
 
-# Endpoint temporal para probar IA (Solo para testing/desarrollo)
 @router.post("/test-ia")
 async def test_ia(
     request: TestIARequest,
@@ -45,11 +43,9 @@ async def crear_plan_nutricional(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_staff)
 ):
-    # 1. Seguridad
     if current_user.role_name not in ["nutritionist", "admin"]:
         raise HTTPException(status_code=403, detail="No autorizado")
 
-    # 2. IA: Cálculo de Calorías Base
     try:
         calorias_base = ia_engine.calcular_requerimiento(
             genero=plan_data.genero, edad=plan_data.edad,
@@ -58,10 +54,9 @@ async def crear_plan_nutricional(
         )
     except Exception as e:
         print(f"Error en calcular_requerimiento: {str(e)}")
-        # Fallback: Usar fórmula de Harris-Benedict
-        if plan_data.genero == 1:  # Masculino
+        if plan_data.genero == 1:
             tmb = 88.362 + (13.397 * plan_data.peso) + (4.799 * plan_data.talla) - (5.677 * plan_data.edad)
-        else:  # Femenino
+        else:
             tmb = 447.593 + (9.247 * plan_data.peso) + (3.098 * plan_data.talla) - (4.330 * plan_data.edad)
         
         calorias_mantenimiento = tmb * plan_data.nivel_actividad
@@ -76,7 +71,6 @@ async def crear_plan_nutricional(
         calorias_base = round(calorias_base, 2)
         print(f"Usando cálculo alternativo: {calorias_base} kcal")
 
-    # 3. IA Avanzada: Recomendaciones con Groq + CBF
     perfil_usuario = {
         "edad": plan_data.edad,
         "genero": plan_data.genero,
@@ -90,7 +84,6 @@ async def crear_plan_nutricional(
     except Exception as e:
         recomendacion_groq = "Error al generar recomendación avanzada. Usa plan básico."
 
-    # 4. Guardar Plan Maestro (Encabezado)
     nuevo_plan = PlanNutricional(
         client_id=plan_data.client_id,
         nutricionista_id=current_user.id,
@@ -99,7 +92,7 @@ async def crear_plan_nutricional(
         nivel_actividad=plan_data.nivel_actividad,
         objetivo=plan_data.objetivo,
         calorias_ia_base=calorias_base,
-        es_contingencia_ia=False, # Plan oficial creado en consulta
+        es_contingencia_ia=False,
         observaciones=plan_data.observaciones
     )
 
@@ -107,13 +100,10 @@ async def crear_plan_nutricional(
         db.add(nuevo_plan)
         db.flush() 
 
-        # 4. Generación Semanal Inteligente
         for i in range(1, 8):
-            # Diferenciamos carga: Días 1-5 (Entreno) vs 6-7 (Descanso)
             factor = 1.1 if i <= 5 else 0.9
             cals_dia = round(calorias_base * factor, 2)
             
-            # IA genera consejos para el Coach y el Cliente
             sugerencia_entreno = ia_engine.generar_sugerencia_entrenamiento(plan_data.objetivo, i)
             nota_ia = "Plan generado automáticamente para dar continuidad a tu progreso."
 
@@ -121,14 +111,12 @@ async def crear_plan_nutricional(
                 plan_id=nuevo_plan.id,
                 dia_numero=i,
                 calorias_dia=cals_dia,
-                # Repartición de macros basada en calorías del día
                 proteinas_g=round((cals_dia * 0.25) / 4, 1),
                 carbohidratos_g=round((cals_dia * 0.50) / 4, 1),
                 grasas_g=round((cals_dia * 0.25) / 9, 1),
-                # Campos de asistencia
                 sugerencia_entrenamiento_ia=sugerencia_entreno,
                 nota_asistente_ia=nota_ia,
-                estado="sugerencia_ia", # Disponible para el cliente al instante
+                estado="sugerencia_ia",
                 validado_nutri=True
             )
             db.add(dia)
@@ -136,7 +124,6 @@ async def crear_plan_nutricional(
         db.commit()
         db.refresh(nuevo_plan)
         
-        # Devolver el plan completo con sus relaciones cargadas
         return nuevo_plan
 
     except Exception as e:
@@ -144,7 +131,6 @@ async def crear_plan_nutricional(
         logger.error("Error al crear plan nutricional: %s", e, exc_info=True)
         raise HTTPException(status_code=400, detail="Error al crear el plan nutricional")
 
-# Endpoint temporal para probar NLP y Fuzzy Logic (Solo para testing/desarrollo)
 @router.post("/test-nlp-fuzzy")
 async def test_nlp_fuzzy(
     request: dict,
@@ -167,15 +153,12 @@ async def test_nlp_fuzzy(
         adherencia_pct = request.get("adherencia_pct", 50)
         progreso_pct = request.get("progreso_pct", 50)
 
-        # Probar NLP si hay comando
         nlp_result = None
         if comando_texto:
             nlp_result = ia_engine.interpretar_comando_nlp(comando_texto)
 
-        # Probar Fuzzy Logic
         alerta_fuzzy = ia_engine.generar_alerta_fuzzy(adherencia_pct, progreso_pct)
 
-        # Generar recomendación completa con las nuevas features
         recomendacion = ia_engine.recomendar_alimentos_con_groq(
             perfil_usuario=perfil_usuario,
             comando_texto=comando_texto,
@@ -193,9 +176,6 @@ async def test_nlp_fuzzy(
         logger.error("Error en test-nlp-fuzzy: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Error en el servicio de NLP/Fuzzy")
 
-# =================================================================
-# 🍎 NUEVOS ENDPOINTS: GESTIÓN DE PLANES (FLUJO GYM REAL)
-# =================================================================
 
 @router.get("/planes/pendientes", response_model=list[PlanNutricionalResponse])
 async def listar_planes_pendientes(
@@ -210,7 +190,6 @@ async def listar_planes_pendientes(
     
     query = db.query(PlanNutricional).filter(PlanNutricional.status == "draft_ia")
     
-    # Si el usuario es nutricionista, solo ver sus asignados
     if current_user.role_name == "nutritionist":
         query = query.join(Client).filter(Client.assigned_nutri_id == current_user.id)
     
@@ -233,22 +212,18 @@ async def validar_plan_nutricional(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan no encontrado")
         
-    # Seguridad: Un nutri solo puede validar si el cliente está asignado a él
-    # o si es administrador
     from app.models.client import Client
     cliente = db.query(Client).filter(Client.id == plan.client_id).first()
     
     if current_user.role_name == "nutritionist" and cliente.assigned_nutri_id != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para validar planes de este cliente")
 
-    # Actualizar cabecera del plan
     from app.core.utils import get_peru_now
     plan.status = "validado"
     plan.validated_by_id = current_user.id
     plan.validated_at = get_peru_now().replace(tzinfo=None)
-    plan.nutricionista_id = current_user.id # Asignar formalmente al plan
+    plan.nutricionista_id = current_user.id
     
-    # Actualizar todos los días del plan a oficial
     for dia in plan.detalles_diarios:
         dia.estado = "oficial"
         dia.validado_nutri = True
@@ -278,12 +253,10 @@ async def obtener_recomendaciones_personalizadas(
     from app.models.preferencias import PreferenciaAlimento
     from app.services.recomendador_platos import _tokens_prohibidos
 
-    # Obtener cliente
     cliente = db.query(Client).filter(Client.email == current_user.email).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
-    # Tokens prohibidos según condiciones dietéticas del perfil
     _conds = list(cliente.medical_conditions or [])
     tokens_prohib = _tokens_prohibidos(_conds)
 
@@ -305,13 +278,11 @@ async def obtener_recomendaciones_personalizadas(
         }
         return _map.get(categoria, "opción equilibrada según tu objetivo")
 
-    # Consultar preferencias del cliente
     preferencias = db.query(PreferenciaAlimento).filter(
         PreferenciaAlimento.client_id == cliente.id
     ).order_by(PreferenciaAlimento.frecuencia.desc()).limit(20).all()
 
-    if len(preferencias) < 3:  # Cold start — usuario nuevo
-        # Catálogo base omnívoro por objetivo
+    if len(preferencias) < 3:
         _base_omnivoro = {
             "Perder peso": [
                 {"nombre": "Pollo a la plancha",  "categoria": "proteina",      "calorias_aprox": 165},
@@ -329,7 +300,6 @@ async def obtener_recomendaciones_personalizadas(
                 {"nombre": "Quinua cocida",        "categoria": "carbohidratos", "calorias_aprox": 222},
             ],
         }
-        # Alternativas veganas/vegetarianas por objetivo
         _base_vegetal = {
             "Perder peso": [
                 {"nombre": "Ensalada de quinua con verduras", "categoria": "proteina_vegetal", "calorias_aprox": 180},
@@ -353,7 +323,6 @@ async def obtener_recomendaciones_personalizadas(
         catalogo = _base_vegetal if _es_vegano else _base_omnivoro
         recomendaciones_raw = catalogo.get(objetivo, catalogo["Mantener peso"])
 
-        # Filtrar cualquier residuo que incumpla restricciones + añadir justificación
         recomendaciones = [
             {**item, "justificacion": _justificacion_cold(item["nombre"], item["categoria"])}
             for item in recomendaciones_raw
@@ -367,12 +336,12 @@ async def obtener_recomendaciones_personalizadas(
             "nota": "El sistema aprenderá tus preferencias a medida que registres tus comidas",
         }
 
-    else:  # Usuario con historial
+    else:
         favoritos = []
         for pref in preferencias:
             nombre = pref.alimento.capitalize()
             if not _es_apto(nombre):
-                continue   # Excluir favorito que incumple restricción dietética actual
+                continue
             favoritos.append({
                 "nombre":       nombre,
                 "frecuencia":   pref.frecuencia,

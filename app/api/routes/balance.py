@@ -35,20 +35,16 @@ async def obtener_balance_hoy(
     - Lista de alimentos registrados
     - Lista de ejercicios registrados
     """
-    # Obtener cliente
     cliente = db.query(Client).filter(Client.email == current_user.email).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     
-    # Obtener plan activo
-    # Obtener plan activo (Lógica alineada con Dashboard)
     plan_activo = db.query(PlanNutricional).filter(
         PlanNutricional.client_id == cliente.id
     ).order_by(PlanNutricional.fecha_creacion.desc()).first()
     
-    objetivo_diario = 2000 # Default
+    objetivo_diario = 2000
     if plan_activo:
-        # Intentar obtener meta especifica del dia
         from app.core.utils import get_peru_now
         dia_semana = get_peru_now().isoweekday()
         plan_hoy = db.query(PlanDiario).filter(
@@ -57,7 +53,6 @@ async def obtener_balance_hoy(
         ).first()
         
         if not plan_hoy:
-             # Si no hay para hoy, tomar el primero disponible (Lógica Dashboard)
              plan_hoy = db.query(PlanDiario).filter(
                  PlanDiario.plan_id == plan_activo.id
              ).first()
@@ -67,7 +62,6 @@ async def obtener_balance_hoy(
         else:
              objetivo_diario = plan_activo.calorias_ia_base or 2000
     else:
-        # 🆕 FALLBACK IA (Lógica Dashboard): Calcular si no hay plan
         from app.services.ia_service import ia_engine
         
         genero_map = {"M": 1, "F": 2}
@@ -83,7 +77,6 @@ async def obtener_balance_hoy(
             nivel_actividad=nivel_actividad, objetivo=objetivo
         )
     
-    # Obtener progreso de hoy
     
     from app.core.utils import get_peru_date
     if fecha:
@@ -101,7 +94,6 @@ async def obtener_balance_hoy(
     
     calorias_consumidas = progreso_hoy.calorias_consumidas if progreso_hoy else 0
 
-    # Calorías quemadas: fuente autoritativa = workout_logs (cubre todos los paths de registro)
     from sqlalchemy import text as _sql_wl
     _dialect = getattr(getattr(db, "bind", None), "dialect", None)
     _dname = getattr(_dialect, "name", "") or ""
@@ -117,10 +109,8 @@ async def obtener_balance_hoy(
             "WHERE client_id = :cid AND date(created_at) = :hoy"
         ), {"cid": cliente.id, "hoy": hoy}).scalar() or 0)
 
-    # Restan = Meta − Consumido + Quemadas
     calorias_restantes = objetivo_diario - calorias_consumidas + calorias_quemadas
     
-    # Obtener preferencias de alimentos registrados hoy (como proxy de registros)
     from app.models.preferencias import PreferenciaAlimento, PreferenciaEjercicio
     from sqlalchemy import func
     
@@ -130,7 +120,6 @@ async def obtener_balance_hoy(
     dialect = getattr(getattr(db, "bind", None), "dialect", None)
     dialect_name = getattr(dialect, "name", "") or ""
 
-    # Fuente de verdad: comida_registros (macros correctos por ítem, ordenados por hora)
     if dialect_name == "postgresql":
         registros_hoy = db.query(ComidaRegistro).filter(
             ComidaRegistro.client_id == cliente.id,
@@ -158,7 +147,6 @@ async def obtener_balance_hoy(
             "FROM workout_logs WHERE client_id = :cid AND date(created_at) = :hoy ORDER BY created_at DESC"
         ), {"cid": cliente.id, "hoy": hoy}).fetchall()
 
-    # Preferencias para es_favorito / puntuacion
     prefs_idx: dict[str, PreferenciaAlimento] = {
         p.alimento.lower(): p
         for p in db.query(PreferenciaAlimento).filter(
@@ -166,9 +154,8 @@ async def obtener_balance_hoy(
         ).all()
     }
 
-    # Agrupar registros por nombre (mismo alimento registrado varias veces → sumar macros, mostrar ×N)
     _grupos: dict[str, dict] = {}
-    for reg in registros_hoy:  # ya ordenados DESC por created_at
+    for reg in registros_hoy:
         _key = reg.nombre_alimento.lower()
         if _key not in _grupos:
             _grupos[_key] = {
@@ -271,7 +258,6 @@ async def obtener_seguimiento_semanal(
         for pd in db.query(PlanDiario).filter(PlanDiario.plan_id == plan_activo.id).all():
             plan_por_dia[pd.dia_numero] = float(pd.calorias_dia)
 
-    # Metas de macros: usar metas_usuario si existen, derivar de kcal si no
     from app.models.meta_usuario import MetaUsuario
     meta_usuario = db.query(MetaUsuario).filter(
         MetaUsuario.client_id == cliente.id
@@ -290,8 +276,6 @@ async def obtener_seguimiento_semanal(
             round(kcal_obj * 0.25 / 9, 1),
         )
 
-    # semana_offset=0 → semana actual (Lun-Dom)
-    # semana_offset=-1 → semana anterior (Lun-Dom), etc.
     hoy = get_peru_date()
     lunes_actual = hoy - timedelta(days=hoy.isoweekday() - 1)
     lunes_semana = lunes_actual + timedelta(weeks=semana_offset)
@@ -306,7 +290,7 @@ async def obtener_seguimiento_semanal(
 
     for i in range(7):
         fecha_dia = lunes_semana + timedelta(days=i)
-        dia_iso = i + 1  # 1=Lun ... 7=Dom
+        dia_iso = i + 1
         dia_label = dias_labels[dia_iso - 1]
 
         kcal_objetivo = plan_por_dia.get(dia_iso, objetivo_base)
@@ -320,7 +304,6 @@ async def obtener_seguimiento_semanal(
         kcal_quemadas = float(progreso.calorias_quemadas or 0) if progreso else 0.0
         hay_registro = progreso is not None and kcal_consumidas > 0
 
-        # Contar ejercicios del día desde workout_logs
         wl_count = db.execute(_sql(
             "SELECT COUNT(*) FROM workout_logs "
             "WHERE client_id = :cid "
@@ -328,14 +311,12 @@ async def obtener_seguimiento_semanal(
         ), {"cid": cliente.id, "fecha": fecha_dia}).scalar() or 0
         hay_ejercicio = int(wl_count) > 0
 
-        # Adherencia: 100% si consumidas está entre 90-110% del objetivo
         adherencia_pct = 0.0
         if hay_registro and kcal_objetivo > 0:
             ratio = kcal_consumidas / kcal_objetivo
             if ratio <= 1.1:
                 adherencia_pct = min(ratio, 1.0) * 100.0
             else:
-                # Penalizar superávit excesivo
                 adherencia_pct = max(0.0, (2.2 - ratio) / 1.1) * 100.0
             adherencia_pct = round(max(0.0, min(100.0, adherencia_pct)), 1)
 
@@ -554,8 +535,8 @@ async def listar_favoritos(
 @router.delete("/registro/{registro_id}")
 async def eliminar_registro(
     registro_id: int,
-    tipo: str,              # "alimento" o "ejercicio"
-    n: int = 0,             # cuántos eliminar (0 = todos del grupo)
+    tipo: str,
+    n: int = 0,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
@@ -569,7 +550,6 @@ async def eliminar_registro(
 
     Recalcula automáticamente el balance después de eliminar.
     """
-    # Obtener cliente
     cliente = db.query(Client).filter(Client.email == current_user.email).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
@@ -579,24 +559,19 @@ async def eliminar_registro(
     from sqlalchemy import text as _text2
 
     if tipo == "alimento":
-        # Buscar el registro referenciado para obtener nombre y fecha
         registro = db.query(ComidaRegistro).filter(
             ComidaRegistro.id == registro_id,
             ComidaRegistro.client_id == cliente.id
         ).first()
         if not registro:
-            # 404 silencioso: el registro ya no existe (huérfano o borrado antes).
-            # Devolvemos 200 vacío para que el frontend refresque sin mostrar error.
             return {"eliminado": 0, "mensaje": "Registro no encontrado, ya eliminado"}
         nombre_registro = registro.nombre_alimento
         fecha_alim = registro.fecha
-        # Obtener todos los registros del grupo ordenados por creación DESC
         todos = db.query(ComidaRegistro).filter(
             ComidaRegistro.client_id == cliente.id,
             ComidaRegistro.nombre_alimento == nombre_registro,
             ComidaRegistro.fecha == fecha_alim,
         ).order_by(ComidaRegistro.created_at.desc()).all()
-        # n=0 → eliminar todos; n>0 → eliminar solo los N más recientes
         a_eliminar = todos if (n == 0 or n >= len(todos)) else todos[:n]
         for r in a_eliminar:
             db.delete(r)
@@ -604,7 +579,6 @@ async def eliminar_registro(
         recalcular_progreso_diario(cliente.id, fecha_alim, db)
         db.commit()
     elif tipo == "ejercicio":
-        # Ejercicios viven en workout_logs
         row = db.execute(_text2(
             "SELECT id, ejercicio, calorias_quemadas FROM workout_logs "
             "WHERE id = :rid AND client_id = :cid"
@@ -614,7 +588,6 @@ async def eliminar_registro(
         nombre_registro = row.ejercicio
         cal_a_restar = float(row.calorias_quemadas or 0)
         db.execute(_text2("DELETE FROM workout_logs WHERE id = :rid"), {"rid": registro_id})
-        # Restar calorías del progreso del día
         from app.core.utils import get_peru_date as _gpd
         db.execute(_text2(
             "UPDATE progreso_calorias SET calorias_quemadas = GREATEST(0, calorias_quemadas - :cal) "
@@ -624,7 +597,6 @@ async def eliminar_registro(
     else:
         raise HTTPException(status_code=400, detail="Tipo debe ser 'alimento' o 'ejercicio'")
     
-    # Recalcular balance
     
     from app.core.utils import get_peru_date
     hoy = get_peru_date()
@@ -634,8 +606,6 @@ async def eliminar_registro(
     ).first()
     
     if progreso_hoy:
-        # Obtener plan para calcular restantes
-        # Obtener plan para calcular restantes (Lógica alineada)
         plan_activo = db.query(PlanNutricional).filter(
             PlanNutricional.client_id == cliente.id
         ).order_by(PlanNutricional.fecha_creacion.desc()).first()

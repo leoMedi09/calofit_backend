@@ -20,7 +20,7 @@ class User(Base):
     role_id = Column(Integer, ForeignKey("roles.id"), nullable=False)
     role_name = Column(String, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    profile_picture_url = Column(String, nullable=True) # ✅ URL de la foto de perfil en Firebase Storage
+    profile_picture_url = Column(String, nullable=True)
 
     role_relation = relationship("Role", back_populates="users")
     

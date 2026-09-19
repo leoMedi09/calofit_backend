@@ -30,11 +30,10 @@ class ComidaRegistro(Base):
     carbohidratos_g = Column(Float, nullable=False, default=0.0)
     grasas_g = Column(Float, nullable=False, default=0.0)
 
-    # 'bd_plato' | 'bd_alimento' | 'plato_dinamico' | 'llm_estimado' | 'manual'
     tipo_resolucion = Column(String(50), nullable=False, default="bd_alimento")
-    confianza = Column(Float, nullable=False, default=1.0)   # 0.0–1.0
+    confianza = Column(Float, nullable=False, default=1.0)
     texto_original = Column(String(500), nullable=True)
-    momento = Column(String(20), nullable=True)              # 'desayuno' | 'almuerzo' | …
+    momento = Column(String(20), nullable=True)
 
     created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
 

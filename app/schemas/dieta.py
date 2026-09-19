@@ -76,7 +76,6 @@ class ClientResponseConDieta(BaseModel):
     medical_conditions: List[str] = []
     profile_picture_url: Optional[str] = None
 
-    # ✅ NUEVO: Recomendación de dieta automática
     dieta_recomendada: RecomendacionDietaCompleta
     
     class Config:

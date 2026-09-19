@@ -16,13 +16,11 @@ class NutricionistaIAService:
         Cerebro Clínico para Nutricionistas y Coaches.
         Enfoque: Adherencia, Alertas de Salud, Ajustes Técnicos.
         """
-        # 1. Detectar paciente específico
         entidades = self._extraer_entidades_paciente(mensaje)
         contexto_paciente = ""
         
         if entidades:
             query = db.query(Client)
-            # Solo buscar pacientes asignados a este nutricionista (si no es admin)
             if hasattr(current_user, 'id') and current_user.role_name.lower() != "admin":
                 query = query.filter(Client.nutritionist_id == current_user.id)
             
@@ -62,7 +60,6 @@ class NutricionistaIAService:
         from app.services.response_parser import parsear_respuesta_para_frontend
         respuesta_estructurada = parsear_respuesta_para_frontend(respuesta_ia, mensaje_usuario=mensaje)
         
-        # Eliminar cards de comida (solo staff ve texto/análisis)
         if "secciones" in respuesta_estructurada:
             respuesta_estructurada["secciones"] = [s for s in respuesta_estructurada["secciones"] if s.get("tipo") != "comida"]
 

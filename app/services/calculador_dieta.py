@@ -107,7 +107,7 @@ class CalculadorDietaAutomatica:
             'Activo': 1.725,
             'Muy activo': 1.90
         }
-        return factores.get(nivel_actividad, 1.20)  # Sedentario por defecto
+        return factores.get(nivel_actividad, 1.20)
     
     @staticmethod
     def calcular_recomendacion_dieta(
@@ -133,19 +133,15 @@ class CalculadorDietaAutomatica:
             RecomendacionDieta con todos los cálculos
         """
         
-        # 1. Calcular IMC
         imc, categoria_imc = CalculadorDietaAutomatica.calcular_imc(peso, altura)
         
-        # 2. Calcular GMB
         gmb = CalculadorDietaAutomatica.calcular_gasto_metabolico_basal(
             peso, altura, edad, genero
         )
         
-        # 3. Aplicar factor de actividad
         factor_actividad = CalculadorDietaAutomatica.get_factor_actividad(nivel_actividad)
         gasto_calorico_diario = gmb * factor_actividad
         
-        # 4. Ajustar según objetivo usando normalización canónica
         _concepto = normalizar_objetivo(objetivo)
         if _concepto == DEFICIT:
             calorias = gasto_calorico_diario * 0.85
@@ -157,13 +153,11 @@ class CalculadorDietaAutomatica:
             calorias = gasto_calorico_diario
             ajuste_objetivo = "Mantenimiento de peso actual"
         
-        # 5. Macronutrientes (misma regla % que parsear_macros solo-kcal / utils histórico)
         m_pct = macros_desde_calorias_pct_clasico(calorias, objetivo)
         proteinas_g = m_pct["proteinas_g"]
         carbohidratos_g = m_pct["carbohidratos_g"]
         grasas_g = m_pct["grasas_g"]
 
-        # 6. Determinar alimentos recomendados según categoría IMC
         alimentos_recomendados = CalculadorDietaAutomatica.get_alimentos_recomendados(
             categoria_imc, objetivo
         )
@@ -172,10 +166,8 @@ class CalculadorDietaAutomatica:
             categoria_imc, objetivo
         )
         
-        # 7. Determinar frecuencia de comidas
         frecuencia_comidas = CalculadorDietaAutomatica.get_frecuencia_comidas(objetivo)
         
-        # 8. Generar notas personalizadas
         notas = CalculadorDietaAutomatica.generar_notas(
             imc, categoria_imc, objetivo, edad
         )
@@ -199,7 +191,6 @@ class CalculadorDietaAutomatica:
     def get_alimentos_recomendados(categoria_imc: str, objetivo: str) -> list:
         """Obtiene lista de alimentos recomendados según categoría"""
         
-        # Base común
         alimentos_base = [
             "Pollo sin piel",
             "Pescado (salmón, trucha)",
@@ -229,7 +220,7 @@ class CalculadorDietaAutomatica:
                 "Agua",
                 "Especias (canela, jengibre)"
             ]
-        else:  # MANTENIMIENTO
+        else:
             return alimentos_base + [
                 "Carbohidratos complejos",
                 "Grasas insaturadas",
@@ -278,7 +269,6 @@ class CalculadorDietaAutomatica:
         
         notas = []
         
-        # Notas por categoría IMC
         if categoria_imc == "Bajo peso":
             notas.append("⚠️ Tu IMC indica bajo peso. Consulta con un nutricionista para un plan personalizado.")
         elif categoria_imc == "Peso normal":
@@ -288,14 +278,12 @@ class CalculadorDietaAutomatica:
         elif "Obesidad" in categoria_imc:
             notas.append("🚨 Tu IMC indica obesidad. Busca ayuda profesional para un plan personalizado.")
         
-        # Notas por objetivo
         _concepto_nota = normalizar_objetivo(objetivo)
         if _concepto_nota == DEFICIT:
             notas.append("💪 Para perder peso: Come despacio, bebe agua, aumenta actividad física.")
         elif _concepto_nota == SUPERAVIT:
             notas.append("🏋️ Para ganar masa: Come en superávit, entrena con pesas, aumenta proteína.")
         
-        # Notas por edad
         if edad > 50:
             notas.append("📋 Mayor de 50: Aumenta ingesta de calcio y Vit. D. Consulta médico antes de cambios drásticos.")
         elif edad < 18:

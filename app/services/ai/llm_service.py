@@ -57,9 +57,6 @@ class LLMService:
                 raise RuntimeError("groq SDK no instalado. Ejecutar: pip install groq")
             return AsyncGroq(api_key=api_key)
 
-    # ──────────────────────────────────────────────────────────────────
-    # API pública
-    # ──────────────────────────────────────────────────────────────────
 
     async def completar(
         self,
@@ -88,7 +85,6 @@ class LLMService:
             return await _call(self._client, model, max_tokens)
         except Exception as exc:
             err = str(exc).lower()
-            # Si el prompt es demasiado grande para el modelo, reintentar con llama-3.3-70b-versatile
             if "413" in err or "too_large" in err or "too large" in err:
                 if model != "llama-3.3-70b-versatile":
                     logger.warning("LLMService: prompt too large for %s. Retrying with llama-3.3-70b-versatile", model)
@@ -98,7 +94,6 @@ class LLMService:
                         logger.error("LLMService fallback to llama-3.3-70b-versatile failed: %s", fallback_exc)
                         err = str(fallback_exc).lower()
             
-            # Si falla por rate limit o timeout, reintentar con el modelo de alta capacidad de requests groq/compound-mini
             if "429" in err or "rate_limit" in err or "rate limit" in err or "timed out" in err or "timeout" in err:
                 if model != "groq/compound-mini":
                     logger.warning("LLMService: rate limit or timeout on %s. Retrying with groq/compound-mini", model)
@@ -107,7 +102,6 @@ class LLMService:
                     except Exception as fallback_exc:
                         logger.error("LLMService fallback to groq/compound-mini failed: %s", fallback_exc)
 
-            # Si el cliente principal falló y existe un cliente de respaldo, reintentar con el respaldo
             if self._backup_client:
                 logger.warning("LLMService: Primary client failed (%s). Retrying with BACKUP client...", exc)
                 try:
@@ -169,21 +163,16 @@ class LLMService:
                 return op
         return opciones[0]
 
-    # ──────────────────────────────────────────────────────────────────
-    # Helpers privados
-    # ──────────────────────────────────────────────────────────────────
 
     @staticmethod
     def _parsear_json(texto: str) -> Optional[Any]:
         """Intenta parsear JSON del texto, extrayendo bloques ```json``` si existen."""
         import re
-        # Extraer bloque ```json ... ```
         bloque = re.search(r"```(?:json)?\s*([\s\S]*?)```", texto)
         candidato = bloque.group(1).strip() if bloque else texto.strip()
         try:
             return json.loads(candidato)
         except json.JSONDecodeError:
-            # Intentar limpiar texto extra antes/después del JSON
             inicio = candidato.find("{") if "{" in candidato else candidato.find("[")
             if inicio != -1:
                 try:

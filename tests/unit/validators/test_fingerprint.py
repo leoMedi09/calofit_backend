@@ -30,7 +30,7 @@ class TestFingerprintGenerator:
         )
         
         assert fp1 == fp2
-        assert len(fp1) == 64  # SHA256 = 64 caracteres hex
+        assert len(fp1) == 64
     
     def test_fingerprint_cambio_ingrediente(self):
         """Cambio en ingrediente = fingerprint diferente."""
@@ -47,7 +47,7 @@ class TestFingerprintGenerator:
             nombre="Arroz con pollo",
             ingredientes=[
                 {'nombre': 'arroz', 'gramos': 200},
-                {'nombre': 'pollo', 'gramos': 200},  # Cambio: 150 → 200
+                {'nombre': 'pollo', 'gramos': 200},
             ],
             macros={'calorias': 500, 'proteina': 45, 'carbohidratos': 50, 'grasas': 10},
         )

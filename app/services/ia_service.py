@@ -35,7 +35,7 @@ try:
 except ImportError:
     AsyncGroq = None
 
-genai = None  # Gemini eliminado — solo Groq
+genai = None
 
 try:
     import skfuzzy as fuzz
@@ -48,31 +48,25 @@ from app.core.config import settings
 from app.core.mets_gym import METS_GYM
 from app.services.nutricion_service import nutricion_service
 
-# Mensaje estable si httpx/Groq corta por tiempo (evitar "[Error: Request timed out.]" en el chat).
 FALLBACK_MSG_IA_TIMEOUT = (
     "No pudimos completar la respuesta a tiempo. "
     "Por favor envía tu mensaje otra vez en unos segundos."
 )
 
-# Mensaje cuando Groq alcanza el límite diario de tokens (429)
 FALLBACK_MSG_RATE_LIMIT = (
     "El asistente está temporalmente ocupado (límite de consultas alcanzado). "
     "Espera unos minutos y vuelve a intentarlo. "
     "Si el problema persiste, intenta más tarde."
 )
 
-# Constantes de Salud
 CONDICIONES_CRITICAS = [
     "diabetes", "hipertensión", "hipertension", "renal", "cardíaca",
     "cardiaca", "embarazo", "lactancia", "celiaco", "celíaco"
 ]
 
-# Porciones estándar según hora del día (Perú) y tipo de plato
 PORCIONES_ESTANDAR = {
-    # Momento del día
     "desayuno": 300, "almuerzo": 400, "cena": 300, "snack": 150,
     "merienda": 150, "media mañana": 150, "lonche": 200,
-    # Tipo de plato
     "plato": 350, "plato de": 350, "porción": 200, "porcion": 200,
     "tazón": 300, "tazon": 300, "sopa": 300, "caldo": 300,
     "ensalada": 200, "fruta": 150, "pan": 80,
@@ -87,7 +81,6 @@ class IAService:
     """Motor de IA de CaloFit — Simplificado para Tesis (Random Forest + KNN + Llama-3)."""
 
     def __init__(self):
-        # Groq — motor principal (14,400 req/día gratis, 30 RPM)
         self.groq_client = None
         groq_api_key = getattr(settings, "GROQ_API_KEY", None)
         if groq_api_key:
@@ -113,17 +106,12 @@ class IAService:
         self.gemini_model = None
         self.gemini_model_fast = None
 
-        # FatSecret (Respaldo de macros)
         self._fs_client_id     = getattr(settings, "FATSECRET_CLIENT_ID", None)
         self._fs_client_secret = getattr(settings, "FATSECRET_CLIENT_SECRET", None)
         self._fs_token         = None
 
-        # Motor de Lógica Difusa (Diagnóstico)
         self._alerta_sim = self._setup_fuzzy_logic()
 
-    # ══════════════════════════════════════════════════════════════════
-    # PILAR 1: CÁLCULO CLÍNICO (Mifflin-St Jeor)
-    # ══════════════════════════════════════════════════════════════════
 
     def calcular_requerimiento(
         self, genero: int, edad: int, peso: float,
@@ -133,14 +121,11 @@ class IAService:
         Calcula el Gasto Energético Total (GET) basado en Mifflin-St Jeor.
         genero: 1=Hombre, 2=Mujer.
         """
-        # TMB (Tasa Metabólica Basal)
         s = 5 if genero == 1 else -161
         tmb = (10 * peso) + (6.25 * talla) - (5 * edad) + s
 
-        # GET = TMB * Nivel de Actividad
         mantenimiento = tmb * nivel_actividad
 
-        # Ajuste por objetivo nutricional
         ajustes = {
             "perder": -500, "perder peso": -500, "perder_leve": -300,
             "mantener": 0,  "mantener peso": 0,
@@ -173,9 +158,6 @@ class IAService:
 
         return macros_desde_calorias_peso_objetivo(calorias, objetivo, peso)
 
-    # ══════════════════════════════════════════════════════════════════
-    # LÓGICA DIFUSA (Diagnóstico de Adherencia)
-    # ══════════════════════════════════════════════════════════════════
 
     def _setup_fuzzy_logic(self):
         if not (fuzz and ctrl): return None
@@ -217,9 +199,6 @@ class IAService:
             return {"nivel": nivel, "score": round(float(score), 2), "mensaje": msg}
         except: return {"nivel": "N/A", "score": 50, "mensaje": "Estándar."}
 
-    # ══════════════════════════════════════════════════════════════════
-    # PROCESAMIENTO NLP (Llama-3 vía Groq)
-    # ══════════════════════════════════════════════════════════════════
 
     @staticmethod
     def es_fallo_respuesta_llm(text: Optional[str]) -> bool:
@@ -245,12 +224,10 @@ class IAService:
         t = re.sub(r"^```[a-z0-9]*\s*", "", t, flags=re.IGNORECASE)
         t = re.sub(r"\s*```\s*$", "", t).strip()
 
-        # Detección directa de etiquetas exactas
         for modo in sorted(MODOS_ASISTENTE, key=len, reverse=True):
             if re.search(rf"(?<![a-z0-9_]){re.escape(modo)}(?![a-z0-9_])", t, re.IGNORECASE):
                 return modo
 
-        # Mapeo semántico: palabras que el LLM usa en vez de la etiqueta exacta
         _SEMANTICO = {
             "registrar_nutricion": [
                 "registro", "registrar", "comida", "comer", "ingesta", "alimento",
@@ -382,11 +359,9 @@ class IAService:
             f"Mensaje a clasificar: \"{m[:500]}\"\n"
             "Respuesta (una sola palabra exacta):"
         )
-        # Clasificación con groq/compound-mini — salida ~1 token, muy rápida y robusta (70,000 TPM limit)
         raw = await self._llamar_groq(prompt, max_tokens=150, temp=0.0,
                                       model="groq/compound-mini")
         if self.es_fallo_respuesta_llm(raw):
-            # Fallback
             raw = await self._llamar_groq(prompt, max_tokens=150, temp=0.0)
         if self.es_fallo_respuesta_llm(raw):
             return None
@@ -427,14 +402,10 @@ class IAService:
             return "[Modo Offline]"
         modelo = model or "groq/compound-mini"
         
-        # Para los modelos de razonamiento (gpt-oss), ajustamos dinámicamente max_tokens
-        # para dar espacio al razonamiento (~1000 tokens) sin exceder el límite de 8000 TPM de Groq.
         if "gpt-oss" in modelo:
             palabras_estimadas = len(prompt.split())
             tokens_prompt_est = int(palabras_estimadas * 1.3)
-            # max_tokens seguro = Límite TPM (8000) - tokens del prompt - margen de seguridad (200)
             max_tokens_seguro = max(200, 8000 - tokens_prompt_est - 200)
-            # Asegurar al menos 1800 para razonamiento + respuesta, sin pasarnos del límite seguro
             max_tokens = min(max_tokens_seguro, max(max_tokens, 1800))
 
         async def _ejecutar_llamada(m, mt):
@@ -450,9 +421,8 @@ class IAService:
             return await _ejecutar_llamada(modelo, max_tokens)
         except Exception as e:
             err = str(e).lower()
-            is_large = len(prompt) > 4000  # 4000 caracteres es ~800-1000 tokens
+            is_large = len(prompt) > 4000
             
-            # 1. Si el prompt es demasiado grande para el modelo (413)
             if "413" in err or "too_large" in err or "too large" in err:
                 if modelo != "llama-3.3-70b-versatile":
                     print(f"⚠️ Groq: prompt demasiado grande para {modelo} (413). Reintentando con llama-3.3-70b-versatile...")
@@ -462,7 +432,6 @@ class IAService:
                         print(f"🚨 Groq: falló también reintento con llama-3.3-70b-versatile: {fallback_err}")
                         err = str(fallback_err).lower()
                 
-                # Si falló o ya era llama-3.3-70b-versatile, intentar con llama-3.1-8b-instant (reemplazo recomendado)
                 if "llama-3.1-8b-instant" not in modelo:
                     print("⚠️ Groq: Reintentando con llama-3.1-8b-instant por límite de contexto/fallback...")
                     try:
@@ -474,9 +443,7 @@ class IAService:
                         print(f"🚨 Groq: falló también llama-3.1-8b-instant: {fallback_err2}")
                         err = str(fallback_err2).lower()
             
-            # 2. Si falla por límite de cuota (429) o timeout
             if "429" in err or "rate_limit" in err or "rate limit" in err or "timed out" in err or "timeout" in err:
-                # Si el prompt es grande, no tiene sentido usar groq/compound-mini (puede dar 413)
                 if is_large:
                     target_fallback = "llama-3.1-8b-instant" if "llama-3.1-8b-instant" not in modelo else "llama-3.3-70b-versatile"
                     if target_fallback != modelo:
@@ -493,7 +460,6 @@ class IAService:
                     if modelo != "groq/compound-mini":
                         print(f"⚠️ Groq: rate limit o timeout en {modelo} ({e}). Reintentando con groq/compound-mini...")
                         try:
-                            # groq/compound-mini tiene un límite de 70,000 TPM y no requiere tantos tokens de razonamiento
                             return await _ejecutar_llamada("groq/compound-mini", 800)
                         except Exception as fallback_err:
                             print(f"🚨 Groq: falló también reintento con groq/compound-mini: {fallback_err}")
@@ -518,7 +484,6 @@ class IAService:
         )
         macros = self.calcular_macros_optimizados(calorias, perfil_usuario.get("goal", "mantener"), perfil_usuario.get("weight", 70))
         
-        # Recuperar y formatear condiciones médicas si existen
         med_conditions = perfil_usuario.get("medical_conditions", [])
         cond_texto = ", ".join(med_conditions) if med_conditions else "Ninguna"
         
@@ -549,7 +514,6 @@ REGLAS INFLEXIBLES:
         condiciones = perfil_usuario.get("medical_conditions") or []
         objetivo = str(perfil_usuario.get("goal", "mantener")).lower()
 
-        # Fallback determinístico si no hay LLM disponible.
         fallback_focus = "Control nutricional y adherencia sostenida"
         if "perder" in objetivo:
             fallback_focus = "Déficit calórico moderado con alta saciedad"
@@ -564,7 +528,6 @@ REGLAS INFLEXIBLES:
         if any("hipert" in str(c).lower() for c in condiciones):
             forbidden_default.append("Snacks altos en sodio")
 
-        # Sanitiza duplicados conservando orden.
         forbidden_default = list(dict.fromkeys(forbidden_default))
 
         if not self.groq_client:
@@ -620,7 +583,6 @@ Reglas:
             rec = [str(x).strip() for x in rec if str(x).strip()]
             forb = [str(x).strip() for x in forb if str(x).strip()]
 
-            # Salida con tamaño y contenido predecible para el frontend.
             if not rec: rec = recommended_default
             if not forb: forb = forbidden_default
             return {
@@ -635,9 +597,6 @@ Reglas:
                 "forbidden_foods": forbidden_default[:8],
             }
 
-    # ══════════════════════════════════════════════════════════════════
-    # NLP — IDENTIFICACIÓN DE INTENCIONES
-    # ══════════════════════════════════════════════════════════════════
 
     def identificar_intencion_salud(self, texto: str) -> str:
         t = texto.lower()
@@ -661,7 +620,6 @@ Reglas:
 
     async def extraer_macros_de_texto(
         self, texto: str, peso_usuario_kg: float = 70.0,
-        # Alias para compatibilidad con código anterior
         peso_usuario: float = None,
     ) -> Dict:
         """
@@ -676,9 +634,6 @@ Reglas:
         texto_lower = texto.lower().strip()
         from app.services.nutricion_service import nutricion_service
 
-        # ─────────────────────────────────────────────────────────────
-        # PASO 1: Detectar ejercicio de gym (fuente: tabla MET)
-        # ─────────────────────────────────────────────────────────────
         ejercicio_detectado = None
         met_detectado = None
         for ejercicio, met in sorted(METS_GYM.items(), key=lambda x: -len(x[0])):
@@ -688,7 +643,6 @@ Reglas:
                 break
 
         if ejercicio_detectado:
-            # Misma duración y fórmula que en tarjetas POWER (ACSM: MET×3.5×kg/200×min).
             from app.services.asistente.asistente_ejercicio import parse_duracion_minutos
             from app.services.ejercicios_service import ejercicios_service
 
@@ -712,7 +666,6 @@ Reglas:
                 "origen": "Tabla MET Cientifica"
             }
 
-        # PASO 1b: "hice X … min/series" con vocabulario de gimnasio → ejercicio (no CENAN/LLM comida)
         from app.services.asistente.asistente_ejercicio import (
             extraccion_ejercicio_fallback_fuerza,
             frase_registro_actividad_fisica,
@@ -721,30 +674,25 @@ Reglas:
         if frase_registro_actividad_fisica(texto) and frase_vocabulario_gimnasio(texto):
             return extraccion_ejercicio_fallback_fuerza(texto, texto_lower, peso_usuario_kg)
 
-        # ─────────────────────────────────────────────────────────────
-        # PASO 2: Detectar porción según hora peruana y texto
-        # ─────────────────────────────────────────────────────────────
         try:
             from app.core.utils import get_peru_now
             hora_peru = get_peru_now().hour
         except Exception:
             hora_peru = 12
 
-        # Porción base según hora del día
         if 5 <= hora_peru < 10:
-            porcion_g = PORCIONES_ESTANDAR["desayuno"]   # 300g
+            porcion_g = PORCIONES_ESTANDAR["desayuno"]
         elif 10 <= hora_peru < 12:
-            porcion_g = PORCIONES_ESTANDAR["snack"]      # 150g
+            porcion_g = PORCIONES_ESTANDAR["snack"]
         elif 12 <= hora_peru < 15:
-            porcion_g = PORCIONES_ESTANDAR["almuerzo"]   # 400g
+            porcion_g = PORCIONES_ESTANDAR["almuerzo"]
         elif 15 <= hora_peru < 18:
-            porcion_g = PORCIONES_ESTANDAR["snack"]      # 150g
+            porcion_g = PORCIONES_ESTANDAR["snack"]
         elif 18 <= hora_peru < 21:
-            porcion_g = PORCIONES_ESTANDAR["cena"]       # 300g
+            porcion_g = PORCIONES_ESTANDAR["cena"]
         else:
-            porcion_g = PORCIONES_ESTANDAR["snack"]      # 150g (nocturno)
+            porcion_g = PORCIONES_ESTANDAR["snack"]
 
-        # Sobreescribir si el usuario especifica cantidad explícita
         match_cantidad = re.search(
             r'(\d+(?:\.\d+)?)\s*(?:g\b|gr\b|gramos?|ml\b|kg\b)',
             texto_lower
@@ -752,15 +700,11 @@ Reglas:
         if match_cantidad:
             porcion_g = float(match_cantidad.group(1))
 
-        # Sobreescribir si el texto menciona tipo de plato/momento
         for keyword, gramos in PORCIONES_ESTANDAR.items():
             if keyword in texto_lower:
                 porcion_g = gramos
                 break
 
-        # ─────────────────────────────────────────────────────────────
-        # PASO 3: Estimación directa vía LLM (Nutricionista Profesional)
-        # ─────────────────────────────────────────────────────────────
         print(f"[IA-Service] Estimando macros para '{texto}' vía LLM...")
         meal_context = "de desayuno" if 5 <= hora_peru < 10 else "tamaño de porción razonable"
         qtxt = (texto.split("(NOTA INTERNA", 1)[0] or texto).replace('"', "'").strip()
@@ -800,9 +744,6 @@ Reglas:
             pass
         return {"es_comida": False, "es_ejercicio": False, "calorias": 0, "alimentos_detectados": [], "ejercicios_detectados": []}
 
-    # ══════════════════════════════════════════════════════════════════
-    # GENERADORES DE PLAN INICIAL
-    # ══════════════════════════════════════════════════════════════════
 
     def generar_plan_inicial_automatico(self, datos_cliente: Dict) -> Optional[Dict]:
         """Genera el primer plan del cliente usando base clínica y personalización por objetivo."""
@@ -831,6 +772,5 @@ Reglas:
             print(f"[Plan inicial] Error: {e}")
             return None
 
-# Instancia exportada
 ia_service = IAService()
 ia_engine = ia_service

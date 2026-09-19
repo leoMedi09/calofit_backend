@@ -27,7 +27,7 @@ def notificar_si_excede_meta(cliente: Client, progreso, meta: float, quemado: fl
     if progreso is None or progreso.alerta_exceso_enviada:
         return
     if es_superavit(getattr(cliente, "goal", "")):
-        return  # ganar masa muscular: el superávit es esperado, no es una alerta
+        return
     if not cliente.fcm_token or not cliente.notificaciones_activas:
         return
 
@@ -54,8 +54,6 @@ def notificar_si_excede_meta(cliente: Client, progreso, meta: float, quemado: fl
             cliente.id, exceso,
         )
 
-# Frases motivacionales — lista fija que rota al azar, sin depender del LLM
-# (cero costo de tokens, cero riesgo de fallo por cupo/conexión de Groq).
 _FRASES_MOTIVACIONALES = [
     "Cada comida que registras es un paso más cerca de tu meta. ¡Vamos! 💪",
     "No se trata de ser perfecto, se trata de ser constante. Hoy también cuenta.",

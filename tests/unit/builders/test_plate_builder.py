@@ -33,7 +33,6 @@ class TestPlatoBuilder:
             client_id=sample_client.id,
         )
 
-        # Debe haber resuelto los ingredientes y calculado macros
         assert resultado.macros_totales is not None
         assert resultado.macros_totales.calorias > 0
         assert resultado.confianza_global >= 60
@@ -61,10 +60,8 @@ class TestPlatoBuilder:
             client_id=sample_client.id,
         )
 
-        # Ambas construcciones deben tener macros calculadas
         assert resultado1.macros_totales.calorias > 0
         assert resultado2.macros_totales.calorias > 0
-        # Las macros deben ser idénticas (determinismo)
         assert resultado1.macros_totales.calorias == resultado2.macros_totales.calorias
 
     def test_ingrediente_no_resuelto_es_advertencia(self, builder, sample_client):
@@ -81,10 +78,8 @@ class TestPlatoBuilder:
             client_id=sample_client.id,
         )
 
-        # No debe explotar — debe retornar un resultado con advertencias
         assert resultado is not None
         assert resultado.macros_totales is not None
-        # Los ingredientes resueltos deben tener macros
         ingredientes_resueltos = [
             i for i in resultado.ingredientes
             if i.macros_totales is not None

@@ -11,10 +11,10 @@ class AuditoriaAdmin(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     admin_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    accion = Column(String(100), nullable=False)  # 'REGISTRO_STAFF', 'CAMBIO_PASSWORD', etc.
+    accion = Column(String(100), nullable=False)
     descripcion = Column(Text, nullable=False)
     tabla_afectada = Column(String(50), nullable=True)
-    registro_id = Column(Integer, nullable=True) # ID del registro afectado (ej: id del staff)
+    registro_id = Column(Integer, nullable=True)
     
     fecha_evento = Column(TIMESTAMP, nullable=False, server_default=func.now())
     ip_origen = Column(String(45), nullable=True)

@@ -25,13 +25,13 @@ class HistorialRecomendacion(Base):
     client_id       = Column(Integer, nullable=False, index=True)
     plato_id        = Column(Integer, ForeignKey("platos.id", ondelete="SET NULL"), nullable=True, index=True)
 
-    nombre_plato    = Column(String(255))       # snapshot del nombre al recomendar
+    nombre_plato    = Column(String(255))
     calorias        = Column(Float)
     proteinas_g     = Column(Float)
     carbohidratos_g = Column(Float)
     grasas_g        = Column(Float)
 
-    momento_dia     = Column(String(30))        # 'desayuno','almuerzo','cena','snack'
+    momento_dia     = Column(String(30))
     fue_consumido   = Column(Boolean, default=False)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

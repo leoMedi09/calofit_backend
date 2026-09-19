@@ -39,8 +39,6 @@ class TestCorreccionRegistroNutricional:
             if "extrae todos los alimentos" in prompt_lower or "responde solo con json" in prompt_lower:
                 msg = _get_mensaje(prompt)
                 if "huevos" in msg and ("tres" in msg or " 3" in msg):
-                    # Corrección ya resuelta a "Huevos - ..." por el código,
-                    # con la nueva cantidad mencionada en el mensaje.
                     return json.dumps({
                         "alimentos": [
                             {"nombre": "Huevos", "es_real": True, "cantidad": 3,
@@ -57,7 +55,6 @@ class TestCorreccionRegistroNutricional:
                         ]
                     })
                 return json.dumps({"alimentos": [], "prot_total": 0, "carb_total": 0, "grasa_total": 0})
-            # Microconsultas/otros prompts no relevantes para este test.
             return json.dumps({"alimentos": []})
 
         with patch.object(ia_engine, "_llamar_groq", new=mock_llamar_groq):
@@ -71,7 +68,6 @@ class TestCorreccionRegistroNutricional:
     async def test_correccion_actualiza_sin_duplicar(self, db, sample_client, plan_hoy):
         hoy = get_peru_date()
 
-        # Turno 1: "Comí dos huevos"
         r1 = await registrar_comida_llm("Comí dos huevos", sample_client, plan_hoy, db, ia_engine)
         assert r1["success"] is True
 
@@ -80,7 +76,7 @@ class TestCorreccionRegistroNutricional:
             .filter(ComidaRegistro.client_id == sample_client.id, ComidaRegistro.fecha == hoy)
             .all()
         )
-        assert len(filas_antes) == 2  # 2 huevos = 2 filas (una por unidad)
+        assert len(filas_antes) == 2
         assert all(f.nombre_alimento == "Huevos" for f in filas_antes)
 
         prog_antes = (
@@ -91,8 +87,6 @@ class TestCorreccionRegistroNutricional:
         assert prog_antes is not None
         kcal_antes = prog_antes.calorias_consumidas
 
-        # Turno 2: corrección — NO repite el nombre del alimento a propósito,
-        # es justo el caso que fallaba antes del fix.
         r2 = await registrar_comida_llm("Corrección, fueron tres", sample_client, plan_hoy, db, ia_engine)
         assert r2["success"] is True
         assert "huevo" in r2["mensaje"].lower()
@@ -103,8 +97,6 @@ class TestCorreccionRegistroNutricional:
             .filter(ComidaRegistro.client_id == sample_client.id, ComidaRegistro.fecha == hoy)
             .all()
         )
-        # Las 2 filas viejas se reemplazan por 3 nuevas — nunca deben coexistir
-        # las 2 viejas + las 3 nuevas (eso sería duplicación).
         assert len(filas_despues) == 3, (
             f"Se esperaban exactamente 3 filas de 'Huevos' tras la corrección, "
             f"hay {len(filas_despues)} — posible duplicación o reemplazo incompleto."
@@ -117,10 +109,7 @@ class TestCorreccionRegistroNutricional:
             .first()
         )
         kcal_filas_despues = sum(f.kcal for f in filas_despues)
-        # El total diario debe reflejar SOLO las filas actuales (3 huevos),
-        # no las 2 viejas + las 3 nuevas sumadas.
         assert abs(prog_despues.calorias_consumidas - kcal_filas_despues) < 2.0
-        # El total cambió respecto al de antes de la corrección.
         assert prog_despues.calorias_consumidas != kcal_antes
 
     @pytest.mark.asyncio

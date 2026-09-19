@@ -61,7 +61,6 @@ class CacheManager:
             macros = data.get("macros")
             if macros is None:
                 return None
-            # Incluir alimento_id del registro DB (funciona con entradas antiguas sin JSON alimento_id)
             return {"macros": macros, "alimento_id": entry.alimento_id}
 
         except Exception as exc:

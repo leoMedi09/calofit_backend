@@ -44,5 +44,4 @@ class TestSaludoPerfilIncompleto:
         assert ", ." not in texto
         assert ",." not in texto
         assert texto.split(".")[0].strip() in ("Buenos días", "Buenas tardes", "Buenas noches")
-        # No debe inventar un nombre que no existe en el perfil.
         assert "None" not in texto

@@ -63,7 +63,6 @@ class TestSemanticValidator:
     
     def test_restricciones_cliente(self, validator, sample_client, db):
         """Respeta restricciones del cliente."""
-        # Agregar restricción
         sample_client.forbidden_foods = ['lácteos', 'gluten']
         db.commit()
         

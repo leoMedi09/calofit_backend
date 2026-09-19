@@ -18,9 +18,6 @@ class TestFallbackRespuestaLLMInvalida:
     @pytest.mark.asyncio
     async def test_respuesta_no_parseable_cae_a_fallback_determinista(self, sample_client):
         async def mock_llamar_groq(prompt, max_tokens=800, temp=0.7, model=None):
-            # Ni JSON, ni bullets "- Nombre (~XXX kcal, P:Xg C:Yg G:Zg)", ni
-            # error reconocido (sin "timeout"/"429"/"[Error:") — texto roto
-            # cualquiera que el parser de platos no puede usar.
             return "{esto no es json valido, falta cierre"
 
         with patch.object(ia_engine, "_llamar_groq", new=mock_llamar_groq):
@@ -38,7 +35,6 @@ class TestFallbackRespuestaLLMInvalida:
 
         assert "esto no es json valido" not in resultado
         assert "falta cierre" not in resultado
-        # Debe ser exactamente uno de los fallbacks deterministas conocidos.
         todas_las_opciones = [
             opcion for lista in _FALLBACKS_OPCIONES.values() for opcion in lista
         ]

@@ -26,11 +26,8 @@ def _sufijos_con_compat(a: str, b: str) -> bool:
     return bool(set(s1) & set(s2))
 
 
-# Verbos y frases de apertura que el LLM añade al inicio del nombre sugerido
-# pero no forman parte del nombre real del plato.
 _RE_PREFIJO_VERBAL = re.compile(
     r"^(?:"
-    # Verbos de inicio: pueden ir seguidos de artículo + sustantivo temporal + "con"
     r"(?:comienza|empieza|inicia)\s+"
     r"(?:(?:la|el|los|las)\s+)?"
     r"(?:(?:semana|dia|día|mañana|tarde|noche)\s+(?:con\s+)?)?"
@@ -40,7 +37,6 @@ _RE_PREFIJO_VERBAL = re.compile(
     r"|consume\s+(?:el\s+|la\s+)?"
     r"|te\s+recomiendo\s+(?:el\s+|la\s+|un\s+|una\s+)?"
     r"|disfruta\s+(?:de\s+)?(?:el\s+|la\s+|un\s+|una\s+)?"
-    # Etiquetas de categoría que el LLM antepone al nombre real
     r"|(?:comida|plato|bebida|snack|postre|entrada|merienda|desayuno|almuerzo|cena)\s+"
     r")",
     re.IGNORECASE | re.UNICODE,
@@ -64,7 +60,6 @@ from app.services.nutricional_result import validar_macros_atwater
 logger = get_logger("plato_constructor")
 
 
-# Tokens que indican claramente entradas no-alimentarias (metales, materiales, sustancias)
 _NO_FOOD_TOKENS: frozenset[str] = frozenset({
     "hierro", "acero", "aluminio", "cobre", "plomo", "oro", "plata",
     "titanio", "zinc", "niquelado", "cemento", "ladrillo", "concreto",
@@ -73,110 +68,77 @@ _NO_FOOD_TOKENS: frozenset[str] = frozenset({
     "detergente", "lejia", "cloro", "jabon",
 })
 
-# ─── Rangos calóricos por horario ────────────────────────────────────────────
-# (min, max) en kcal totales del plato generado
 _RANGOS_CALORICOS: dict = {
     "desayuno":    (300,  500),
     "almuerzo":    (600,  900),
     "cena":        (300,  550),
-    "cualquiera":  (150, 1000),  # rango amplio para platos genéricos
+    "cualquiera":  (150, 1000),
     "snack":       ( 80,  300),
     "merienda":    ( 80,  300),
-    # Cebiches y tiraditos: gramaje ligero (pescado 150-200g + acompañamiento)
     "cebiche":          (150,  450),
     "tiradito":         (150,  400),
-    "causa ferreñafana":(400,  650),   # plato norteño compacto
-    "arroz con pato":   (700, 1000),   # ración almuerzo — mínimo 700 kcal exigido
-    "jalea":            (500,  900),   # fritura mixta con absorción de aceite
-    # Platos adicionales con rango calórico definido
-    "chaufa":           (350,  750),   # arroz chaufa (verduras ~400, con proteína ~600)
-    "sopa":             (100,  400),   # sopas / caldos / chupe / crema
-    "ensalada":         ( 80,  500),   # ensaladas (simple ~150, con pollo/palta ~400)
-    "anticucho":        (200,  500),   # anticuchos (por porción ~ 3-4 pinchos)
-    "mazamorra":        (150,  400),   # postre de maíz / mazamorra morada
-    "picarones":        (250,  550),   # picarones con miel de chancaca
-    "apanado":          (400,  900),   # X apanado: proteína + rebozado + aceite
-    "milanesa":         (400,  900),   # milanesa: igual que apanado
+    "causa ferreñafana":(400,  650),
+    "arroz con pato":   (700, 1000),
+    "jalea":            (500,  900),
+    "chaufa":           (350,  750),
+    "sopa":             (100,  400),
+    "ensalada":         ( 80,  500),
+    "anticucho":        (200,  500),
+    "mazamorra":        (150,  400),
+    "picarones":        (250,  550),
+    "apanado":          (400,  900),
+    "milanesa":         (400,  900),
 }
 
-# ─── Filtro de coherencia semántica ──────────────────────────────────────────
-# Ingredientes que NO deben aparecer en platos con ciertos patrones de nombre
 _CONFLICTOS_SEMANTICOS: list[tuple[set[str], frozenset[str]]] = [
-    # Cebiches: sin palta, zanahoria, tomate, jengibre, salsas industriales NI aceites
     ({"cebiche", "ceviche"},
      frozenset({"palta", "aguacate", "zanahoria", "tomate", "jengibre", "ketchup",
                 "salsa de tomate", "mayonesa", "crema de leche", "mostaza",
                 "aceite de oliva", "aceite vegetal", "aceite", "mantequilla",
                 "crema", "queso", "leche", "yogurt"})),
-    # Panes y tostadas: sin papas, arroz ni pollo entero
     ({"tostada", "pan tostado", "sandwich", "sandw"},
      frozenset({"arroz blanco", "papa cocida", "papa sancochada"})),
-    # Sopas/cremas: sin aceitunas ni embutidos fríos
     ({"sopa", "crema de", "caldo"},
      frozenset({"mayonesa", "jamonada", "aceitunas", "jamon"})),
-    # Postres: sin ingredientes salados de fondo
     ({"torta", "queque", "bizcocho", "mousse", "flan"},
      frozenset({"ajo", "cebolla", "comino", "oregano"})),
-    # Cebiches y tiraditos: solo pescado fresco — nunca cocido ni sancochado
     ({"cebiche", "ceviche", "tiradito"},
      frozenset({"palta", "aguacate", "zanahoria", "tomate",
                 "pescado blanco cocido", "salmon cocido", "trucha cocida",
                 "sancochado", "sancochada"})),
-    # FASE 3.5 — Ceviches/tiraditos: sin componentes fritos en texto LLM.
-    # Complementa _validar_coherencia_culinaria() que opera post-resolución BD.
     ({"cebiche", "ceviche", "tiradito"},
      frozenset({"frito", "rebozado", "empanizado", "apanado",
                 "horneado", "a la plancha con aceite"})),
-    # Sudado / aguadito / chilcano: pescado FRESCO o cocido — nunca frito ni apanado
     ({"sudado", "aguadito", "chilcano"},
      frozenset({"pescado blanco frito", "pescado frito", "apanado", "frito",
                 "rebozado", "empanizado", "chicharron de pescado"})),
-    # Platos al horno / parrilla: prohibir variantes sancochadas
     ({"al horno", "a la parrilla", "horneado", "parrillada"},
      frozenset({"sancochado", "sancochada", "hervido", "hervida"})),
-    # Causa Ferreñafana: sin lácteos ni emulsiones (son de la variante limeña)
     ({"causa ferreñafana", "causa ferrenafana"},
      frozenset({"mayonesa", "queso fresco", "queso", "crema de leche",
                 "leche evaporada", "mantequilla", "pescado blanco fresco",
                 "pescado blanco cocido"})),
-    # Jalea: requiere variantes fritas — sin pescado fresco/cocido sin aceite
     ({"jalea"},
      frozenset({"pescado blanco fresco", "pescado blanco cocido",
                 "calamar crudo", "langostino crudo"})),
-    # Chaufa: no lleva perejil, cilantro ni aceite de oliva — sabor asiático-peruano
     ({"chaufa", "arroz chaufa"},
      frozenset({"perejil", "cilantro", "albahaca", "aceite de oliva",
                 "mantequilla", "crema de leche"})),
-    # Cualquier "X apanado / empanizado / milanesa": SOLO proteína X + huevo + harina + aceite.
-    # NUNCA verduras de acompañamiento — el rebozado es el único "extra" válido.
     ({"apanado", "apanada", "empanizado", "empanizada", "milanesa", "rebozado", "rebozada"},
      frozenset({"cebolla", "ajo", "perejil", "cilantro", "albahaca",
                 "palta", "aguacate", "tomate", "zanahoria", "pimiento", "pepino",
                 "lechuga", "espinaca", "brocoli", "brócoli", "champiñon", "champiñones",
                 "arroz", "papa cocida", "papa sancochada", "fideos",
                 "queso", "crema de leche", "leche evaporada", "yogurt", "mantequilla"})),
-    # Cebiches/tiraditos de mariscos: sin lácteos ni vegetales cocidos calientes
     ({"cebiche de camaron", "cebiche de langostino", "cebiche mixto"},
      frozenset({"queso", "crema de leche", "papa cocida", "zanahoria cocida",
                 "choclo cocido", "cancha tostada"})),
-    # FASE 3.5 — Ensaladas: sin frituras industriales incompatibles
-    # NO bloquear "pollo frito" (Ensalada César con pollo frito es válida).
-    # Solo bloquear elementos que convierten la ensalada en algo diferente.
     ({"ensalada"},
      frozenset({"salchipapa", "papa rellena", "hot dog", "hamburguesa"})),
 ]
 
 
-# ─── FASE 4.2: Matriz de incompatibilidades entre ingredientes ────────────────
-# Pares (grupo_A, grupo_B): si el plato contiene al menos un ingrediente de
-# grupo_A Y al menos uno de grupo_B → rechazar.
-# REGLA DE ORO: conservador — solo bloquear combinaciones universalmente absurdas.
-# NO bloquear: queso/crema/leche evaporada + pollo (ají de gallina), yogurt + pollo
-# (marinado), queso + res (algunas preparaciones). Solo los casos imposibles.
 _INCOMPATIBILIDADES_INGREDIENTES: list[tuple[frozenset[str], frozenset[str]]] = [
-    # leche en polvo es incompatible con toda proteína animal salada.
-    # Uso válido de leche en polvo: mazamorra, arroz con leche, bebidas, repostería.
-    # NUNCA en ensaladas, saltados, cebiches, sopas o cualquier proteína salada.
     (
         frozenset({"leche en polvo", "leche descremada en polvo", "leche entera en polvo"}),
         frozenset({
@@ -186,8 +148,6 @@ _INCOMPATIBILIDADES_INGREDIENTES: list[tuple[frozenset[str], frozenset[str]]] = 
             "pavo", "pato", "mariscos", "anchoveta", "bonito", "trucha",
         }),
     ),
-    # yogurt con pescado/mariscos: no hay base culinaria en gastronomía peruana.
-    # Excepción deliberadamente NO cubierta: yogurt + pollo (marinados válidos).
     (
         frozenset({"yogurt", "yogur"}),
         frozenset({
@@ -196,9 +156,6 @@ _INCOMPATIBILIDADES_INGREDIENTES: list[tuple[frozenset[str], frozenset[str]]] = 
             "anchoveta", "bonito", "trucha", "salpreso",
         }),
     ),
-    # pescado fresco (para cebiches/tiraditos) con lácteos base.
-    # Segunda línea de defensa post-resolución: _CONFLICTOS_SEMANTICOS cubre el
-    # texto raw del LLM, esta regla cubre los nombres reales de alimentos en BD.
     (
         frozenset({"pescado blanco fresco", "pescado fresco"}),
         frozenset({
@@ -250,11 +207,6 @@ def _validar_compatibilidad_ingredientes(
     return True, ""
 
 
-# ─── Plantillas semánticas por tipo de plato ─────────────────────────────────
-# Define ingredientes base obligatorios (al menos 1 debe estar presente) y
-# prohibidos (ninguno puede estar) para los tipos de plato más comunes.
-# Los checks se aplican sobre nombres normalizados de alimentos ya RESUELTOS en BD,
-# complementando el filtro _CONFLICTOS_SEMANTICOS (que opera sobre raw LLM text).
 _PLANTILLAS_PLATOS: dict[str, dict] = {
     "ceviche_cebiche": {
         "keywords_plato": ["ceviche", "cebiche"],
@@ -293,26 +245,17 @@ _PLANTILLAS_PLATOS: dict[str, dict] = {
 }
 
 
-# ─── CAMBIO 2: Ingredientes esenciales por tipo de plato ─────────────────────
-# Define reglas OBLIGATORIAS y PROHIBIDAS para los tipos de plato más críticos.
-# - obligatorios: al menos 1 ingrediente de la lista DEBE estar presente.
-# - prohibidos:   ningún ingrediente de la lista puede estar presente.
-# Opera sobre nombres normalizados de alimentos RESUELTOS en BD (post-resolución).
 _PLATOS_ESENCIALES: dict[str, dict] = {
     "ceviche": {
         "obligatorios": ["pescado", "limon", "cebolla", "lisa", "caballa",
                          "mero", "tollo", "toyo", "merluza", "cabrilla",
                          "ojo de uva", "jurel", "camaron", "langostino", "pulpo"],
-        # El ceviche DEBE tener: al menos un pescado/marisco Y limón Y cebolla
         "obligatorio_todos": [
-            # grupo 1: proteína marina (al menos 1)
             ("pescado", "lisa", "caballa", "mero", "tollo", "toyo",
              "merluza", "cabrilla", "ojo de uva", "jurel",
              "camaron", "langostino", "pulpo", "calamar", "anchoveta", "bonito",
              "trucha", "salmon", "atun"),
-            # grupo 2: ácido (al menos 1)
             ("limon", "lima", "citrico"),
-            # grupo 3: cebolla
             ("cebolla",),
         ],
         "prohibidos": ["aceite", "mantequilla", "crema", "mayonesa", "leche",
@@ -341,7 +284,6 @@ _PLATOS_ESENCIALES: dict[str, dict] = {
         "prohibidos": ["carne", "pollo", "pescado"],
     },
     "chaufa": {
-        # Arroz chaufa siempre lleva arroz y huevo como mínimo
         "obligatorio_todos": [
             ("arroz",),
             ("huevo",),
@@ -349,14 +291,12 @@ _PLATOS_ESENCIALES: dict[str, dict] = {
         "prohibidos": ["perejil", "cilantro", "aceite de oliva", "mantequilla"],
     },
     "aji de gallina": {
-        # Plato bandera — debe llevar pollo, no pescado ni res
         "obligatorio_todos": [
             ("pollo", "pechuga", "muslo"),
         ],
         "prohibidos": ["pescado", "res", "cerdo", "chancho"],
     },
     "tacu tacu": {
-        # Tacu tacu = arroz + frejoles mezclados y fritos
         "obligatorio_todos": [
             ("arroz",),
             ("frejol", "frejoles", "menestra"),
@@ -367,8 +307,6 @@ _PLATOS_ESENCIALES: dict[str, dict] = {
         "obligatorio_todos": [],
         "prohibidos": ["salchipapa"],
     },
-    # Regla general para CUALQUIER "X apanado/empanizado/milanesa"
-    # La clave se busca como substring en el nombre normalizado del plato.
     "apanado": {
         "obligatorio_todos": [
             ("huevo",),
@@ -427,7 +365,6 @@ def _validar_ingredientes_esenciales(
         if tipo not in nombre_norm:
             continue
 
-        # 1) Verificar grupos obligatorios (cada grupo debe tener al menos 1 match)
         for grupo in reglas.get("obligatorio_todos", []):
             if not any(
                 any(req in ing_n for req in grupo)
@@ -438,7 +375,6 @@ def _validar_ingredientes_esenciales(
                     f"se requiere al menos uno de: {', '.join(grupo[:4])}"
                 )
 
-        # 2) Verificar prohibidos (ninguno puede aparecer)
         for prohibido in reglas.get("prohibidos", []):
             if any(prohibido in ing_n for ing_n in ings_norms):
                 return False, (
@@ -447,8 +383,6 @@ def _validar_ingredientes_esenciales(
 
     return True, ""
 
-
-# ─── CAMBIO 3: Auditoría de platos existentes en BD ──────────────────────────
 
 def auditar_platos_esenciales(session) -> list[dict]:
     """
@@ -523,7 +457,6 @@ def validar_semantica_plato(
         if not any(kw in nombre_n for kw in plantilla.get("keywords_plato", [])):
             continue
 
-        # 1) Ingredientes prohibidos (ninguno debe estar presente)
         for prohibido in plantilla.get("prohibidos", []):
             proh_n = _norm(prohibido)
             if any(proh_n in ing for ing in ings_n):
@@ -531,7 +464,6 @@ def validar_semantica_plato(
                     f"ingrediente prohibido '{prohibido}' en plato '{nombre_plato}'"
                 )
 
-        # 2) Al menos un ingrediente base debe estar presente
         base_list = plantilla.get("ingredientes_base", [])
         if base_list:
             base_norms = [_norm(b) for b in base_list]
@@ -547,14 +479,8 @@ def validar_semantica_plato(
     return True, ""
 
 
-# ─── Verificación de proteína requerida por nombre de plato ──────────────────
-# Pares (keywords_en_nombre_plato, keywords_en_alimento_resuelto).
-# Si el nombre contiene algún keyword del primer tuple, al menos un ingrediente
-# resuelto debe contener algún keyword del segundo.
-# Complementa validar_semantica_plato() que solo cubre 6 tipos de _PLANTILLAS_PLATOS.
 _PROTEINAS_REQUERIDAS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
     (("pollo",),                         ("pollo", "pechuga", "muslo")),
-    # "gallina" en nombre → acepta gallina o pollo/pechuga (sustituto habitual en ají de gallina)
     (("gallina",),                       ("gallina", "pollo", "pechuga", "muslo")),
     (("pato",),                          ("pato",)),
     (("pavo", "pavita"),                 ("pavo", "pavita")),
@@ -564,11 +490,6 @@ _PROTEINAS_REQUERIDAS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
     (("cabrito",),                       ("cabrito", "cordero")),
     (("langostino",),                    ("langostino", "camaron")),
     (("pulpo",),                         ("pulpo",)),
-    # ── Pescados específicos por nombre ──────────────────────────────────────
-    # Cubren casos como "ensalada de atún", "sopa de salmón" donde el nombre
-    # menciona el pescado ESPECÍFICO en lugar del genérico "pescado".
-    # _COHERENCIA_NOMBRE_INGREDIENTES solo activa cuando "pescado" está en el nombre;
-    # estas reglas cubren el gap cuando el nombre dice el pescado directamente.
     (("atun",),                          ("atun",)),
     (("salmon",),                        ("salmon",)),
     (("trucha",),                        ("trucha",)),
@@ -579,12 +500,7 @@ _PROTEINAS_REQUERIDAS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
     (("mero",),                          ("mero",)),
     (("lisa",),                          ("lisa",)),
     (("camaron",),                       ("camaron", "langostino")),
-    # "lisa" como token completo → pez, no adjetivo.
-    # Se verifica con word-level token en _validar_consistencia_final().
     (("vacuno",),                        ("vacuno", "res", "carne", "lomo")),
-    # ── Bases carbohidrato ───────────────────────────────────────────────────
-    # Evita que "Tostada de ARROZ integral" tenga solo pan (bug plato 304).
-    # Si el nombre dice "arroz", al menos un ingrediente debe contener "arroz".
     (("arroz",),                         ("arroz",)),
     (("quinua",),                        ("quinua",)),
     (("avena",),                         ("avena",)),
@@ -617,13 +533,7 @@ def _verificar_proteina_requerida(
     return True, ""
 
 
-# ─── CAMBIO 1: Validación estricta de ingrediente principal ──────────────────
-# Verifica que el ingrediente proteico mencionado en el nombre del plato esté
-# REALMENTE presente en los ingredientes resueltos desde la BD.
-# Complementa _PROTEINAS_REQUERIDAS con reglas explícitas de cruce de proteínas
-# que son los bugs más críticos en producción (pescado→pollo, etc.).
 _COHERENCIA_NOMBRE_INGREDIENTES: list[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]] = [
-    # (keywords_en_nombre, keywords_requeridos_en_ing, keywords_prohibidos_en_ing)
     (("pescado",),
      ("pescado", "atun", "salmon", "trucha", "caballa", "lisa", "mero",
       "tollo", "anchoveta", "bonito", "merluza", "tilapia", "lenguado",
@@ -647,16 +557,7 @@ _COHERENCIA_NOMBRE_INGREDIENTES: list[tuple[tuple[str, ...], tuple[str, ...], tu
 ]
 
 
-# ─── CAMBIO 2: Guard final de consistencia nombre↔ingredientes ───────────────
-# Cubre keywords proteicos específicos que NO activan _COHERENCIA_NOMBRE_INGREDIENTES
-# ni _PROTEINAS_REQUERIDAS porque requieren coincidencia como PALABRA COMPLETA
-# (no substring), evitando falsos positivos:
-#   - "lisa" ≠ "realista", "lisa" = el pez en "ceviche de lisa"
-#   - "res" ≠ "fresco", "res" = carne bovina en "sopa de res"
-#   - "atún" ya cubierto por _PROTEINAS_REQUERIDAS pero con doble check de cross-proteína
-# Usa set de tokens del nombre (split por espacio) para comparación exacta.
 _CONSISTENCIA_FINAL_REGLAS: list[tuple[frozenset, tuple, tuple]] = [
-    # (keywords_como_palabra_en_nombre, requeridos_en_ings, prohibidos_en_ings)
     (frozenset({"lisa"}),
      ("lisa",),
      ("pollo", "pechuga", "res", "vacuno", "cerdo", "chancho")),
@@ -706,14 +607,12 @@ def _validar_consistencia_final(
     ings_norms = [_norm(alim.nombre) for alim, _ in resueltos]
 
     for kws_nombre, kws_requeridos, kws_prohibidos in _CONSISTENCIA_FINAL_REGLAS:
-        # Solo activa si alguna keyword aparece como PALABRA COMPLETA en el nombre
         matched = kws_nombre & tokens_nombre
         if not matched:
             continue
 
         matched_kw = next(iter(matched))
 
-        # Verificar que al menos 1 ingrediente aporte la proteína requerida
         if kws_requeridos:
             tiene = any(
                 any(kr in ing_n for kr in kws_requeridos)
@@ -725,7 +624,6 @@ def _validar_consistencia_final(
                     f"resuelto lo confirma (esperado: {', '.join(kws_requeridos[:3])})"
                 )
 
-        # Verificar que no haya proteína cruzada
         for prohibido in kws_prohibidos:
             if any(prohibido in ing_n for ing_n in ings_norms):
                 return False, (
@@ -734,16 +632,6 @@ def _validar_consistencia_final(
 
     return True, ""
 
-
-# ─── CAMBIO 1 (FASE 3.4 adaptado): Limpieza de nombre según resueltos ─────────
-# En lugar de reemplazar el nombre con un genérico (UX inaceptable),
-# se eliminan únicamente los sufijos "con X" donde X NO fue resuelto como
-# ingrediente real. Preserva el nombre específico del plato.
-#
-# Ejemplos:
-#   "Ceviche de Lisa con Aceite de Oliva" → aceite rechazado → "Ceviche de Lisa"
-#   "Pollo al Horno con Arroz" → arroz resuelto → nombre intacto
-#   "Tortilla de Huevo con Plátano" → plátano no resuelto → "Tortilla de Huevo"
 
 def _limpiar_nombre_segun_resueltos(nombre_plato: str, resueltos: list[tuple]) -> str:
     """
@@ -764,11 +652,10 @@ def _limpiar_nombre_segun_resueltos(nombre_plato: str, resueltos: list[tuple]) -
 
     partes = re.split(r'\s+con\s+', nombre_plato, flags=re.IGNORECASE)
     if len(partes) == 1:
-        return nombre_plato  # no hay "con" — sin cambios
+        return nombre_plato
 
     base = partes[0].strip()
 
-    # Índice de tokens de todos los ingredientes resueltos (palabras ≥4 chars)
     ings_tokens: set[str] = set()
     for alim, _ in resueltos:
         for tok in _norm(alim.nombre).split():
@@ -781,7 +668,6 @@ def _limpiar_nombre_segun_resueltos(nombre_plato: str, resueltos: list[tuple]) -
     for parte in partes[1:]:
         parte_n = _norm(parte)
         tokens_parte = [t for t in parte_n.split() if len(t) >= 4]
-        # La parte es válida si al menos 1 token significativo está en ingredientes resueltos
         if any(tok in ings_tokens for tok in tokens_parte):
             partes_validas.append(parte.strip())
         else:
@@ -798,81 +684,49 @@ def _limpiar_nombre_segun_resueltos(nombre_plato: str, resueltos: list[tuple]) -
     return base
 
 
-# ─── FASE 3.4b: Validación de ingredientes explícitos en el nombre ────────────
-# Verifica que los ingredientes MENCIONADOS EN EL NOMBRE del plato existan
-# realmente entre los ingredientes resueltos desde la BD.
-#
-# Problema que resuelve:
-#   LLM genera "Ensalada de Plátano y Cebolla" pero los ingredientes resueltos
-#   son plátano + yogurt → "cebolla" está en el nombre pero NO en los ings.
-#   _PROTEINAS_REQUERIDAS y _CONSISTENCIA_FINAL_REGLAS solo cubren proteínas;
-#   esta función cubre CUALQUIER ingrediente específico en el nombre.
-#
-# Estrategia:
-#   1. Extrae tokens significativos (≥5 chars) después de "con", "y", "de" en el nombre.
-#   2. Para cada token, verifica si algún ingrediente resuelto lo contiene.
-#   3. Si >50% de los tokens del nombre no están en ings → rechazar.
-#   El umbral del 50% evita falsos positivos cuando el nombre incluye descriptores
-#   de preparación ("al horno", "a la plancha") que no son ingredientes.
-#
-# Palabras ignoradas (conectores, adjetivos, preparaciones):
 _PALABRAS_IGNORADAS_NOMBRE = frozenset({
-    # conectores y artículos
     "con", "sin", "del", "los", "las", "una", "unos", "unas",
-    # descriptores de preparación (no son ingredientes)
     "horno", "plancha", "parrilla", "vapor", "frito", "frita", "cocido", "cocida", "asado", "asada",
-    "horneado", "horneada",     # hornear — "arroz horneado"
-    "apanado", "apanada",       # apanado en pan rallado — "pescado apanado"
-    "empanizado", "empanizada", # empanizado — variante de apanado
-    "rebozado", "rebozada",     # rebozado en harina/huevo
-    "ahumado", "ahumada",       # ahumado (trucha ahumada, pollo ahumado)
-    "gratinado", "gratinada",   # gratinado con queso
-    "sancochado", "sancochada", # sancochado/hervido
-    "caramelizado",             # cebollas caramelizadas
-    "agridulce",                # pollo agridulce, cerdo agridulce (chifa)
-    "crujiente",                # pollo crujiente, maíz crujiente
-    "dorado", "dorada",         # pollo dorado, papa dorada
-    "salteado", "salteada",     # salteado de verduras
+    "horneado", "horneada",
+    "apanado", "apanada",
+    "empanizado", "empanizada",
+    "rebozado", "rebozada",
+    "ahumado", "ahumada",
+    "gratinado", "gratinada",
+    "sancochado", "sancochada",
+    "caramelizado",
+    "agridulce",
+    "crujiente",
+    "dorado", "dorada",
+    "salteado", "salteada",
     "ligera", "ligero", "saludable", "natural", "fresco", "fresca",
     "estilo", "tipo", "especial", "peruano", "peruana", "casero", "casera",
     "salsa", "estofado", "guiso", "sudado", "saltado",
-    # tipos de plato — no son ingredientes en sí mismos
     "ensalada", "tostada", "tortilla", "sandwich", "sandwi",
     "ceviche", "cebiche", "tiradito", "causa", "crema", "sopa",
     "batido", "licuado", "smoothi",
-    # categorías genéricas — los ingredientes concretos son los que importan
     "verduras", "frutas", "fruta",
-    # sinónimos comunes de ingredientes registrados con otro nombre en BD
-    "aguacate",     # → Palta
-    # pasta/fideos: el ingrediente en BD se llama "pasta cocida", no "tallarines"
+    "aguacate",
     "tallarines", "fideos", "espagueti", "fettuccine",
-    # descriptores adicionales de cantidad/método
     "porcion", "porcion", "controlada", "rellena", "relleno",
-    # Cortes de carne — el ingrediente en BD es la carne genérica (ej: "Cerdo Lomo Cocido"),
-    # no el corte específico. El validador busca "cerdo/pollo/res" en los resueltos.
-    "chuleta",     # chuleta de cerdo/res — corte, no ingrediente propio en BD
-    "filete",      # filete de res/pollo — ídem
-    "bistec",      # bistec de res — ídem
-    "lomo",        # lomo fino/saltado — puede ser plato o corte; no verificar como ingrediente
-    # términos regionales que no mapean a ingredientes individuales
+    "chuleta",
+    "filete",
+    "bistec",
+    "lomo",
     "canchita", "serrana", "serrano", "norteno", "criollo", "criolla",
-    # Tipos de plato peruanos (no son ingredientes en BD)
-    "chaufa",       # arroz chaufa / chifa peruano
-    "anticucho",    # anticuchos de corazón / pollo (singular)
-    "anticuchos",   # plural — forma más común en nombres de platos
-    "mazamorra",    # mazamorra morada / de maíz
-    "picarones",    # picarones de camote/zapallo
-    "empanada",     # empanada de pollo / carne
+    "chaufa",
+    "anticucho",
+    "anticuchos",
+    "mazamorra",
+    "picarones",
+    "empanada",
     "empanadas",
-    "alfajor",      # postre — alfajor de manjar blanco
+    "alfajor",
     "alfajores",
-    "pepian",       # seco a lo pepián
-    "chicharron",   # chicharrón como tipo de plato (ej: "chicharrón de cerdo con mote")
-    # Descriptores de color usados en nombres de platos, no en alimentos BD
-    "morado",       # mazamorra morada, chicha morada → el color no es ingrediente
+    "pepian",
+    "chicharron",
+    "morado",
     "morada",
-    # Nombres de animal en platos peruanos donde el LLM puede usar "pollo" en lugar de "gallina"
-    # _PROTEINAS_REQUERIDAS ya verifica que haya pollo/pechuga si el nombre tiene "gallina"
     "gallina",
 })
 
@@ -893,14 +747,12 @@ def _validar_ingredientes_en_nombre(
     if not resueltos or not nombre_norm:
         return True, ""
 
-    # Índice de todos los tokens de ingredientes resueltos (≥4 chars)
     ings_tokens: set[str] = set()
     for alim, _ in resueltos:
         for tok in _norm(alim.nombre).split():
             if len(tok) >= 4:
                 ings_tokens.add(tok)
 
-    # Extraer tokens significativos del nombre (≥5 chars, no ignorados, no números)
     tokens_nombre = [
         t for t in nombre_norm.split()
         if len(t) >= 5
@@ -909,17 +761,13 @@ def _validar_ingredientes_en_nombre(
     ]
 
     if len(tokens_nombre) < 2:
-        return True, ""  # nombre muy corto o genérico — no verificar
+        return True, ""
 
-    # Verificar cuántos tokens del nombre tienen correspondencia en ingredientes
     ausentes = [
         t for t in tokens_nombre
         if not any(t in ing_tok or ing_tok in t for ing_tok in ings_tokens)
     ]
 
-    # Umbral: si ≥40% de tokens significativos del nombre no están en ings → rechazar.
-    # 0.4 en lugar de 0.5: cierra el gap donde exactamente 50% ausentes pasaba el guard
-    # (ej: "batido leche almendras frutas" con "almendras" y "batido" ausentes = 50%).
     if len(ausentes) >= len(tokens_nombre) * 0.4:
         return False, (
             f"ingrediente(s) del nombre sin correspondencia en resueltos: "
@@ -930,14 +778,6 @@ def _validar_ingredientes_en_nombre(
     return True, ""
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# FASE 3.5 — VALIDACIÓN CULINARIA Y COHERENCIA DE PREPARACIÓN
-# ═══════════════════════════════════════════════════════════════════════════
-
-# ─── Clasificación culinaria del plato ───────────────────────────────────────
-# Mapea el nombre normalizado del plato a un tipo culinario.
-# Se usa para aplicar reglas de coherencia específicas por categoría.
-# Orden de evaluación: de más específico a más genérico.
 _TIPOS_CULINARIOS_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("crudo_marino",    ("ceviche", "cebiche", "tiradito", "leche de tigre")),
     ("crudo_general",   ("sashimi", "carpaccio", "tartare", "tartár")),
@@ -945,13 +785,8 @@ _TIPOS_CULINARIOS_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("sopa",            ("sopa", "caldo", "chupe", "aguadito", "crema de", "consomé")),
     ("guiso",           ("guiso", "estofado", "adobo", "pepián", "seco de")),
     ("cocido_caliente", ("saltado", "al horno", "horneado", "a la parrilla", "frito")),
-    # ── Nuevos tipos para bloquear ingredientes imposibles ──────────────────
-    # Tostada: base = pan. Puede llevar untables sólidos o frescos encima.
-    # PROHIBIDO: leche líquida/polvo (pan mojado ≠ tostada), jugos, bebidas.
     ("tostada",         ("tostada", "pan tostado", "tostado de pan")),
-    # Batido / bebida: base líquida (leche, agua, jugo). PROHIBIDO: panes, arroz, pastas.
     ("batido",          ("batido", "smoothie", "licuado", "jugo de", "bebida de")),
-    # Snack sólido: frutas, frutos secos, yogur. PROHIBIDO: arroz, pasta, carne pesada.
     ("snack",           ("snack", "fruta", "colacion", "bocado")),
 ]
 
@@ -967,39 +802,22 @@ def _inferir_tipo_culinario(nombre_norm: str) -> str:
     return "mixto"
 
 
-# ─── Reglas de coherencia culinaria por tipo ─────────────────────────────────
-# Formato: (tipo_culinario, keywords_prohibidos_en_ings_resueltos, motivo)
-# Opera sobre nombres NORMALIZADOS de alimentos ya resueltos desde la BD.
-# Reglas CONSERVADORAS para evitar falsos positivos:
-#   - "frito" solo se bloquea en platos crudos (crudo_marino) donde es claramente
-#     incompatible. En ensaladas NO se bloquea ("Ensalada César con Pollo Frito" es válida).
-#   - "horneado" y "cocido" solo en tipo crudo_marino.
-#   - Para ensaladas solo se bloquean frituras industriales pesadas (papa frita, chicharron).
 _REGLAS_COHERENCIA_CULINARIA: list[tuple[str, tuple[str, ...], str]] = [
-    # Platos crudos marinos: ningún ingrediente puede ser cocido, frito u horneado
     ("crudo_marino",
      ("frito", "cocido", "sancochado", "horneado", "a la parrilla",
       "hervido", "asado", "rebozado", "empanizado"),
      "plato crudo marino no puede tener ingredientes cocidos/fritos"),
-    # Ensaladas: sin frituras industriales que cambian la naturaleza del plato.
     ("ensalada",
      ("papa frita", "salchipapa", "chicharron de cerdo", "hot dog"),
      "ensalada con componentes de fritura industrial incompatibles"),
-    # Sopas: sin emulsiones frías ni aliños que degradan la textura
     ("sopa",
      ("mayonesa", "crema agria"),
      "sopa con emulsiones frías incompatibles"),
-    # ── NUEVAS REGLAS ────────────────────────────────────────────────────────
-    # Tostada: no puede tener leche líquida/polvo — convertiría el pan en
-    # algo mojado, perdiendo la textura crujiente que define una tostada.
-    # Tampoco arroz ni pasta — son acompañamientos incompatibles con tostada.
     ("tostada",
      ("leche en polvo", "leche descremada polvo", "leche evaporada",
       "leche fresca", "leche entera", "leche",
       "arroz blanco", "arroz cocido", "pasta cocida", "fideos"),
      "tostada no puede contener leche líquida/polvo ni carbohidratos pesados"),
-    # Batido: no puede tener bases sólidas/carbohidratos no líquidos.
-    # Un batido es una bebida — arroz, pan o pasta no se licúan en un batido peruano.
     ("batido",
      ("pan integral", "pan tostado", "arroz", "pasta", "fideos",
       "papa", "yuca", "camote"),
@@ -1027,7 +845,7 @@ def _validar_coherencia_culinaria(
 
     tipo = _inferir_tipo_culinario(nombre_norm)
     if tipo == "mixto":
-        return True, ""  # sin reglas para platos genéricos — no bloquear
+        return True, ""
 
     ings_norms = [_norm(alim.nombre) for alim, _ in resueltos]
 
@@ -1045,11 +863,6 @@ def _validar_coherencia_culinaria(
 
     return True, ""
 
-
-# ─── Validación de preparación vs tipo culinario (LOG-ONLY) ──────────────────
-# No bloquea la creación del plato. Solo registra si los pasos de preparación
-# generados por el LLM contienen verbos culinariamente incompatibles con el tipo.
-# Esto detecta bugs en el LLM de preparación sin interrumpir el flujo.
 
 _VERBOS_ESPERADOS_POR_TIPO: dict[str, set[str]] = {
     "crudo_marino":    {"mezclar", "marinar", "macerar", "exprimir", "agregar", "revolver"},
@@ -1081,7 +894,6 @@ def _validar_preparacion_vs_tipo(nombre_norm: str, preparacion: list[str]) -> No
 
     texto_prep = " ".join(str(p) for p in preparacion).lower()
 
-    # Verificar verbos incompatibles (más crítico — siempre loguear)
     incompatibles = _VERBOS_INCOMPATIBLES_POR_TIPO.get(tipo, set())
     for verbo in incompatibles:
         if verbo in texto_prep:
@@ -1090,9 +902,8 @@ def _validar_preparacion_vs_tipo(nombre_norm: str, preparacion: list[str]) -> No
                 "revisar LLM de preparacion",
                 nombre_norm, tipo, verbo,
             )
-            return  # una advertencia es suficiente
+            return
 
-    # Verificar verbos esperados (suave — solo debug si no hay ninguno)
     esperados = _VERBOS_ESPERADOS_POR_TIPO.get(tipo, set())
     if esperados and not any(v in texto_prep for v in esperados):
         logger.debug(
@@ -1131,7 +942,6 @@ def _validar_coherencia_nombre_ingredientes(
         if not any(kw in nombre_norm for kw in kws_nombre):
             continue
 
-        # Si el nombre menciona esta proteína, debe estar en los ingredientes
         if kws_requeridos:
             tiene_requerido = any(
                 any(kr in ing_n for kr in kws_requeridos)
@@ -1143,9 +953,6 @@ def _validar_coherencia_nombre_ingredientes(
                     f"resuelto lo confirma (ings: {', '.join(ings_norms[:4])})"
                 )
 
-        # No debe haber proteínas contradictorias.
-        # Usar word-boundary (_token_en_texto) para evitar falsos positivos:
-        # "res" no debe detectarse en "fresco", "tomate fresco", "perejil", etc.
         if kws_prohibidos:
             for prohibido in kws_prohibidos:
                 if any(_token_en_texto(prohibido, ing_n) for ing_n in ings_norms):
@@ -1182,8 +989,6 @@ def _autocorregir_gramajes(
     porción realista supera esa cantidad en un solo ingrediente.
     Retorna la lista corregida.
     """
-    # Hard cap por ingrediente: máx 500g individual
-    # (Lechuga 480g, Arroz 500g, etc. son porciones absurdas para 1 persona)
     _MAX_GRAMOS_ING = 500.0
     capped = []
     for alim, gramos in resueltos:
@@ -1210,7 +1015,6 @@ def _autocorregir_gramajes(
 
     if kcal_actual < min_kcal and len(resueltos) > 0:
         factor = min_kcal / kcal_actual
-        # Solo escalar si el factor no es extremo (máx ×2.5) para no crear porciones absurdas
         if factor <= 2.5:
             corregidos = [(alim, _redondear_a_5g(gramos * factor)) for alim, gramos in resueltos]
             logger.info("Autocorrección gramajes: %.0f→%.0f kcal (mínimo %s)", kcal_actual, _calcular_kcal_resueltos(corregidos), min_kcal)
@@ -1248,8 +1052,6 @@ def _filtrar_coherencia_semantica(
     return filtrados
 
 
-# ─── Detección de ingrediente principal ─────────────────────────────────────
-
 _PLATO_STOPWORDS: frozenset[str] = frozenset({
     "con", "de", "en", "al", "a", "la", "el", "del", "las", "los",
     "y", "e", "sin", "para", "sobre", "tipo", "estilo",
@@ -1283,8 +1085,6 @@ def _detectar_ingrediente_principal(
     return None
 
 
-# ─── Normalización interna ───────────────────────────────────────────────────
-
 def _norm(texto: str) -> str:
     s = (texto or "").strip().lower()
     s = unicodedata.normalize("NFKD", s)
@@ -1296,8 +1096,6 @@ def _norm(texto: str) -> str:
 def _initcap(texto: str) -> str:
     return texto.strip().capitalize()
 
-
-# ─── Helpers LLM ─────────────────────────────────────────────────────────────
 
 async def _descomponer_plato_llm(nombre_plato: str) -> List[dict]:
     """
@@ -1389,12 +1187,8 @@ async def _descomponer_plato_llm(nombre_plato: str) -> List[dict]:
             if it.get("nombre_es") and str(it.get("nombre_es", "")).strip()
         ]
 
-        # ── Post-procesado por tipo de plato ─────────────────────────────────
-        # El LLM tiende a agregar ingredientes de relleno o incoherentes.
-        # Filtramos por tipo de plato para mantener coherencia culinaria.
         _nombre_n = _norm(nombre_plato)
 
-        # 1) Platos SIMPLES: eliminar rellenos genéricos (aceite, sal, especias, ajo)
         _PLATOS_SIMPLES_KEYWORDS = (
             "ensalada", "fruta", "yogur", "yogurt", "batido", "snack",
             "manzana", "platano", "naranja", "mandarina",
@@ -1417,9 +1211,6 @@ async def _descomponer_plato_llm(nombre_plato: str) -> List[dict]:
                     )
                 parsed = _reales
 
-        # 2) TOSTADAS: el único líquido permitido es aceite de oliva (para untar).
-        #    Leche líquida/en polvo es incompatible — pan mojado no es tostada.
-        #    Arroz o pasta tampoco van encima de una tostada.
         if "tostada" in _nombre_n or "pan tostado" in _nombre_n:
             _PROHIBIDOS_TOSTADA = frozenset({
                 "leche", "leche en polvo", "leche descremada", "leche fresca",
@@ -1437,7 +1228,6 @@ async def _descomponer_plato_llm(nombre_plato: str) -> List[dict]:
                     nombre_plato, _antes - len(parsed),
                 )
 
-        # 3) BATIDOS / LICUADOS: no pueden contener panes, arroz ni pastas.
         if any(kw in _nombre_n for kw in ("batido", "licuado", "smoothie", "jugo de")):
             _PROHIBIDOS_BATIDO = frozenset({
                 "pan integral", "pan tostado", "pan", "arroz", "pasta",
@@ -1501,16 +1291,12 @@ async def _generar_preparacion_llm(
         pasos = json.loads(m.group(0))
         pasos_limpios = [str(p).strip() for p in pasos if str(p).strip()]
 
-        # ── Guard post-generación: detectar si la preparación menciona ingredientes
-        # que no estaban en la lista original (señal de alucinación del LLM).
-        # Solo loguea — no bloquea, para no perder el plato por un falso positivo.
         _ings_norm_set: set[str] = set()
         for ing in nombres_ingredientes:
             for tok in _norm(ing).split():
                 if len(tok) >= 4:
                     _ings_norm_set.add(tok)
 
-        # Palabras genéricas que siempre son válidas en una preparación
         _PREP_STOPWORDS = frozenset({
             "agua", "sal", "calor", "fuego", "temperatura", "minutos",
             "plato", "tazon", "bowl", "sarten", "olla", "taza", "cuchara",
@@ -1539,8 +1325,6 @@ async def _generar_preparacion_llm(
         logger.error("Error generando preparacion para '%s': %s", nombre_plato, e)
         return None
 
-
-# ─── Trinidad Nutricional (logging, no bloqueante) ───────────────────────────
 
 def _verificar_trinidad_nutricional(plato: Plato) -> None:
     """Log de integridad: confirma que macros = Σ(alimento.macro × gramos/100)."""
@@ -1598,12 +1382,6 @@ def _loguear_resultado_nutricional(
         logger.error("[ResultadoNutricional] Error: %s", e)
 
 
-# ─── Sanitizador de nombres LLM ──────────────────────────────────────────────
-# El LLM a veces devuelve "nombre_es" con porciones incrustadas:
-#   "2 rebanadas  pan integral" → "pan integral"
-#   "15g  miel"                → "miel"
-#   "1 taza de avena"          → "avena"
-# Esos nombres causan creación de alimentos con nombres raros (IDs 790/792/793/809).
 _RE_PORCION_PREFIJA = re.compile(
     r"^\d+[\.,]?\d*\s*"
     r"(cucharaditas|cucharadita|cucharadas|cucharada|rebanadas|rebanada|"
@@ -1620,8 +1398,6 @@ def _limpiar_nombre_ingrediente(nombre_es: str) -> str:
     return limpio if limpio else nombre_es
 
 
-# ─── Constructor principal ───────────────────────────────────────────────────
-
 async def crear_plato_dinamico(
     db: Session,
     nombre_plato: str,
@@ -1633,9 +1409,6 @@ async def crear_plato_dinamico(
 
     Retorna el objeto Plato creado (con ingredientes cargados) o None si falla.
     """
-    # FIREWALL: esta función solo crea Plato + PlatoIngrediente.
-    # Llama a _buscar_o_crear_alimento_async() (solo alimentos).
-    # NUNCA es llamada desde _buscar_o_crear_alimento_async() — no hay recursión.
     from app.services.asistente.asistente_nutricion import _buscar_o_crear_alimento_async
     import difflib
 
@@ -1644,7 +1417,6 @@ async def crear_plato_dinamico(
     if not nombre_norm or len(nombre_norm) < 3:
         return None
 
-    # Auto-detectar tipo_plato → aplica rango calórico correcto
     if tipo_plato == "cualquiera":
         if any(kw in nombre_norm for kw in ("cebiche", "ceviche")):
             tipo_plato = "cebiche"
@@ -1672,17 +1444,12 @@ async def crear_plato_dinamico(
                                                "milanesa", "rebozado")):
             tipo_plato = "almuerzo"
 
-    # Guardia no-alimento: rechazar si contiene tokens claramente no-alimentarios
     _tokens = set(nombre_norm.split())
     if _tokens & _NO_FOOD_TOKENS:
         _rechazados = _tokens & _NO_FOOD_TOKENS
         logger.warning("'%s' rechazado — tokens no-alimentarios: %s", nombre_plato, _rechazados)
         return None
 
-    # REGLA 5: deduplicación fuzzy antes de INSERT.
-    # Threshold 0.80 cubre variantes regionales ("norteño", "casero", "especial")
-    # que el threshold anterior (0.85) dejaba pasar y generaban platos duplicados.
-    # Busca en platos cuya primera palabra coincida (eficiencia) O en los 40 más recientes.
     _first_word = nombre_norm.split()[0]
     existing = (
         db.query(Plato)
@@ -1697,29 +1464,22 @@ async def crear_plato_dinamico(
             logger.info("Plato similar encontrado (REGLA 5): '%s' (sim=%.2f)", p.nombre, sim)
             return p
 
-    # Descomponer ingredientes con LLM
     ingredientes_raw = await _descomponer_plato_llm(nombre_plato)
     if not ingredientes_raw:
         logger.warning("LLM no devolvió ingredientes para '%s'", nombre_plato)
         return None
 
-    # Filtro de coherencia semántica (antes de resolver en BD)
     ingredientes_raw = _filtrar_coherencia_semantica(nombre_plato, ingredientes_raw)
 
-    # Resolver o crear cada ingrediente en BD
-    # Detectar ingrediente principal antes de resolver (para guard de omisión)
     _nombre_ing_principal = _detectar_ingrediente_principal(nombre_norm, ingredientes_raw)
 
-    resueltos: list[tuple] = []  # [(Alimento, gramos)]
+    resueltos: list[tuple] = []
     for item in ingredientes_raw:
         nombre_ing_es = _limpiar_nombre_ingrediente(item["nombre_es"])
         gramos = item["gramos"]
         nombre_ing_norm = _norm(nombre_ing_es)
         alim = await _buscar_o_crear_alimento_async(db, nombre_ing_norm, nombre_ing_es)
 
-        # Fallback de simplificación: si el nombre completo falla (ej. "Perejil Deshidratado"),
-        # quitar el último descriptor y reintentar ("Perejil").
-        # Solo 1 paso para no sobre-simplificar ("Ají Amarillo" no debe reducirse a "Ají").
         if not alim:
             _partes = nombre_ing_es.split()
             if len(_partes) >= 2:
@@ -1738,9 +1498,6 @@ async def crear_plato_dinamico(
         else:
             logger.warning("Ingrediente no resuelto: '%s'", nombre_ing_es)
 
-    # Guard de omisión silenciosa: si el ingrediente principal no se resolvió,
-    # el plato tendría macros incorrectos (ej. "Arroz con Pato" sin Pato → ~200 kcal).
-    # Falla explícitamente en lugar de devolver un resultado engañoso.
     if _nombre_ing_principal:
         _principal_norm = _norm(_nombre_ing_principal)
         _resueltos_norms = {_norm(alim.nombre) for alim, _ in resueltos}
@@ -1752,7 +1509,6 @@ async def crear_plato_dinamico(
             )
             return None
 
-    # CAMBIO 3 — Mínimo de ingredientes reales con gramaje significativo
     if len(resueltos) < 2:
         logger.warning("Insuficientes ingredientes resueltos (%d) para '%s'", len(resueltos), nombre_plato)
         return None
@@ -1764,8 +1520,6 @@ async def crear_plato_dinamico(
         )
         return None
 
-    # BLOQUE 2: Gramaje total mínimo — el prompt pide 400-750g pero sin gate duro
-    # un LLM que devuelva ingredientes traza (5g×2) pasaría todos los checks.
     _peso_total = sum(g for _, g in resueltos)
     if _peso_total < 50:
         logger.warning(
@@ -1774,8 +1528,6 @@ async def crear_plato_dinamico(
         )
         return None
 
-    # FASE 4.2 — Compatibilidad entre ingredientes (antes de calcular macros).
-    # Bloquea combinaciones culinariamente absurdas: pollo+leche en polvo, pescado+yogurt.
     _ok_compat, _motivo_compat = _validar_compatibilidad_ingredientes(resueltos)
     if not _ok_compat:
         logger.warning(
@@ -1784,8 +1536,6 @@ async def crear_plato_dinamico(
         )
         return None
 
-    # CAMBIO 1 — Validación estricta de coherencia nombre↔ingrediente principal.
-    # CRÍTICO: evita persistir platos con proteína cruzada (pescado→pollo, etc.)
     _ok_coh, _motivo_coh = _validar_coherencia_nombre_ingredientes(nombre_norm, resueltos)
     if not _ok_coh:
         logger.warning(
@@ -1794,8 +1544,6 @@ async def crear_plato_dinamico(
         )
         return None
 
-    # BLOQUE 3a: Proteína requerida por nombre — cubre cualquier keyword proteico,
-    # no solo los 6 tipos de _PLANTILLAS_PLATOS. Complementa validar_semantica_plato().
     _ok_prot, _motivo_prot = _verificar_proteina_requerida(nombre_norm, resueltos)
     if not _ok_prot:
         logger.warning(
@@ -1803,9 +1551,6 @@ async def crear_plato_dinamico(
         )
         return None
 
-    # BLOQUE 3b: Validación semántica de plantilla sobre ingredientes resueltos.
-    # Opera post-resolución (nombres reales de alimentos en BD), a diferencia de
-    # _filtrar_coherencia_semantica() que opera sobre texto raw del LLM.
     _ings_resueltos_nombres = [alim.nombre for alim, _ in resueltos]
     _ok_sem, _motivo_sem = validar_semantica_plato(nombre_plato, _ings_resueltos_nombres)
     if not _ok_sem:
@@ -1814,9 +1559,6 @@ async def crear_plato_dinamico(
         )
         return None
 
-    # BLOQUE 3c — CAMBIO 2: Validación de ingredientes ESENCIALES por tipo.
-    # Garantiza que ceviche tenga pescado+limón+cebolla y no lleve aceite, etc.
-    # Más granular que _PLANTILLAS_PLATOS: verifica GRUPOS obligatorios independientes.
     _ok_esen, _motivo_esen = _validar_ingredientes_esenciales(nombre_norm, resueltos)
     if not _ok_esen:
         logger.warning(
@@ -1825,10 +1567,6 @@ async def crear_plato_dinamico(
         )
         return None
 
-    # BLOQUE 3d — CAMBIO 2 (FASE 3.4): Guard final de consistencia (word-level).
-    # Cubre keywords proteicos que NO disparan _COHERENCIA_NOMBRE_INGREDIENTES:
-    # "lisa" (pez), "res" (sin matchear "fresco"), "atún", "salmón", "camarón", etc.
-    # Usa tokens de palabra completa para evitar falsos positivos por substring.
     _ok_cf, _motivo_cf = _validar_consistencia_final(nombre_norm, resueltos)
     if not _ok_cf:
         logger.warning(
@@ -1837,9 +1575,6 @@ async def crear_plato_dinamico(
         )
         return None
 
-    # BLOQUE 3e — FASE 3.5: Coherencia culinaria (tipo de plato vs ingredientes BD).
-    # Verifica que los ingredientes RESUELTOS sean compatibles con el tipo culinario.
-    # Reglas conservadoras: solo bloquea incompatibilidades OBVIAS (ceviche+cocido, etc.).
     _ok_cul, _motivo_cul = _validar_coherencia_culinaria(nombre_norm, resueltos)
     if not _ok_cul:
         logger.warning(
@@ -1848,9 +1583,6 @@ async def crear_plato_dinamico(
         )
         return None
 
-    # BLOQUE 3f — FASE 3.4b: Ingredientes mencionados en el nombre deben estar en resueltos.
-    # Bloquea: "Ensalada de Plátano y Cebolla" con ings=plátano+yogurt (cebolla ausente).
-    # Umbral del 50%: tolera descriptores de preparación en el nombre que no son ingredientes.
     _ok_ien, _motivo_ien = _validar_ingredientes_en_nombre(nombre_norm, resueltos)
     if not _ok_ien:
         logger.warning(
@@ -1861,9 +1593,6 @@ async def crear_plato_dinamico(
 
     resueltos = _autocorregir_gramajes(resueltos, tipo_plato)
 
-    # CAMBIO 2 — BLOQUEAR MACROS EN 0 (CRÍTICO)
-    # Se calcula DESPUÉS de autocorregir gramajes para no rechazar platos que
-    # simplemente tenían porciones fuera de rango y ya fueron corregidos.
     _kcal_total = _calcular_kcal_resueltos(resueltos)
     _prot_t = sum(float(getattr(a, "proteina_100g", 0) or 0) * g / 100 for a, g in resueltos)
     _carb_t = sum(float(getattr(a, "carbohidratos_100g", 0) or 0) * g / 100 for a, g in resueltos)
@@ -1883,10 +1612,6 @@ async def crear_plato_dinamico(
         )
         return None
 
-    # BLOQUE 5: Coherencia nutricional del plato completo (Atwater ±15%).
-    # Reutiliza validar_macros_atwater() sobre la suma de macros de todos los ingredientes.
-    # Nota: platos con vegetales INS/CENAN pueden tener desviaciones estructurales por fibra;
-    # si se rechazan aquí, el caller deberá servir el plato desde BD o LLM sin persistir.
     _ok_atw, _motivo_atw = validar_macros_atwater(_kcal_total, _prot_t, _carb_t, _gras_t)
     if not _ok_atw:
         logger.warning(
@@ -1894,15 +1619,9 @@ async def crear_plato_dinamico(
         )
         return None
 
-    # CAMBIO 1 (FASE 3.4) — Limpiar nombre: eliminar sufijos "con X" donde X no fue resuelto.
-    # Evita que el nombre persista componentes rechazados (ej. "con Aceite de Oliva").
-    # Se aplica DESPUÉS de todas las validaciones para operar sobre los resueltos definitivos.
     nombre_plato = _limpiar_nombre_segun_resueltos(nombre_plato, resueltos)
     nombre_norm = _norm(nombre_plato)
 
-    # Crear el registro Plato + PlatoIngredientes en una sola transacción.
-    # Ambos flushes están dentro del mismo BEGIN implícito; el único COMMIT ocurre
-    # al final, garantizando que nunca exista un plato sin ingredientes en BD.
     nombre_display = _initcap(nombre_plato)
     try:
         plato = Plato(
@@ -1912,7 +1631,7 @@ async def crear_plato_dinamico(
             origen="llm",
         )
         db.add(plato)
-        db.flush()  # obtener plato.id — aún dentro de la transacción, sin commit
+        db.flush()
 
         for orden, (alim, gramos) in enumerate(resueltos):
             db.add(PlatoIngrediente(
@@ -1922,17 +1641,15 @@ async def crear_plato_dinamico(
                 orden=orden,
             ))
 
-        db.flush()  # validar FK antes de llamar al LLM (costoso)
+        db.flush()
 
         nombres_ings = [alim.nombre for alim, _ in resueltos]
         preparacion = await _generar_preparacion_llm(nombre_plato, nombres_ings)
         if preparacion:
             plato.preparacion = preparacion
-            # FASE 3.5 CAMBIO 4 — Log-only: verifica coherencia pasos vs tipo culinario.
-            # No bloquea el plato; detecta bugs del LLM de preparación.
             _validar_preparacion_vs_tipo(nombre_norm, preparacion)
 
-        db.commit()  # único commit — plato + ingredientes + preparacion atómicos
+        db.commit()
         db.refresh(plato)
 
         logger.info(

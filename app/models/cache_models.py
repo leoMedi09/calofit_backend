@@ -21,13 +21,12 @@ class AppCacheAlimentos(Base):
     food_normalized = Column(String(255), nullable=False, index=True)
     user_id        = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, index=True)
     alimento_id    = Column(Integer, ForeignKey("alimentos.id", ondelete="CASCADE"), nullable=True)
-    source         = Column(String(64), nullable=True)   # BD|USDA|FatSecret|Groq
+    source         = Column(String(64), nullable=True)
     raw_response   = Column(Text, nullable=True)
     hit_count      = Column(Integer, default=1, nullable=False)
     expires_at     = Column(DateTime(timezone=True), nullable=True)
     created_at     = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
-    # Relationships
     alimento = relationship("Alimento", foreign_keys=[alimento_id])
     client   = relationship("Client",   foreign_keys=[user_id])
 
@@ -55,7 +54,6 @@ class AppCachePlatos(Base):
     expires_at       = Column(DateTime(timezone=True), nullable=True)
     created_at       = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
-    # Relationships
     plato  = relationship("Plato",   foreign_keys=[plato_id])
     client = relationship("Client",  foreign_keys=[user_id])
 
@@ -87,7 +85,6 @@ class AlimentoSinResolver(Base):
     fecha_reporte      = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     fecha_resolucion   = Column(DateTime(timezone=True), nullable=True)
 
-    # Relationships
     client    = relationship("Client", foreign_keys=[user_id])
     reporter  = relationship("User",   foreign_keys=[reporter_id])
 

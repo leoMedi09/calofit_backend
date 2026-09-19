@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
 
-# Mapeo de modelos desde nombres de Groq/OpenAI a nombres de OpenRouter
 MODEL_MAPPING = {
     "groq/compound-mini": "google/gemini-2.5-flash",
     "openai/gpt-oss-20b": "meta-llama/llama-3.3-70b-instruct",
@@ -19,7 +18,6 @@ class OpenRouterClient:
     """
     def __init__(self, api_key: str, timeout: float = 180.0, **kwargs):
         self.api_key = api_key
-        # En caso de que se pase un objeto httpx.Timeout
         if isinstance(timeout, httpx.Timeout):
             self.timeout = timeout.read or 180.0
         else:
@@ -43,11 +41,9 @@ class OpenRouterCompletions:
         temperature: float = None,
         **kwargs
     ):
-        # Mapear modelo
         mapped_model = MODEL_MAPPING.get(model, model)
         logger.info(f"OpenRouter: mapeando modelo '{model}' a '{mapped_model}'")
         
-        # Limitar max_tokens para evitar errores 402 en OpenRouter (limite de saldo de desarrollo)
         if max_tokens is None:
             max_tokens = 1000
             
@@ -82,7 +78,6 @@ class OpenRouterCompletions:
                 data = resp.json()
                 content = data["choices"][0]["message"]["content"]
                 
-                # Reconstruir el objeto de respuesta esperado por el llamador
                 message_obj = SimpleNamespace(content=content)
                 choice_obj = SimpleNamespace(message=message_obj)
                 response_obj = SimpleNamespace(choices=[choice_obj])

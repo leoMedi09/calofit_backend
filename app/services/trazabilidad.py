@@ -100,7 +100,6 @@ def crear_comida_registros(
     texto_trunc = (texto_original or "")[:500] or None
     registros: list[ComidaRegistro] = []
 
-    # Usar macros individuales cuando están disponibles (plato + extras)
     alimentos_con_macros = extraccion.get("alimentos_con_macros")
     if alimentos_con_macros:
         for item in alimentos_con_macros:
@@ -120,7 +119,6 @@ def crear_comida_registros(
             db.add(reg)
             registros.append(reg)
     else:
-        # Fallback: distribución equitativa para alimentos simples (1 solo alimento)
         kcal_t = float(extraccion.get("calorias", 0) or 0)
         prot_t = float(extraccion.get("proteinas_g", 0) or 0)
         carb_t = float(extraccion.get("carbohidratos_g", 0) or 0)

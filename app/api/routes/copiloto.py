@@ -32,7 +32,6 @@ async def consultar_copiloto(
 
     try:
         if user_role == "admin":
-             # Usar Servicio de Administración Gerencial
              resultado = await admin_ia_service.consultar(
                  mensaje=request.mensaje,
                  db=db,
@@ -40,7 +39,6 @@ async def consultar_copiloto(
                  historial=request.historial
              )
         elif user_role in ["nutricionista", "nutritionist", "coach"]:
-             # Usar Servicio de Nutrición Clínica
              resultado = await nutricionista_ia_service.consultar(
                  mensaje=request.mensaje,
                  db=db,

@@ -9,7 +9,7 @@ from datetime import datetime
 
 class ValidationResult(BaseModel):
     es_valido: bool
-    confianza: int  # 0-100
+    confianza: int
     errores: List[str] = []
     advertencias: List[str] = []
     sugerencias: List[str] = []

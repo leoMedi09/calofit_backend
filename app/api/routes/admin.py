@@ -71,7 +71,6 @@ async def crear_personal_staff(
         "users", nuevo_usuario.id
     )
     
-    # ✉️ Correo de bienvenida al equipo con credenciales
     try:
         from app.services.email_service import EmailService
         EmailService.send_welcome_staff_brevo(
@@ -94,11 +93,9 @@ async def listar_personal_staff(
     """
     Lista el personal del staff (nutricionistas, entrenadores y otros administradores).
     """
-    # 1. Verificación de permisos
     check_is_admin(current_user)
     
     try:
-        # 2. Obtener usuarios filtrados (Incluyendo todas las variantes de admin y staff)
         usuarios_db = db.query(User).filter(
             User.role_name.ilike("%admin%"),
             User.id != current_user.id
@@ -112,16 +109,13 @@ async def listar_personal_staff(
             User.id != current_user.id
         ).all()
 
-        # Deduplicar por id y ordenar — sin ORDER BY PostgreSQL cambia el orden tras UPDATE
         seen = {}
         for u in usuarios_db + especialistas:
             seen[u.id] = u
         usuarios_db = sorted(seen.values(), key=lambda u: u.id)
         
-        # 3. Mapeo manual a diccionario
         res = []
         for u in usuarios_db:
-            # Calcular carga de trabajo según el rol
             role_lower = u.role_name.lower()
             count = 0
             if "nutri" in role_lower:
@@ -214,7 +208,6 @@ async def cambiar_password_staff(
         "users", usuario.id
     )
 
-    # ✉️ Notificar al staff que su contraseña fue actualizada
     try:
         from app.services.email_service import EmailService
         EmailService.send_password_updated_staff_brevo(
@@ -244,14 +237,12 @@ async def actualizar_personal_staff(
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario del staff no encontrado")
 
-    # Validar duplicación de email si se intenta cambiar
     if usuario_data.email and usuario_data.email != usuario.email:
         email_existente = db.query(User).filter(User.email == usuario_data.email).first()
         if email_existente:
             raise HTTPException(status_code=400, detail="El nuevo correo electrónico ya está registrado")
         usuario.email = usuario_data.email
 
-    # Actualizar campos opcionales
     if usuario_data.first_name:
         usuario.first_name = usuario_data.first_name
     if usuario_data.last_name_paternal:
@@ -289,7 +280,6 @@ async def alternar_estado_staff(
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario del staff no encontrado")
 
-    # Invertir estado
     nuevo_estado = not usuario.is_active
     usuario.is_active = nuevo_estado
     db.commit()
@@ -322,8 +312,6 @@ async def eliminar_personal_staff(
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario del staff no encontrado")
 
-    # Reasignar clientes si es necesario (opcional)
-    # Por ahora simplemente desvinculamos la clave foránea en Client
     if usuario.role_name and "nutri" in usuario.role_name.lower():
         clientes = db.query(Client).filter(Client.assigned_nutri_id == user_id).all()
         for c in clientes:

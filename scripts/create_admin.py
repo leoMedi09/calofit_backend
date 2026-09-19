@@ -3,14 +3,12 @@ import sys
 from sqlalchemy import create_engine, text
 from passlib.context import CryptContext
 
-# Configurar el contexto de hash compatible con el backend (Argon2)
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 def main():
-    # Obtener la URL de base de datos del entorno
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         print("❌ Error: La variable de entorno DATABASE_URL no está configurada.")
@@ -18,7 +16,6 @@ def main():
 
     print(f"🔌 Conectando a la base de datos...")
     
-    # Crear engine de SQLAlchemy
     try:
         engine = create_engine(db_url, pool_pre_ping=True)
     except Exception as e:
@@ -26,14 +23,12 @@ def main():
         sys.exit(1)
 
     admin_email = "leomedinaflores09@gmail.com"
-    # Contraseña por defecto para restablecer/crear
     admin_password = "AdminWorldLight2026!"
     hashed_pwd = hash_password(admin_password)
 
     with engine.connect() as conn:
         trans = conn.begin()
         try:
-            # 1. Asegurar que los roles básicos existan
             print("👤 Verificando roles básicos...")
             roles = [
                 (1, "admin", "Acceso total al sistema"),
@@ -42,7 +37,6 @@ def main():
                 (4, "client", "Cliente del gimnasio")
             ]
             for r_id, r_name, r_desc in roles:
-                # Verificar si el rol ya existe
                 res = conn.execute(
                     text("SELECT id FROM roles WHERE id = :rid"),
                     {"rid": r_id}
@@ -54,7 +48,6 @@ def main():
                         {"rid": r_id, "rname": r_name, "rdesc": r_desc}
                     )
             
-            # 2. Crear o actualizar el usuario administrador
             print(f"🔍 Buscando usuario administrador '{admin_email}'...")
             user = conn.execute(
                 text("SELECT id FROM users WHERE email = :email"),

@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from app.services.validators.base_validator import BaseValidator, ValidationResult
 
 
-# Reglas: por tipo de plato → ingredientes requeridos y prohibidos
 _REGLAS: Dict[str, Dict] = {
     "ceviche": {
         "requiere":  ["pescado", "limón", "lima"],
@@ -35,7 +34,6 @@ _REGLAS: Dict[str, Dict] = {
     },
 }
 
-# Mapa de categorías para coherencia general
 _CATEGORIAS: Dict[str, List[str]] = {
     "pescados":       ["pescado", "corvina", "lenguado", "caballa", "lisa", "mero", "tollo",
                        "atún", "bonito", "sardina", "anchoveta", "salpreso"],
@@ -56,10 +54,7 @@ _CATEGORIAS: Dict[str, List[str]] = {
                        "limón", "ajo", "cilantro", "perejil"],
 }
 
-# Combinaciones incoherentes culinariamente
-# Cada entrada: (patron_nombre_plato, ingrediente_incompatible, mensaje)
 _COMBOS_INCOHERENTES: List[tuple] = [
-    # Plato base + ingrediente que no tiene sentido
     ("tostada",   "plátano",       "Tostada de plátano no es una preparación estándar — considera 'plátano asado' o 'tostones'"),
     ("tostada",   "platano",       "Tostada de plátano no es una preparación estándar"),
     ("tostada",   "leche en polvo","Leche en polvo no es un ingrediente típico en tostadas"),
@@ -70,7 +65,6 @@ _COMBOS_INCOHERENTES: List[tuple] = [
     ("ensalada",  "leche en polvo","Leche en polvo no pertenece a una ensalada"),
 ]
 
-# Ingredientes que sugieren procesamiento industrial fuera de contexto
 _INGREDIENTES_PROCESADOS_FUERA_CONTEXTO = [
     "leche en polvo",
     "margarina",
@@ -79,7 +73,6 @@ _INGREDIENTES_PROCESADOS_FUERA_CONTEXTO = [
     "saborizante artificial",
 ]
 
-# Conjunto de tokens reconocidos como no-alimento / ficticios
 _TOKENS_FICTICIOS: frozenset = frozenset({
     "unicornio", "dragon", "dragón", "fenix", "fénix", "centauro", "hada", "grifo",
     "hidra", "quimera", "sirena", "goblin", "pixie", "mágico", "magico",
@@ -134,7 +127,6 @@ class SemanticValidator(BaseValidator):
         sugerencias: List[str] = []
         confianza = 100
 
-        # 1. Restricciones del cliente
         if client_id and self.db:
             r = self._restricciones_cliente(client_id, nombres)
             errores.extend(r["errores"])
@@ -142,7 +134,6 @@ class SemanticValidator(BaseValidator):
             if r["errores"]:
                 confianza -= 30
 
-        # 2. Reglas culinarias del tipo de plato
         tipo = _detectar_tipo_plato(nombre_plato)
         if tipo and tipo in _REGLAS:
             regla = _REGLAS[tipo]
@@ -159,7 +150,6 @@ class SemanticValidator(BaseValidator):
                     )
                     confianza -= 20
 
-        # 3. Combos culinariamente incoherentes
         nombre_plato_lower = nombre_plato.lower()
         nombres_ings_lower = " ".join(nombres)
         for patron_plato, ingrediente_incompat, mensaje in _COMBOS_INCOHERENTES:
@@ -170,7 +160,6 @@ class SemanticValidator(BaseValidator):
                 advertencias.append(f"Combinación incoherente: {mensaje}")
                 confianza -= 25
 
-        # 4. Ingredientes ficticios o no reconocidos
         tokens = set(t for n in nombres for t in n.split())
         ficticios = tokens & _TOKENS_FICTICIOS
         if ficticios:
@@ -184,7 +173,6 @@ class SemanticValidator(BaseValidator):
             advertencias.append("Ningún ingrediente fue reconocido en categorías alimentarias conocidas")
             confianza -= 30
 
-        # 4. Coherencia general
         if len(ingredientes) > 10:
             advertencias.append(
                 f"Plato con {len(ingredientes)} ingredientes — verifica que sea coherente"
@@ -221,7 +209,6 @@ class SemanticValidator(BaseValidator):
             raw_forbidden = [f.lower().strip() for f in (cliente.forbidden_foods or [])]
             errores: List[str] = []
 
-            # Expandir categorías: si forbidden contiene "lácteos", bloquear todos los lácteos
             forbidden_tokens: List[str] = []
             for f in raw_forbidden:
                 if f in _CATEGORIAS:
@@ -230,8 +217,6 @@ class SemanticValidator(BaseValidator):
                     forbidden_tokens.append(f)
 
             for ing in ingredientes:
-                # Coincidencia directa (forbidden token dentro del nombre del ing)
-                # O el nombre del ing dentro del token prohibido
                 if any(tok in ing or ing in tok for tok in forbidden_tokens):
                     errores.append(f"'{ing}' está en la lista prohibida del cliente")
 

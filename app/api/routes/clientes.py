@@ -35,7 +35,6 @@ def admin_crear_cliente(
     Crea un cliente solo con email + contraseña + firebase_uid.
     El cliente completará su perfil en el Onboarding al primer login.
     """
-    # Permite a Administradores y Nutricionistas crear clientes
     if not (current_staff.role and current_staff.role.name.lower() in ['admin', 'superadmin', 'nutritionist', 'nutricionista']):
         raise HTTPException(status_code=403, detail="Solo los administradores o nutricionistas pueden crear clientes")
 
@@ -44,13 +43,13 @@ def admin_crear_cliente(
         raise HTTPException(status_code=400, detail="Este correo ya está registrado")
 
     nuevo = Client(
-        first_name="",           # Se completará en el Onboarding
+        first_name="",
         last_name_paternal="",
         last_name_maternal="",
         email=data.email,
         hashed_password=security.hash_password(data.password),
         flutter_uid=data.flutter_uid,
-        gender="M",              # Valor por defecto hasta el Onboarding
+        gender="M",
         weight=0.0,
         height=0.0,
         activity_level="Sedentario",
@@ -72,24 +71,20 @@ def admin_crear_cliente(
 def registrar_cliente(cliente_data: ClientCreate, db: Session = Depends(get_db)):
     """Registra un nuevo cliente en el sistema"""
     
-    # Verificar si el email ya existe
     existe = db.query(Client).filter(Client.email == cliente_data.email).first()
     if existe:
         raise HTTPException(status_code=400, detail="El email ya está registrado")
     
-    # Verificar que assigned_coach_id existe si se proporciona
     if cliente_data.assigned_coach_id is not None:
         coach = db.query(User).filter(User.id == cliente_data.assigned_coach_id).first()
         if not coach:
             raise HTTPException(status_code=400, detail="El coach asignado no existe")
     
-    # Verificar que assigned_nutri_id existe si se proporciona
     if cliente_data.assigned_nutri_id is not None:
         nutri = db.query(User).filter(User.id == cliente_data.assigned_nutri_id).first()
         if not nutri:
             raise HTTPException(status_code=400, detail="El nutricionista asignado no existe")
     
-    # Crear el nuevo cliente con valores proporcionados o por defecto
     nuevo_cliente = Client(
         first_name=cliente_data.first_name,
         last_name_paternal=cliente_data.last_name_paternal,
@@ -113,12 +108,10 @@ def registrar_cliente(cliente_data: ClientCreate, db: Session = Depends(get_db))
         db.commit()
         db.refresh(nuevo_cliente)
         
-        # 🆕 GENERAR PLAN NUTRICIONAL AUTOMÁTICO
         print(f"🤖 Generando plan automático para {nuevo_cliente.email}...")
         from app.services.ia_service import ia_engine
         from app.models.nutricion import PlanNutricional, PlanDiario
         
-        # Calcular edad
         edad = (date.today() - nuevo_cliente.birth_date).days // 365 if nuevo_cliente.birth_date else 25
         
         plan_data = ia_engine.generar_plan_inicial_automatico({
@@ -131,25 +124,23 @@ def registrar_cliente(cliente_data: ClientCreate, db: Session = Depends(get_db))
         })
         
         if plan_data:
-            # Crear plan maestro
             plan_maestro = PlanNutricional(
                 client_id=nuevo_cliente.id,
                 genero=1 if nuevo_cliente.gender == "M" else 2,
                 edad=edad,
                 peso=nuevo_cliente.weight,
                 talla=nuevo_cliente.height,
-                nivel_actividad=1.55,  # Moderado por defecto
+                nivel_actividad=1.55,
                 objetivo=nuevo_cliente.goal,
-                es_contingencia_ia=False,  # Es plan inicial, no contingencia
+                es_contingencia_ia=False,
                 calorias_ia_base=plan_data["calorias_diarias"],
-                status="draft_ia",  # Pendiente validación
+                status="draft_ia",
                 validated_by_id=None,
                 validated_at=None
             )
             db.add(plan_maestro)
-            db.flush()  # Obtener el ID sin hacer commit completo
+            db.flush()
             
-            # Crear planes diarios
             for dia_info in plan_data["dias"]:
                 plan_dia = PlanDiario(
                     plan_id=plan_maestro.id,
@@ -168,7 +159,6 @@ def registrar_cliente(cliente_data: ClientCreate, db: Session = Depends(get_db))
             db.commit()
             print(f"✅ Plan automático creado (ID: {plan_maestro.id}) con {len(plan_data['dias'])} días")
             
-            # Retornar info completa al frontend
             return {
                 **nuevo_cliente.__dict__,
                 "plan_generado": True,
@@ -204,7 +194,6 @@ def obtener_perfil_cliente(
     print(f"🔍 ID: {current_user.id}")
     print(f"🔍 Email: {current_user.email}")
     
-    # Verificar que sea un cliente
     if not isinstance(current_user, Client):
         print(f"❌ Usuario no es Cliente, es {type(current_user).__name__}")
         raise HTTPException(
@@ -254,11 +243,9 @@ async def subir_foto_perfil_cliente(
     
     file_bytes = await file.read()
     
-    # 0. Borrar foto anterior si existe
     if current_user.profile_picture_url:
         local_storage.delete_file(current_user.profile_picture_url)
     
-    # Guardar Localmente
     relative_path = local_storage.save_file(file_bytes, file.filename)
     public_url = local_storage.get_public_url(relative_path)
     
@@ -273,15 +260,12 @@ def solicitar_codigo(email: str, db: Session = Depends(get_db)):
     if not cliente:
         raise HTTPException(status_code=404, detail="Email no encontrado")
 
-    # Generar código de 6 dígitos
     otp_code = f"{random.randint(100000, 999999)}"
     
-    # Guardar en BD con expiración (15 mins)
     cliente.verification_code = otp_code
     cliente.code_expires_at = datetime.utcnow() + timedelta(minutes=15)
     db.commit()
 
-    # Enviar por Resend
     EmailService.send_otp_email(email, otp_code)
 
     return {"message": "Código enviado exitosamente"}
@@ -290,7 +274,6 @@ def solicitar_codigo(email: str, db: Session = Depends(get_db)):
 def verificar_y_cambiar(email: str, code: str, new_password: str, db: Session = Depends(get_db)):
     print(f"🔐 Iniciando verificación y sincronización para: {email}")
     
-    # 1. Buscar al cliente y validar el código
     cliente = db.query(Client).filter(
         Client.email == email,
         Client.verification_code == code,
@@ -302,18 +285,13 @@ def verificar_y_cambiar(email: str, code: str, new_password: str, db: Session = 
         raise HTTPException(status_code=400, detail="Código inválido o expirado")
 
     try:
-        # 2. 🔥 SINCRONIZACIÓN CON FIREBASE
-        # Buscamos al usuario en Firebase por su email para obtener su UID
         try:
             fb_user = firebase_admin_auth.get_user_by_email(email)
-            # Actualizamos la contraseña en Firebase
             firebase_admin_auth.update_user(fb_user.uid, password=new_password)
             print(f"✅ Contraseña sincronizada en Firebase para UID: {fb_user.uid}")
         except Exception as fb_error:
-            # Si el usuario no existe en Firebase, solo imprimimos el error y seguimos
             print(f"⚠️ Nota: No se pudo actualizar en Firebase (posiblemente no existe): {fb_error}")
 
-        # 3. Actualizar en PostgreSQL (BD Local)
         cliente.hashed_password = security.hash_password(new_password)
         cliente.verification_code = None
         cliente.code_expires_at = None
@@ -341,7 +319,6 @@ def actualizar_perfil_cliente(
     print(f"📝 Usuario: {current_user.email}")
     print(f"📝 Datos recibidos: {cliente_data.model_dump(exclude_unset=True)}")
     
-    # Verificar que sea un cliente
     if not isinstance(current_user, Client):
         print(f"❌ Usuario no es Cliente")
         raise HTTPException(
@@ -349,27 +326,20 @@ def actualizar_perfil_cliente(
             detail="Solo clientes pueden actualizar su perfil"
         )
     
-    # Obtener cliente de la BD
     cliente = db.query(Client).filter(Client.id == current_user.id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     
-    # Verificar email único si se está cambiando
     if cliente_data.email and cliente_data.email != cliente.email:
         existe = db.query(Client).filter(Client.email == cliente_data.email).first()
         if existe:
             raise HTTPException(status_code=400, detail="El email ya está registrado")
     
-    # Actualizar solo campos proporcionados
     update_data = cliente_data.model_dump(exclude_unset=True)
 
-    # Campos que, si cambian, invalidan la validación del nutricionista
-    # (peso/talla afectan Mifflin-St Jeor; actividad/objetivo cambian el multiplicador;
-    # condiciones médicas cambian las restricciones dietéticas)
     _PLAN_TRIGGER_FIELDS    = {"activity_level", "goal", "weight", "height"}
     _PLAN_INVALIDATE_FIELDS = {"activity_level", "goal", "weight", "height", "medical_conditions"}
 
-    # Capturar valores ANTES del update para detectar cambios reales
     _old_plan_vals = {
         f: getattr(cliente, f)
         for f in _PLAN_INVALIDATE_FIELDS
@@ -382,7 +352,6 @@ def actualizar_perfil_cliente(
             setattr(cliente, field, value)
             print(f"✅ {field}: {old_value} → {value}")
 
-    # Si el usuario guarda campos clave del perfil → marcar como completo
     _COMPLETION_FIELDS = {"first_name", "weight", "height", "birth_date", "gender"}
     if _COMPLETION_FIELDS & set(update_data.keys()):
         cliente.is_profile_complete = True
@@ -392,7 +361,6 @@ def actualizar_perfil_cliente(
         db.refresh(cliente)
         print(f"✅ Perfil actualizado para cliente ID {cliente.id}")
 
-        # ── Recalculate plan macros if relevant fields changed ────────────────
         plan_recalculado = False
         if _PLAN_TRIGGER_FIELDS & set(update_data.keys()):
             try:
@@ -432,10 +400,6 @@ def actualizar_perfil_cliente(
             except Exception as _e:
                 print(f"⚠️ Recalculo de plan falló (no crítico): {_e}")
 
-        # ── Resetear validación cuando cambia cualquier campo que afecte el plan ─
-        # El nutricionista validó el plan con parámetros específicos (peso, talla,
-        # actividad, objetivo, condiciones médicas). Si alguno cambió, el plan
-        # aprobado ya no refleja la realidad del paciente y debe re-validarse.
         try:
             from app.models.nutricion import PlanNutricional
 
@@ -461,7 +425,6 @@ def actualizar_perfil_cliente(
                     )
         except Exception as _e:
             print(f"⚠️ Reset plan falló (no crítico): {_e}")
-        # ─────────────────────────────────────────────────────────────────────
 
         return {
             "message": "Perfil actualizado exitosamente",
@@ -479,7 +442,6 @@ def actualizar_perfil_cliente(
         raise HTTPException(status_code=500, detail="Error interno al actualizar el cliente")
 
 
-# ✅ NUEVO ENDPOINT: Vincular UID de Flutter con perfil de salud
 @router.put("/vincular-uid")
 def vincular_uid_flutter(
     flutter_uid: str,
@@ -502,7 +464,6 @@ def vincular_uid_flutter(
     
     print(f"🔗 Vinculando UID de Flutter: {flutter_uid} al cliente ID: {current_user.id}")
     
-    # Verificar que sea un cliente
     if not isinstance(current_user, Client):
         raise HTTPException(
             status_code=403,
@@ -510,7 +471,6 @@ def vincular_uid_flutter(
         )
     
     try:
-        # Verificar si el UID ya está vinculado a otro usuario
         existing = db.query(Client).filter(
             Client.flutter_uid == flutter_uid,
             Client.id != current_user.id
@@ -523,7 +483,6 @@ def vincular_uid_flutter(
                 detail="Este UID de Flutter ya está vinculado a otro usuario"
             )
         
-        # Actualizar el UID de Flutter del cliente actual
         current_user.flutter_uid = flutter_uid
         db.commit()
         
@@ -547,7 +506,6 @@ def vincular_uid_flutter(
         )
 
 
-# ✅ NUEVO ENDPOINT: Obtener perfil por UID de Flutter CON DIETA AUTOMÁTICA
 @router.get("/por-uid/{flutter_uid}", response_model=ClientResponseConDieta)
 def obtener_perfil_por_uid_con_dieta(
     flutter_uid: str,
@@ -563,7 +521,6 @@ def obtener_perfil_por_uid_con_dieta(
     
     print(f"🔍 Buscando perfil + dieta por UID de Flutter: {flutter_uid}")
     
-    # 🔒 VALIDACIÓN DE SEGURIDAD: Verificar que el usuario sea el dueño del perfil
     if isinstance(current_user, Client):
         if current_user.flutter_uid != flutter_uid:
             print(f"❌ Intento de acceso no autorizado: Usuario {current_user.email} intentó acceder a UID {flutter_uid}")
@@ -572,7 +529,6 @@ def obtener_perfil_por_uid_con_dieta(
                 detail="No tienes permiso para acceder a este perfil"
             )
     elif not (hasattr(current_user, 'role_name') and current_user.role_name in ['admin', 'nutritionist', 'coach']):
-        # Si no es cliente ni staff, denegar acceso
         raise HTTPException(
             status_code=403,
             detail="No autorizado para acceder a perfiles de clientes"
@@ -589,7 +545,6 @@ def obtener_perfil_por_uid_con_dieta(
     
     print(f"✅ Perfil encontrado para {cliente.first_name}")
     
-    # ✅ Calcular edad
     edad = 30  
     if cliente.birth_date:
         today = date.today()
@@ -597,7 +552,6 @@ def obtener_perfil_por_uid_con_dieta(
             (today.month, today.day) < (cliente.birth_date.month, cliente.birth_date.day)
         )
     
-    # Calcular recomendación de dieta
     recomendacion = CalculadorDietaAutomatica.calcular_recomendacion_dieta(
         peso=cliente.weight or 70,
         altura=cliente.height or 170,
@@ -607,7 +561,6 @@ def obtener_perfil_por_uid_con_dieta(
         objetivo=cliente.goal or 'Mantener peso'
     )
     
-    # Convertir recomendación a schema
     dieta_schema = RecomendacionDietaCompleta(
         calorias_diarias=recomendacion.calorias_diarias,
         proteinas_g=recomendacion.proteinas_g,
@@ -623,7 +576,6 @@ def obtener_perfil_por_uid_con_dieta(
         notas=recomendacion.notas
     )
     
-    # ✅ CREAR RESPUESTA INCLUYENDO medical_conditions
     perfil_response = ClientResponseConDieta(
         id=cliente.id,
         first_name=cliente.first_name or "",
@@ -635,7 +587,6 @@ def obtener_perfil_por_uid_con_dieta(
         weight=cliente.weight or 0.0,
         height=cliente.height or 0.0,
         gender=cliente.gender or "M",
-        # 🔥 AQUÍ ESTABA EL ERROR: Agregamos las condiciones médicas para que Flutter las vea
         medical_conditions=cliente.medical_conditions or [],
         goal=cliente.goal,
         activity_level=cliente.activity_level,
@@ -650,7 +601,6 @@ def obtener_perfil_por_uid_con_dieta(
     return perfil_response
 
 
-# ✅ MANTENER ENDPOINT ANTERIOR (sin dieta) para compatibilidad
 @router.get("/por-uid-simple/{flutter_uid}")
 def obtener_perfil_por_uid(
     flutter_uid: str,
@@ -677,7 +627,6 @@ def obtener_perfil_por_uid(
     
     print(f"🔍 Buscando perfil simple por UID de Flutter: {flutter_uid}")
     
-    # 🔒 VALIDACIÓN DE SEGURIDAD: Verificar que el usuario sea el dueño del perfil
     if isinstance(current_user, Client):
         if current_user.flutter_uid != flutter_uid:
             print(f"❌ Intento de acceso no autorizado: Usuario {current_user.email} intentó acceder a UID {flutter_uid}")
@@ -686,7 +635,6 @@ def obtener_perfil_por_uid(
                 detail="No tienes permiso para acceder a este perfil"
             )
     elif not (hasattr(current_user, 'role_name') and current_user.role_name in ['admin', 'nutritionist', 'coach']):
-        # Si no es cliente ni staff, denegar acceso
         raise HTTPException(
             status_code=403,
             detail="No autorizado para acceder a perfiles de clientes"
@@ -728,7 +676,6 @@ def obtener_perfil_por_uid(
     return perfil_response
 
 
-# ✅ Check-in Mensual
 @router.get("/checkin-status")
 def check_checkin_status(
     current_user = Depends(get_current_user),
@@ -739,29 +686,24 @@ def check_checkin_status(
     from app.models.historial import HistorialPeso
     from app.models.client import Client as ClientModel
 
-    # Solo aplica a clientes — staff no necesita check-in
     if not isinstance(current_user, ClientModel):
         return {"needed": False, "already_done": True, "days_since": 0,
                 "days_until_checkin": 30, "precision": 100, "is_new_user": False}
 
     now = get_peru_now()
 
-    # 🗓️ Primer día del mes actual (check-in mensual)
     first_of_month = now.replace(day=1).date()
 
-    # 🆕 REGLA PARA USUARIOS NUEVOS: No pedir check-in hasta después de 30 días
     now_naive = now.replace(tzinfo=None)
     created = current_user.created_at.replace(tzinfo=None) if current_user.created_at else None
     days_since_creation = (now_naive - created).days if created else 31
     is_new_user = days_since_creation < 30
 
-    # 🔍 Verificar si ya registró peso este mes
     already_done = db.query(Client).filter(
         Client.id == current_user.id,
         Client.historial_peso.any(HistorialPeso.fecha_registro >= first_of_month)
     ).first()
 
-    # Días desde el último registro (para el medidor de precisión)
     last_record = db.query(HistorialPeso).filter(
         HistorialPeso.client_id == current_user.id
     ).order_by(HistorialPeso.fecha_registro.desc()).first()
@@ -772,30 +714,25 @@ def check_checkin_status(
     else:
         days_since = days_since_creation
 
-    # Precisión basada en días sin actualizar (escala mensual)
     precision = 100
     if not is_new_user:
         if days_since > 15: precision = 70
         if days_since > 25: precision = 40
         if days_since > 35: precision = 15
     else:
-        precision = 100  # Usuarios nuevos siempre al 100% el primer mes
+        precision = 100
 
     days_until_checkin = max(0, 30 - days_since)
     
-    # Si la diferencia es de 30 días o más, needed es True
     needed = days_since >= 30
 
-    # Ver si hay actualizaciones del Nutricionista
     from app.models.nutricion import PlanNutricional
     nutri_updates_pending = False
     last_update_date = None
     
-    # 1. Chequeamos si validó la estrategia o dejó nota
     if current_user.is_strategic_guide_validated or current_user.nutri_weekly_note:
         nutri_updates_pending = True
     
-    # 2. Buscamos la fecha de la última validación de un plan nutricional
     latest_plan = db.query(PlanNutricional).filter(
         PlanNutricional.client_id == current_user.id,
         PlanNutricional.status == "validado"
@@ -818,7 +755,7 @@ def check_checkin_status(
 
 @router.post("/checkin")
 def process_checkin(
-    data: dict, # {"weight": 80.5, "height": 175, "activity_level": "Moderado"}
+    data: dict,
     current_user = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -830,14 +767,12 @@ def process_checkin(
     old_weight = cliente.weight
     new_weight = data.get("weight")
     
-    # Actualizar perfil
     cliente.weight = new_weight
     if data.get("height"):
         cliente.height = data.get("height")
     if data.get("activity_level"):
         cliente.activity_level = data.get("activity_level")
         
-    # Registrar en historial
     from app.models.historial import HistorialPeso
     from app.core.utils import get_peru_date
     nuevo_registro = HistorialPeso(
@@ -847,7 +782,6 @@ def process_checkin(
     )
     db.add(nuevo_registro)
     
-    # Lógica de alerta si el cambio es brusco (> 3% en una semana)
     alerta_staff = False
     if old_weight:
         diff_percent = abs(new_weight - old_weight) / old_weight * 100
@@ -862,7 +796,6 @@ def process_checkin(
     }
 
 
-# ✅ NUEVO ENDPOINT: Recalcular dieta cuando cambia objetivo o actividad
 @router.put("/recalcular-dieta/{cliente_id}", response_model=ClientResponseConDieta)
 def recalcular_dieta(
     cliente_id: int,
@@ -886,19 +819,16 @@ def recalcular_dieta(
     
     print(f"🔄 Recalculando dieta para cliente {cliente_id}")
     
-    # Validar que el usuario sea propietario del perfil o sea personal de staff
     if current_user.type != 'staff' and current_user.user_id != cliente_id:
         raise HTTPException(
             status_code=403,
             detail="No tienes permiso para modificar este perfil"
         )
     
-    # Obtener cliente
     cliente = db.query(Client).filter(Client.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     
-    # Actualizar objetivo y/o nivel de actividad si se proporcionan
     if objetivo:
         cliente.goal = objetivo
     if nivel_actividad:
@@ -907,7 +837,6 @@ def recalcular_dieta(
     db.commit()
     print(f"✅ Perfil actualizado: Objetivo={cliente.goal}, Actividad={cliente.activity_level}")
     
-    # Calcular edad
     edad = 30
     if cliente.birth_date:
         today = date.today()
@@ -915,19 +844,17 @@ def recalcular_dieta(
             (today.month, today.day) < (cliente.birth_date.month, cliente.birth_date.day)
         )
     
-    # Recalcular dieta con los nuevos parámetros
     print(f"🍽️  Recalculando dieta con nuevos parámetros...")
     
     recomendacion = CalculadorDietaAutomatica.calcular_recomendacion_dieta(
         peso=cliente.weight or 70,
         altura=cliente.height or 170,
         edad=edad,
-        genero=cliente.gender or 'M',  # ✅ USA EL GÉNERO REAL DEL CLIENTE
+        genero=cliente.gender or 'M',
         nivel_actividad=cliente.activity_level or 'Moderado',
         objetivo=cliente.goal or 'Mantener peso'
     )
     
-    # Convertir a schema
     dieta_schema = RecomendacionDietaCompleta(
         calorias_diarias=recomendacion.calorias_diarias,
         proteinas_g=recomendacion.proteinas_g,
@@ -943,7 +870,6 @@ def recalcular_dieta(
         notas=recomendacion.notas
     )
     
-    # Retornar perfil con nueva dieta
     perfil_response = ClientResponseConDieta(
         id=cliente.id,
         first_name=cliente.first_name or "",
@@ -967,7 +893,6 @@ def recalcular_dieta(
     return perfil_response
 
 
-# ✅ ENDPOINT: Admin cambia contraseña de un cliente
 @router.put("/{cliente_id}/cambiar-contrasena")
 def admin_cambiar_contrasena_cliente(
     cliente_id: int,
@@ -998,20 +923,17 @@ def admin_cambiar_contrasena_cliente(
     """
     print(f"🔐 Admin {current_staff.email} intentando cambiar contraseña de cliente {cliente_id}")
     
-    # Verificar que las contraseñas coinciden
     if nueva_contrasena.new_password != nueva_contrasena.confirm_password:
         raise HTTPException(
             status_code=400,
             detail="Las contraseñas no coinciden"
         )
     
-    # Obtener cliente
     cliente = db.query(Client).filter(Client.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     
     try:
-        # Actualizar contraseña
         cliente.hashed_password = security.hash_password(nueva_contrasena.new_password)
         db.commit()
         
@@ -1032,7 +954,6 @@ def admin_cambiar_contrasena_cliente(
         )
 
 
-# ✅ ENDPOINT: Admin cambia contraseña de un usuario (staff)
 @router.put("/usuario/{usuario_id}/cambiar-contrasena")
 def admin_cambiar_contrasena_usuario(
     usuario_id: int,
@@ -1060,20 +981,17 @@ def admin_cambiar_contrasena_usuario(
     """
     print(f"🔐 Admin {current_staff.email} intentando cambiar contraseña de usuario {usuario_id}")
     
-    # Verificar que las contraseñas coinciden
     if nueva_contrasena.new_password != nueva_contrasena.confirm_password:
         raise HTTPException(
             status_code=400,
             detail="Las contraseñas no coinciden"
         )
     
-    # Obtener usuario (staff)
     usuario = db.query(User).filter(User.id == usuario_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario staff no encontrado")
     
     try:
-        # Actualizar contraseña
         usuario.hashed_password = security.hash_password(nueva_contrasena.new_password)
         db.commit()
         
