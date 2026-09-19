@@ -609,7 +609,6 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
     if _tiene_consumo and "?" not in _m:
         return REGISTRAR_NUTRICION
 
-    #   todo por lista — siempre hay una conjugación nueva.
 
     try:
         modo_ia = await ia.clasificar_modo_asistente(mensaje, historial=historial)

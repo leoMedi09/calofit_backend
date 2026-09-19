@@ -62,7 +62,6 @@ _FUENTE_SCORE: dict[str, float] = {
     "FatSecret (auto-aprendido)": 0.8,
     "Groq (estimado)": 0.5,
     "manual": 1.0,
-    # Todo lo no listado (INS/CENAN, catálogo) → 1.0 (default)
 }
 
 

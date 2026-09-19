@@ -21,7 +21,6 @@ psycopg2-binary==2.9.10
 alembic==1.14.0
 
 # === Cache y Storage ===
-redis==7.4.0
 cloudinary==1.41.0
 
 # === Inteligencia Artificial y ML ===
