@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+import logging
 import os
+import time
 from app.core.database import engine, Base
 from app.core import firebase
 
@@ -45,6 +47,17 @@ with engine.connect() as connection:
         print(f"Error en migración manual: {e}")
 
 app = FastAPI(title="CaloFit - Gimnasio World Light API")
+
+
+@app.middleware("http")
+async def _log_lentas(request, call_next):
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    dt = time.perf_counter() - t0
+    if dt > 1.0 and request.url.path != "/health":
+        logging.getLogger("calofit.timing").warning("%s %s %.2fs", request.method, request.url.path, dt)
+    return response
+
 
 app.add_middleware(
     CORSMiddleware,

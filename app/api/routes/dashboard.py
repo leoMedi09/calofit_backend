@@ -15,7 +15,7 @@ router = APIRouter()
 
 
 @router.get("/clientes/{cliente_id}/resumen-diario")
-async def get_daily_summary(
+def get_daily_summary(
     cliente_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
 ):
     cliente = db.query(Client).filter(Client.id == cliente_id).first()
@@ -182,7 +182,7 @@ async def get_daily_summary(
 
 
 @router.get("/clientes/{cliente_id}/calorias-tendencia")
-async def get_calories_trend(cliente_id: int, db: Session = Depends(get_db)):
+def get_calories_trend(cliente_id: int, db: Session = Depends(get_db)):
     dias_semana = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
     resultado = []
     hoy = get_peru_date()
@@ -204,7 +204,7 @@ async def get_calories_trend(cliente_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/clientes/{cliente_id}/peso-historial")
-async def get_weight_history(cliente_id: int, db: Session = Depends(get_db)):
+def get_weight_history(cliente_id: int, db: Session = Depends(get_db)):
     registros = (
         db.query(HistorialPeso)
         .filter(HistorialPeso.client_id == cliente_id)
@@ -216,7 +216,7 @@ async def get_weight_history(cliente_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/clientes/{cliente_id}/imc-historial")
-async def get_imc_history(cliente_id: int, db: Session = Depends(get_db)):
+def get_imc_history(cliente_id: int, db: Session = Depends(get_db)):
     registros = (
         db.query(HistorialIMC)
         .filter(HistorialIMC.client_id == cliente_id)

@@ -15,7 +15,7 @@ router = APIRouter()
 
 
 @router.get("/mis-clientes", response_model=list[AlertaSaludResponse])
-async def listar_alertas_mis_clientes(
+def listar_alertas_mis_clientes(
     estado: Optional[str] = Query(None, description="Filtrar por estado: pendiente, en_proceso, atendida"),
     severidad: Optional[str] = Query(None, description="Filtrar por severidad: bajo, medio, alto"),
     db: Session = Depends(get_db),
@@ -84,7 +84,7 @@ async def listar_alertas_mis_clientes(
 
 
 @router.get("/{alerta_id}", response_model=AlertaSaludResponse)
-async def obtener_detalle_alerta(
+def obtener_detalle_alerta(
     alerta_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_staff)
 ):
     """
@@ -132,7 +132,7 @@ async def obtener_detalle_alerta(
 
 
 @router.put("/{alerta_id}/actualizar")
-async def actualizar_alerta(
+def actualizar_alerta(
     alerta_id: int,
     update_data: AlertaUpdateRequest,
     db: Session = Depends(get_db),
@@ -186,7 +186,7 @@ async def actualizar_alerta(
 
 
 @router.put("/{alerta_id}/atender")
-async def marcar_alerta_atendida(
+def marcar_alerta_atendida(
     alerta_id: int,
     atencion_data: AlertaAtenderRequest,
     db: Session = Depends(get_db),
@@ -239,7 +239,7 @@ async def marcar_alerta_atendida(
 
 
 @router.get("/cliente/{cliente_id}", response_model=list[AlertaSaludResponse])
-async def listar_alertas_por_cliente(
+def listar_alertas_por_cliente(
     cliente_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_staff)
 ):
     """

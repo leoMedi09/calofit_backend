@@ -33,7 +33,7 @@ def _log_admin_action(db: Session, admin_id: int, accion: str, descripcion: str,
 
 
 @router.post("/usuarios", response_model=UserResponse)
-async def crear_personal_staff(
+def crear_personal_staff(
     usuario_data: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """
@@ -87,7 +87,7 @@ async def crear_personal_staff(
 
 
 @router.get("/staff")
-async def listar_personal_staff(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def listar_personal_staff(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Lista el personal del staff (nutricionistas, entrenadores y otros administradores).
     """
@@ -146,7 +146,7 @@ async def listar_personal_staff(db: Session = Depends(get_db), current_user: Use
 
 
 @router.put("/clientes/{cliente_id}/asignar")
-async def asignar_especialistas_a_cliente(
+def asignar_especialistas_a_cliente(
     cliente_id: int,
     nutri_id: int = None,
     trainer_id: int = None,
@@ -196,7 +196,7 @@ async def asignar_especialistas_a_cliente(
 
 
 @router.put("/staff/{user_id}/password")
-async def cambiar_password_staff(
+def cambiar_password_staff(
     user_id: int,
     password_data: PasswordUpdate,
     db: Session = Depends(get_db),
@@ -238,7 +238,7 @@ async def cambiar_password_staff(
 
 
 @router.put("/staff/{user_id}")
-async def actualizar_personal_staff(
+def actualizar_personal_staff(
     user_id: int,
     usuario_data: UserUpdate,
     db: Session = Depends(get_db),
@@ -286,7 +286,7 @@ async def actualizar_personal_staff(
 
 
 @router.put("/staff/{user_id}/status")
-async def alternar_estado_staff(
+def alternar_estado_staff(
     user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """
@@ -313,7 +313,7 @@ async def alternar_estado_staff(
 
 
 @router.delete("/staff/{user_id}")
-async def eliminar_personal_staff(
+def eliminar_personal_staff(
     user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """
@@ -352,7 +352,7 @@ async def eliminar_personal_staff(
 
 
 @router.get("/logs")
-async def listar_logs_admin(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def listar_logs_admin(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Lista los eventos de auditoría administrativa.
     """

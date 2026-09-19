@@ -42,7 +42,7 @@ class LogSeriesRequest(BaseModel):
 
 
 @router.get("/")
-async def listar_ejercicios(
+def listar_ejercicios(
     grupo: Optional[str] = Query(default=None, description="Filtrar por grupo_padre"),
     nivel: Optional[str] = Query(default=None, description="Filtrar por nivel"),
     metrica: Optional[str] = Query(default=None, description="Filtrar por tipo_metrica"),
@@ -97,7 +97,7 @@ async def listar_ejercicios(
 
 
 @router.get("/grupos")
-async def listar_grupos(db: Session = Depends(get_db)):
+def listar_grupos(db: Session = Depends(get_db)):
     """Lista todos los grupos_padre disponibles con conteo de ejercicios."""
     rows = db.execute(
         _sql("""
@@ -139,7 +139,7 @@ async def generar_rutina(
 
 
 @router.post("/log-series")
-async def registrar_series(
+def registrar_series(
     body: LogSeriesRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -169,7 +169,7 @@ async def registrar_series(
 
 
 @router.get("/logs")
-async def historial_logs(
+def historial_logs(
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),

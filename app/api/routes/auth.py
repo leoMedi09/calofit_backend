@@ -31,7 +31,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 
 @router.post("/login")
-async def login(credentials: UserLogin, db: Session = Depends(get_db)):
+def login(credentials: UserLogin, db: Session = Depends(get_db)):
     print(f"🔐 Intento de login: {credentials.email}")
 
     requested_type = (credentials.user_type or "").strip().lower()
@@ -138,7 +138,7 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
     return response_data
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     print(f"🔍 Verificando token...")
 
     credentials_exception = HTTPException(
@@ -178,7 +178,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     return user
 
 
-async def get_current_staff(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def get_current_staff(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Token inválido o expirado",
@@ -207,7 +207,7 @@ async def get_current_staff(token: str = Depends(oauth2_scheme), db: Session = D
 
 
 @router.post("/sync-firebase-password")
-async def sync_firebase_password(request: SyncPasswordRequest, db: Session = Depends(get_db)):
+def sync_firebase_password(request: SyncPasswordRequest, db: Session = Depends(get_db)):
     """
     Sincroniza el cambio de contraseña desde Firebase a la BD local.
 
@@ -264,7 +264,7 @@ async def sync_firebase_password(request: SyncPasswordRequest, db: Session = Dep
 
 
 @router.post("/sync-password")
-async def sync_password_from_firebase(email: str, new_password: str, db: Session = Depends(get_db)):
+def sync_password_from_firebase(email: str, new_password: str, db: Session = Depends(get_db)):
     """
     Endpoint interno para sincronizar cambios de contraseña desde Firebase.
 
@@ -319,7 +319,7 @@ from app.schemas.client import ChangePassword
 
 
 @router.post("/change-password")
-async def change_password(data: ChangePassword, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+def change_password(data: ChangePassword, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Actualiza la contraseña del usuario actual en BD local y Firebase.
     """
@@ -345,7 +345,7 @@ async def change_password(data: ChangePassword, current_user=Depends(get_current
 
 
 @router.post("/verify-and-sync-password")
-async def verify_and_sync_password(credentials: UserLogin, db: Session = Depends(get_db)):
+def verify_and_sync_password(credentials: UserLogin, db: Session = Depends(get_db)):
     """
     ⭐ NUEVO ENDPOINT: Sincroniza automáticamente después del reset de Firebase.
 
@@ -422,7 +422,7 @@ async def verify_and_sync_password(credentials: UserLogin, db: Session = Depends
 
 
 @router.post("/forgot-password")
-async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """Paso 1: Solicitar código de recuperación — solo para clientes."""
     from app.models.password_reset import PasswordReset
     from app.services.email_service import EmailService
@@ -451,7 +451,7 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
 
 
 @router.post("/verify-reset-code")
-async def verify_reset_code(request: ValidateResetCodeRequest, db: Session = Depends(get_db)):
+def verify_reset_code(request: ValidateResetCodeRequest, db: Session = Depends(get_db)):
     """Paso 2: Validar que el código es correcto (sin consumir el código todavía)"""
     from app.models.password_reset import PasswordReset
 
@@ -473,7 +473,7 @@ async def verify_reset_code(request: ValidateResetCodeRequest, db: Session = Dep
 
 
 @router.post("/reset-password")
-async def reset_password(request: ValidateResetCodeRequest, db: Session = Depends(get_db)):
+def reset_password(request: ValidateResetCodeRequest, db: Session = Depends(get_db)):
     """Paso 3: Cambiar la contraseña y consumir el código"""
     from app.models.password_reset import PasswordReset
 

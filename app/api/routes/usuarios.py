@@ -34,7 +34,7 @@ async def subir_foto_perfil(
 
 
 @router.post("/registrar", status_code=201)
-async def registrar_usuario(
+def registrar_usuario(
     usuario_data: UserCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -78,7 +78,7 @@ async def registrar_usuario(
 
 
 @router.get("/me")
-async def leer_mi_perfil(current_user: User = Depends(get_current_user)):
+def leer_mi_perfil(current_user: User = Depends(get_current_user)):
     """Retorna los datos del usuario logueado usando su Token JWT"""
     return {
         "identidad": {
@@ -98,7 +98,7 @@ async def leer_mi_perfil(current_user: User = Depends(get_current_user)):
 
 
 @router.put("/me")
-async def actualizar_mi_perfil(
+def actualizar_mi_perfil(
     datos: StaffSelfUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

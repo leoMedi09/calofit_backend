@@ -169,7 +169,7 @@ async def consultar_asistente(
 
 
 @router.get("/historial")
-async def obtener_historial_chat(
+def obtener_historial_chat(
     limite: int = 30,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -237,7 +237,7 @@ class RegistroDirectoRequest(BaseModel):
 
 
 @router.post("/registrar-directo")
-async def registrar_macros_directos(
+def registrar_macros_directos(
     body: RegistroDirectoRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -394,7 +394,7 @@ async def confirmar_registro_con_consulta_id(
 
 
 @router.post("/guardar-sugerencia")
-async def guardar_sugerencia(
+def guardar_sugerencia(
     body: GuardarSugerenciaRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -472,7 +472,7 @@ async def guardar_sugerencia(
 
 
 @router.get("/mis-sugerencias")
-async def listar_sugerencias(
+def listar_sugerencias(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -509,7 +509,7 @@ async def listar_sugerencias(
 
 
 @router.patch("/sugerencia/{sugerencia_id}/completar")
-async def completar_sugerencia(
+def completar_sugerencia(
     sugerencia_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -538,7 +538,7 @@ async def completar_sugerencia(
 
 
 @router.delete("/sugerencia/{sugerencia_id}")
-async def eliminar_sugerencia(
+def eliminar_sugerencia(
     sugerencia_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -567,7 +567,7 @@ async def eliminar_sugerencia(
 
 
 @router.get("/mi-racha")
-async def mi_racha(
+def mi_racha(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):

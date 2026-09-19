@@ -18,7 +18,7 @@ class NotificacionesPrefRequest(BaseModel):
 
 
 @router.post("/fcm-token")
-async def registrar_fcm_token(
+def registrar_fcm_token(
     payload: FcmTokenRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -38,7 +38,7 @@ async def registrar_fcm_token(
 
 
 @router.put("/preferencias")
-async def actualizar_preferencia_notificaciones(
+def actualizar_preferencia_notificaciones(
     payload: NotificacionesPrefRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),

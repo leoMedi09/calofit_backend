@@ -15,7 +15,7 @@ router = APIRouter()
 
 
 @router.post("/test-ia")
-async def test_ia(request: TestIARequest, current_user=Depends(get_current_staff)):
+def test_ia(request: TestIARequest, current_user=Depends(get_current_staff)):
     """
     Endpoint de prueba para verificar el modelo de IA.
     🔒 REQUIERE AUTH STAFF: Solo personal autorizado puede probar.
@@ -41,7 +41,7 @@ async def test_ia(request: TestIARequest, current_user=Depends(get_current_staff
 
 
 @router.post("/", response_model=PlanNutricionalResponse)
-async def crear_plan_nutricional(
+def crear_plan_nutricional(
     plan_data: PlanNutricionalCreate, db: Session = Depends(get_db), current_user=Depends(get_current_staff)
 ):
     if current_user.role_name not in ["nutritionist", "admin"]:
@@ -139,7 +139,7 @@ async def crear_plan_nutricional(
 
 
 @router.post("/test-nlp-fuzzy")
-async def test_nlp_fuzzy(request: dict, current_user=Depends(get_current_staff)):
+def test_nlp_fuzzy(request: dict, current_user=Depends(get_current_staff)):
     """
     Endpoint de prueba para las nuevas funcionalidades de NLP y Fuzzy Logic.
     🔒 REQUIERE AUTH STAFF: Solo personal autorizado puede probar.
@@ -182,7 +182,7 @@ async def test_nlp_fuzzy(request: dict, current_user=Depends(get_current_staff))
 
 
 @router.get("/planes/pendientes", response_model=list[PlanNutricionalResponse])
-async def listar_planes_pendientes(db: Session = Depends(get_db), current_user=Depends(get_current_staff)):
+def listar_planes_pendientes(db: Session = Depends(get_db), current_user=Depends(get_current_staff)):
     """
     Lista los planes en estado 'draft_ia' (generados por IA)
     que pertenecen a los clientes asignados al nutricionista logueado.
@@ -198,7 +198,7 @@ async def listar_planes_pendientes(db: Session = Depends(get_db), current_user=D
 
 
 @router.put("/planes/{plan_id}/validar")
-async def validar_plan_nutricional(
+def validar_plan_nutricional(
     plan_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_staff)
 ):
     """
@@ -241,7 +241,7 @@ async def validar_plan_nutricional(
 
 
 @router.get("/recomendaciones")
-async def obtener_recomendaciones_personalizadas(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def obtener_recomendaciones_personalizadas(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """
     🧠 SISTEMA DE APRENDIZAJE: Recomendaciones personalizadas de alimentos
 

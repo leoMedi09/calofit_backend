@@ -23,7 +23,7 @@ router = APIRouter()
 
 
 @router.get("/hoy")
-async def obtener_balance_hoy(
+def obtener_balance_hoy(
     fecha: Optional[str] = Query(None, description="Fecha opcional YYYY-MM-DD para historial"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -267,7 +267,7 @@ async def obtener_balance_hoy(
 
 
 @router.get("/semanal")
-async def obtener_seguimiento_semanal(
+def obtener_seguimiento_semanal(
     semana_offset: int = Query(0, ge=-12, le=0, description="0=semana actual, -1=semana anterior, etc."),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -437,7 +437,7 @@ async def obtener_seguimiento_semanal(
 
 
 @router.get("/historico")
-async def obtener_historico(
+def obtener_historico(
     dias: int = Query(30, ge=7, le=90, description="Días de historial (7, 30 o 90)"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -545,7 +545,7 @@ async def obtener_historico(
 
 
 @router.post("/favorito/{registro_id}")
-async def toggle_favorito(
+def toggle_favorito(
     registro_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -574,7 +574,7 @@ async def toggle_favorito(
 
 
 @router.get("/favoritos")
-async def listar_favoritos(
+def listar_favoritos(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -612,7 +612,7 @@ async def listar_favoritos(
 
 
 @router.delete("/registro/{registro_id}")
-async def eliminar_registro(
+def eliminar_registro(
     registro_id: int, tipo: str, n: int = 0, db: Session = Depends(get_db), current_user=Depends(get_current_user)
 ):
     """
