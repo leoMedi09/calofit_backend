@@ -739,7 +739,7 @@ def get_nutri_stats(db: Session = Depends(get_db), current_user: User = Depends(
             "id": a.id,
             "paciente": f"{a.cliente.first_name} {a.cliente.last_name_paternal}",
             "problema": a.descripcion,
-            "urgencia": a.severidad.capitalize(),
+            "urgency": a.severidad.capitalize(),
             "tipo": a.tipo,
         }
         for a in alertas_recientes_objs
@@ -747,21 +747,18 @@ def get_nutri_stats(db: Session = Depends(get_db), current_user: User = Depends(
 
     alertas_ia = 0
     for c in pacientes:
-        if c.id in pacientes_con_alerta_db:
+        if c.id in pacientes_con_alerta_db or not c.is_profile_complete:
             continue
-        registros_recientes = [r for r in c.progreso_calorias if r.fecha >= seven_days_ago.date()]
-        adh = round((len(registros_recientes) / 7) * 100, 1)
-        prog = calcular_progreso_paciente(c)
-        alerta_data = ia_service.generar_alerta_fuzzy(adh, prog)
-        if alerta_data.get("nivel") == "Alto":
+        dias = len({r.fecha for r in c.progreso_calorias if r.fecha >= seven_days_ago.date()})
+        if dias / 7 < 0.3:
             alertas_ia += 1
             if len(alertas_formateadas) < 5:
                 alertas_formateadas.append(
                     {
                         "id": 0,
                         "paciente": f"{c.first_name} {c.last_name_paternal}",
-                        "problema": "Baja adherencia detectada por IA",
-                        "urgencia": "Media",
+                        "problema": "Sin registros esta semana" if dias == 0 else f"Solo {dias} de 7 días con registro",
+                        "urgency": "Alta" if dias == 0 else "Media",
                         "tipo": "progreso",
                     }
                 )
