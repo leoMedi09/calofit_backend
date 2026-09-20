@@ -71,6 +71,20 @@ def create_express_patient(
     """
     check_is_nutri(current_user)
 
+    _ADMIN = {"admin", "administrador"}
+    _NUTRI = {"nutricionista", "nutritionist", "nutri"}
+    rol = str(getattr(current_user, "role_name", "")).lower()
+    if rol not in _ADMIN | _NUTRI:
+        raise HTTPException(status_code=403, detail="Solo nutricionistas o administradores pueden crear clientes.")
+
+    nutri_id = client_data.assigned_nutri_id
+    if nutri_id is None and rol in _NUTRI:
+        nutri_id = current_user.id
+    if nutri_id is not None:
+        elegido = db.query(User).filter(User.id == nutri_id, User.is_active == True).first()
+        if not elegido or str(getattr(elegido, "role_name", "")).lower() not in _NUTRI:
+            raise HTTPException(status_code=400, detail="El nutricionista seleccionado no es válido.")
+
     if db.query(Client).filter(Client.email == client_data.email).first():
         raise HTTPException(status_code=400, detail="Este correo ya está registrado como paciente en el sistema.")
     if db.query(User).filter(User.email == client_data.email).first():
@@ -110,11 +124,7 @@ def create_express_patient(
         hashed_password=hashed_dni,
         flutter_uid=flutter_uid,
         is_profile_complete=False,
-        assigned_nutri_id=(
-            client_data.assigned_nutri_id
-            if str(getattr(current_user, "role_name", "")).lower() in {"admin", "administrador"}
-            else current_user.id
-        ),
+        assigned_nutri_id=nutri_id,
         assigned_coach_id=client_data.assigned_coach_id,
     )
 
@@ -841,6 +851,29 @@ def save_coach_note(
     client.coach_notes = payload.get("nota", "").strip() or None
     db.commit()
     return {"status": "ok"}
+
+
+@router.get("/nutricionistas", response_model=List[dict])
+def get_nutricionistas_list(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Nutricionistas activos, para elegir a quién asignar un cliente al crearlo."""
+    check_is_nutri(current_user)
+
+    _ROLES_NUTRI = {"nutricionista", "nutritionist", "nutri"}
+    result = []
+    for u in db.query(User).filter(User.is_active == True).all():
+        if str(getattr(u, "role_name", "")).lower() not in _ROLES_NUTRI:
+            continue
+        full_name = f"{u.first_name or ''} {u.last_name_paternal or ''}".strip()
+        result.append(
+            {
+                "id": u.id,
+                "full_name": full_name or u.email,
+                "email": u.email,
+                "profile_picture_url": getattr(u, "profile_picture_url", None),
+                "pacientes_count": len(u.clients_as_nutri),
+            }
+        )
+    return result
 
 
 @router.get("/coaches", response_model=List[dict])
