@@ -762,16 +762,20 @@ def get_nutri_stats(db: Session = Depends(get_db), current_user: User = Depends(
         dias = len({r.fecha for r in c.progreso_calorias if r.fecha >= seven_days_ago.date()})
         if dias / 7 < 0.3:
             alertas_ia += 1
-            if len(alertas_formateadas) < 5:
-                alertas_formateadas.append(
-                    {
-                        "id": 0,
-                        "paciente": f"{c.first_name} {c.last_name_paternal}",
-                        "problema": "Sin registros esta semana" if dias == 0 else f"Solo {dias} de 7 días con registro",
-                        "urgency": "Alta" if dias == 0 else "Media",
-                        "tipo": "progreso",
-                    }
-                )
+            alertas_formateadas.append(
+                {
+                    "id": 0,
+                    "paciente": f"{c.first_name} {c.last_name_paternal}",
+                    "problema": "Sin registros esta semana" if dias == 0 else f"Solo {dias} de 7 días con registro",
+                    "urgency": "Alta" if dias == 0 else "Media",
+                    "tipo": "progreso",
+                    "_dias": dias,
+                }
+            )
+
+    _rango = {"Alta": 0, "Media": 1, "Baja": 2}
+    alertas_formateadas.sort(key=lambda x: (_rango.get(x["urgency"], 3), x.get("_dias", 0)))
+    alertas_formateadas = [{k: v for k, v in x.items() if k != "_dias"} for x in alertas_formateadas[:30]]
 
     total_alertas = alertas_db_count + alertas_ia
 
