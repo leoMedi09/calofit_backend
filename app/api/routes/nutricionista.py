@@ -14,23 +14,13 @@ from datetime import datetime, timedelta
 from app.core.utils import calcular_metabolismo_basal, obtener_macros_desglosados, get_peru_now
 from app.schemas.client import StrategicGuideUpdate, ClientExpressCreate
 from app.core.security import security
+from app.core.roles import es_staff, es_admin, es_nutricionista, es_entrenador
 
 router = APIRouter()
 
-_ROLES_PERMITIDOS = {
-    "nutricionista",
-    "nutritionist",
-    "nutri",
-    "admin",
-    "administrador",
-    "coach",
-    "entrenador",
-}
-
 
 def check_is_nutri(current_user: User):
-    role = str(getattr(current_user, "role_name", "")).lower()
-    if role not in _ROLES_PERMITIDOS:
+    if not es_staff(getattr(current_user, "role_name", "")):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Operación permitida solo para Staff (Nutricionistas, Coaches o Admin)",
@@ -71,18 +61,15 @@ def create_express_patient(
     """
     check_is_nutri(current_user)
 
-    _ADMIN = {"admin", "administrador"}
-    _NUTRI = {"nutricionista", "nutritionist", "nutri"}
-    rol = str(getattr(current_user, "role_name", "")).lower()
-    if rol not in _ADMIN | _NUTRI:
+    if not (es_admin(current_user.role_name) or es_nutricionista(current_user.role_name)):
         raise HTTPException(status_code=403, detail="Solo nutricionistas o administradores pueden crear clientes.")
 
     nutri_id = client_data.assigned_nutri_id
-    if nutri_id is None and rol in _NUTRI:
+    if nutri_id is None and es_nutricionista(current_user.role_name):
         nutri_id = current_user.id
     if nutri_id is not None:
         elegido = db.query(User).filter(User.id == nutri_id, User.is_active == True).first()
-        if not elegido or str(getattr(elegido, "role_name", "")).lower() not in _NUTRI:
+        if not elegido or not es_nutricionista(elegido.role_name):
             raise HTTPException(status_code=400, detail="El nutricionista seleccionado no es válido.")
 
     if db.query(Client).filter(Client.email == client_data.email).first():
@@ -146,21 +133,24 @@ def get_assigned_patients(db: Session = Depends(get_db), current_user: User = De
     check_is_nutri(current_user)
 
     query = db.query(Client)
-    role = str(getattr(current_user, "role_name", "")).lower()
 
-    if role in {"nutricionista", "nutritionist", "nutri"}:
+    if es_nutricionista(current_user.role_name):
         query = query.filter(Client.assigned_nutri_id == current_user.id)
-    elif role in {"coach", "entrenador", "trainer"}:
+    elif es_entrenador(current_user.role_name):
         query = query.filter(
             Client.assigned_coach_id == current_user.id,
             Client.is_profile_complete == True,
         )
 
-    clients = query.options(
-        selectinload(Client.progreso_calorias),
-        selectinload(Client.historial_peso),
-        selectinload(Client.planes_nutricionales),
-    ).all()
+    clients = (
+        query.options(
+            selectinload(Client.progreso_calorias),
+            selectinload(Client.historial_peso),
+            selectinload(Client.planes_nutricionales),
+        )
+        .order_by(Client.created_at.desc().nulls_last())
+        .all()
+    )
 
     now = get_peru_now()
     seven_days_ago = now - timedelta(days=7)
@@ -241,7 +231,7 @@ def get_patient_progress(id: int, db: Session = Depends(get_db), current_user: U
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
     if (
-        current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"]
+        es_nutricionista(current_user.role_name)
         and client.assigned_nutri_id != current_user.id
     ):
         raise HTTPException(status_code=403, detail="No tienes permiso para ver este paciente")
@@ -349,7 +339,7 @@ def get_patient_daily_log(
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
     if (
-        current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"]
+        es_nutricionista(current_user.role_name)
         and client.assigned_nutri_id != current_user.id
     ):
         raise HTTPException(status_code=403, detail="No tienes permiso para ver este paciente")
@@ -475,7 +465,7 @@ def update_strategic_guide(
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
     if (
-        current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"]
+        es_nutricionista(current_user.role_name)
         and client.assigned_nutri_id != current_user.id
     ):
         raise HTTPException(status_code=403, detail="No tienes permiso para modificar este paciente")
@@ -569,7 +559,7 @@ def get_client_plan(id: int, db: Session = Depends(get_db), current_user: User =
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
     if (
-        current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"]
+        es_nutricionista(current_user.role_name)
         and client.assigned_nutri_id != current_user.id
     ):
         raise HTTPException(status_code=403, detail="No tienes permiso para ver este paciente")
@@ -617,7 +607,7 @@ def update_client_plan(
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
     if (
-        current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"]
+        es_nutricionista(current_user.role_name)
         and client.assigned_nutri_id != current_user.id
     ):
         raise HTTPException(status_code=403, detail="No tienes permiso")
@@ -686,14 +676,10 @@ def update_client_plan(
 def get_nutri_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     check_is_nutri(current_user)
 
-    _ROLES_NUTRI = {"nutricionista", "nutritionist", "nutri"}
-    _ROLES_COACH = {"coach", "entrenador", "trainer"}
-
-    role = str(getattr(current_user, "role_name", "")).lower()
     query = db.query(Client)
-    if role in _ROLES_NUTRI:
+    if es_nutricionista(current_user.role_name):
         query = query.filter(Client.assigned_nutri_id == current_user.id)
-    elif role in _ROLES_COACH:
+    elif es_entrenador(current_user.role_name):
         query = query.filter(
             Client.assigned_coach_id == current_user.id,
             Client.is_profile_complete == True,
@@ -814,7 +800,7 @@ def delete_client(id: int, db: Session = Depends(get_db), current_user: User = D
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado.")
 
-    if current_user.role_name.upper() in ["NUTRICIONISTA", "NUTRITIONIST"]:
+    if es_nutricionista(current_user.role_name):
         if client.assigned_nutri_id != current_user.id:
             raise HTTPException(status_code=403, detail="No tienes permiso para eliminar este paciente.")
 
@@ -862,10 +848,9 @@ def get_nutricionistas_list(db: Session = Depends(get_db), current_user: User = 
     """Nutricionistas activos, para elegir a quién asignar un cliente al crearlo."""
     check_is_nutri(current_user)
 
-    _ROLES_NUTRI = {"nutricionista", "nutritionist", "nutri"}
     result = []
     for u in db.query(User).filter(User.is_active == True).all():
-        if str(getattr(u, "role_name", "")).lower() not in _ROLES_NUTRI:
+        if not es_nutricionista(u.role_name):
             continue
         full_name = f"{u.first_name or ''} {u.last_name_paternal or ''}".strip()
         result.append(
@@ -885,13 +870,11 @@ def get_coaches_list(db: Session = Depends(get_db), current_user: User = Depends
     """Retorna la lista de entrenadores activos para que el nutri pueda asignarlos al crear un paciente."""
     check_is_nutri(current_user)
 
-    _ROLES_COACH = {"coach", "entrenador", "trainer"}
     coaches = db.query(User).filter(User.is_active == True).all()
 
     result = []
     for u in coaches:
-        role = str(getattr(u, "role_name", "")).lower()
-        if role not in _ROLES_COACH:
+        if not es_entrenador(u.role_name):
             continue
         full_name = f"{u.first_name or ''} {u.last_name_paternal or ''}".strip()
         result.append(

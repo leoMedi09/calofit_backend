@@ -3,6 +3,7 @@ from app.models.client import Client
 from app.models.historial import ProgresoCalorias, AlertaSalud
 from app.services.ia_service import ia_engine
 from app.core.utils import get_peru_date
+from app.core.roles import es_admin
 from datetime import datetime
 import json
 import re
@@ -22,8 +23,8 @@ class NutricionistaIAService:
 
         if entidades:
             query = db.query(Client)
-            if hasattr(current_user, "id") and current_user.role_name.lower() != "admin":
-                query = query.filter(Client.nutritionist_id == current_user.id)
+            if hasattr(current_user, "id") and not es_admin(current_user.role_name):
+                query = query.filter(Client.assigned_nutri_id == current_user.id)
 
             for entidad in entidades:
                 query = query.filter(

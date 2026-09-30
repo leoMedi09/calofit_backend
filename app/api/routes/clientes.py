@@ -17,6 +17,7 @@ import random
 from datetime import datetime, timedelta
 from app.core.firebase import auth as firebase_admin_auth
 from app.core.logging_config import get_logger
+from app.core.roles import es_staff
 
 logger = get_logger("api.clientes")
 
@@ -35,10 +36,9 @@ def admin_crear_cliente(
     Crea un cliente solo con email + contraseña + firebase_uid.
     El cliente completará su perfil en el Onboarding al primer login.
     """
-    if not (
-        current_staff.role
-        and current_staff.role.name.lower() in ["admin", "superadmin", "nutritionist", "nutricionista"]
-    ):
+    from app.core.roles import es_admin, es_nutricionista
+
+    if not (es_admin(current_staff.role_name) or es_nutricionista(current_staff.role_name)):
         raise HTTPException(status_code=403, detail="Solo los administradores o nutricionistas pueden crear clientes")
 
     existe = db.query(Client).filter(Client.email == data.email).first()
@@ -501,7 +501,7 @@ def obtener_perfil_por_uid_con_dieta(
                 f"❌ Intento de acceso no autorizado: Usuario {current_user.email} intentó acceder a UID {flutter_uid}"
             )
             raise HTTPException(status_code=403, detail="No tienes permiso para acceder a este perfil")
-    elif not (hasattr(current_user, "role_name") and current_user.role_name in ["admin", "nutritionist", "coach"]):
+    elif not (hasattr(current_user, "role_name") and es_staff(current_user.role_name)):
         raise HTTPException(status_code=403, detail="No autorizado para acceder a perfiles de clientes")
 
     cliente = db.query(Client).filter(Client.flutter_uid == flutter_uid).first()
@@ -598,7 +598,7 @@ def obtener_perfil_por_uid(flutter_uid: str, db: Session = Depends(get_db), curr
                 f"❌ Intento de acceso no autorizado: Usuario {current_user.email} intentó acceder a UID {flutter_uid}"
             )
             raise HTTPException(status_code=403, detail="No tienes permiso para acceder a este perfil")
-    elif not (hasattr(current_user, "role_name") and current_user.role_name in ["admin", "nutritionist", "coach"]):
+    elif not (hasattr(current_user, "role_name") and es_staff(current_user.role_name)):
         raise HTTPException(status_code=403, detail="No autorizado para acceder a perfiles de clientes")
 
     cliente = db.query(Client).filter(Client.flutter_uid == flutter_uid).first()

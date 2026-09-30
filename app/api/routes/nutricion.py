@@ -8,6 +8,7 @@ from typing import List, Optional, Any, Dict
 from app.api.routes.auth import get_current_staff, get_current_user
 from app.services.ia_service import ia_engine
 from app.core.logging_config import get_logger
+from app.core.roles import es_admin, es_nutricionista
 
 logger = get_logger("api.nutricion")
 
@@ -44,7 +45,7 @@ def test_ia(request: TestIARequest, current_user=Depends(get_current_staff)):
 def crear_plan_nutricional(
     plan_data: PlanNutricionalCreate, db: Session = Depends(get_db), current_user=Depends(get_current_staff)
 ):
-    if current_user.role_name not in ["nutritionist", "admin"]:
+    if not (es_admin(current_user.role_name) or es_nutricionista(current_user.role_name)):
         raise HTTPException(status_code=403, detail="No autorizado")
 
     try:
@@ -191,7 +192,7 @@ def listar_planes_pendientes(db: Session = Depends(get_db), current_user=Depends
 
     query = db.query(PlanNutricional).filter(PlanNutricional.status == "draft_ia")
 
-    if current_user.role_name == "nutritionist":
+    if es_nutricionista(current_user.role_name):
         query = query.join(Client).filter(Client.assigned_nutri_id == current_user.id)
 
     return query.all()
@@ -216,7 +217,7 @@ def validar_plan_nutricional(
 
     cliente = db.query(Client).filter(Client.id == plan.client_id).first()
 
-    if current_user.role_name == "nutritionist" and cliente.assigned_nutri_id != current_user.id:
+    if es_nutricionista(current_user.role_name) and cliente.assigned_nutri_id != current_user.id:
         raise HTTPException(status_code=403, detail="No tienes permiso para validar planes de este cliente")
 
     from app.core.utils import get_peru_now

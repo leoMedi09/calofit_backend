@@ -10,6 +10,7 @@ from app.models.client import Client
 from app.models.user import User
 from app.schemas.alerta import AlertaSaludResponse, AlertaUpdateRequest, AlertaAtenderRequest
 from app.api.routes.auth import get_current_staff
+from app.core.roles import es_admin, es_nutricionista, es_entrenador
 
 router = APIRouter()
 
@@ -31,12 +32,14 @@ def listar_alertas_mis_clientes(
     if not staff:
         raise HTTPException(status_code=404, detail="Usuario staff no encontrado")
 
-    if staff.role_name == "nutritionist":
+    if es_nutricionista(staff.role_name):
         clientes_ids = db.query(Client.id).filter(Client.assigned_nutri_id == staff.id).all()
-    elif staff.role_name == "coach":
+    elif es_entrenador(staff.role_name):
         clientes_ids = db.query(Client.id).filter(Client.assigned_coach_id == staff.id).all()
-    else:
+    elif es_admin(staff.role_name):
         clientes_ids = db.query(Client.id).all()
+    else:
+        clientes_ids = []
 
     clientes_ids = [c[0] for c in clientes_ids]
 
@@ -100,11 +103,11 @@ def obtener_detalle_alerta(
     staff = db.query(User).filter(User.email == current_user.email).first()
     cliente = db.query(Client).filter(Client.id == alerta.client_id).first()
 
-    if staff.role_name != "admin":
+    if not es_admin(staff.role_name):
         tiene_acceso = False
-        if staff.role_name == "nutritionist" and cliente.assigned_nutri_id == staff.id:
+        if es_nutricionista(staff.role_name) and cliente.assigned_nutri_id == staff.id:
             tiene_acceso = True
-        elif staff.role_name == "coach" and cliente.assigned_coach_id == staff.id:
+        elif es_entrenador(staff.role_name) and cliente.assigned_coach_id == staff.id:
             tiene_acceso = True
 
         if not tiene_acceso:
@@ -151,11 +154,11 @@ def actualizar_alerta(
     staff = db.query(User).filter(User.email == current_user.email).first()
     cliente = db.query(Client).filter(Client.id == alerta.client_id).first()
 
-    if staff.role_name != "admin":
+    if not es_admin(staff.role_name):
         tiene_acceso = False
-        if staff.role_name == "nutritionist" and cliente.assigned_nutri_id == staff.id:
+        if es_nutricionista(staff.role_name) and cliente.assigned_nutri_id == staff.id:
             tiene_acceso = True
-        elif staff.role_name == "coach" and cliente.assigned_coach_id == staff.id:
+        elif es_entrenador(staff.role_name) and cliente.assigned_coach_id == staff.id:
             tiene_acceso = True
 
         if not tiene_acceso:
@@ -205,11 +208,11 @@ def marcar_alerta_atendida(
     staff = db.query(User).filter(User.email == current_user.email).first()
     cliente = db.query(Client).filter(Client.id == alerta.client_id).first()
 
-    if staff.role_name != "admin":
+    if not es_admin(staff.role_name):
         tiene_acceso = False
-        if staff.role_name == "nutritionist" and cliente.assigned_nutri_id == staff.id:
+        if es_nutricionista(staff.role_name) and cliente.assigned_nutri_id == staff.id:
             tiene_acceso = True
-        elif staff.role_name == "coach" and cliente.assigned_coach_id == staff.id:
+        elif es_entrenador(staff.role_name) and cliente.assigned_coach_id == staff.id:
             tiene_acceso = True
 
         if not tiene_acceso:
@@ -253,11 +256,11 @@ def listar_alertas_por_cliente(
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
-    if staff.role_name != "admin":
+    if not es_admin(staff.role_name):
         tiene_acceso = False
-        if staff.role_name == "nutritionist" and cliente.assigned_nutri_id == staff.id:
+        if es_nutricionista(staff.role_name) and cliente.assigned_nutri_id == staff.id:
             tiene_acceso = True
-        elif staff.role_name == "coach" and cliente.assigned_coach_id == staff.id:
+        elif es_entrenador(staff.role_name) and cliente.assigned_coach_id == staff.id:
             tiene_acceso = True
 
         if not tiene_acceso:

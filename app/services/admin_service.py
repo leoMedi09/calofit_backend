@@ -6,6 +6,7 @@ from app.models.historial import ProgresoCalorias, AlertaSalud
 from app.models.user import User
 from app.services.ia_service import ia_engine
 from app.core.utils import get_peru_date
+from app.core.roles import es_nutricionista
 from datetime import datetime, timedelta
 
 
@@ -56,7 +57,7 @@ class AdminIAService:
 
     def _obtener_stats_sistema(self, db: Session):
         total_pacientes = db.query(Client).count()
-        total_nutris = db.query(User).filter(User.role_name == "nutricionista").count()
+        total_nutris = sum(1 for u in db.query(User).all() if es_nutricionista(u.role_name))
 
         hoy = get_peru_date()
         alertas_hoy = (
