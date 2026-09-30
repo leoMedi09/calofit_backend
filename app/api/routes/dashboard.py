@@ -10,17 +10,17 @@ from app.models.nutricion import PlanDiario, PlanNutricional
 from app.api.routes.auth import get_current_user
 from app.models.historial import ProgresoCalorias, HistorialPeso, HistorialIMC
 from app.core.utils import get_peru_date, get_peru_now, calcular_metabolismo_basal, obtener_macros_desglosados
+from app.core.roles import verificar_acceso_cliente
 
 router = APIRouter()
 
 
 @router.get("/clientes/{cliente_id}/resumen-diario")
-def get_daily_summary(
-    cliente_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
-):
+def get_daily_summary(cliente_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     cliente = db.query(Client).filter(Client.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, cliente)
 
     hoy = get_peru_date()
     progreso_hoy = (
@@ -182,7 +182,12 @@ def get_daily_summary(
 
 
 @router.get("/clientes/{cliente_id}/calorias-tendencia")
-def get_calories_trend(cliente_id: int, db: Session = Depends(get_db)):
+def get_calories_trend(cliente_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    cliente = db.query(Client).filter(Client.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, cliente)
+
     dias_semana = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
     resultado = []
     hoy = get_peru_date()
@@ -204,7 +209,12 @@ def get_calories_trend(cliente_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/clientes/{cliente_id}/peso-historial")
-def get_weight_history(cliente_id: int, db: Session = Depends(get_db)):
+def get_weight_history(cliente_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    cliente = db.query(Client).filter(Client.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, cliente)
+
     registros = (
         db.query(HistorialPeso)
         .filter(HistorialPeso.client_id == cliente_id)
@@ -216,7 +226,12 @@ def get_weight_history(cliente_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/clientes/{cliente_id}/imc-historial")
-def get_imc_history(cliente_id: int, db: Session = Depends(get_db)):
+def get_imc_history(cliente_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    cliente = db.query(Client).filter(Client.id == cliente_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, cliente)
+
     registros = (
         db.query(HistorialIMC)
         .filter(HistorialIMC.client_id == cliente_id)

@@ -17,7 +17,7 @@ import random
 from datetime import datetime, timedelta
 from app.core.firebase import auth as firebase_admin_auth
 from app.core.logging_config import get_logger
-from app.core.roles import es_staff
+from app.core.roles import es_staff, verificar_acceso_cliente
 
 logger = get_logger("api.clientes")
 
@@ -786,12 +786,10 @@ def recalcular_dieta(
 
     print(f"🔄 Recalculando dieta para cliente {cliente_id}")
 
-    if current_user.type != "staff" and current_user.user_id != cliente_id:
-        raise HTTPException(status_code=403, detail="No tienes permiso para modificar este perfil")
-
     cliente = db.query(Client).filter(Client.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, cliente)
 
     if objetivo:
         cliente.goal = objetivo

@@ -6,6 +6,7 @@ from app.core.security import security
 from app.schemas.user import UserCreate, StaffSelfUpdate
 from app.api.routes.auth import get_current_user
 from app.core.local_storage import local_storage
+from app.core.roles import verificar_admin
 from datetime import datetime
 
 router = APIRouter()
@@ -39,6 +40,8 @@ def registrar_usuario(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    verificar_admin(current_user)
+
     usuario_existente = db.query(User).filter(User.email == usuario_data.email).first()
     if usuario_existente:
         raise HTTPException(status_code=400, detail="El correo electrónico ya está registrado")
