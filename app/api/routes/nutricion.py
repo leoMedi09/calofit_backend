@@ -22,7 +22,6 @@ def test_ia(request: TestIARequest, current_user=Depends(get_current_staff)):
     🔒 REQUIERE AUTH STAFF: Solo personal autorizado puede probar.
     """
     print(f"🛠️ Testing IA por: {current_user.email}")
-    ia_engine = get_ia_engine()
     if not ia_engine:
         raise HTTPException(status_code=500, detail="Servicio de IA no disponible")
 
