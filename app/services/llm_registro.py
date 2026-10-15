@@ -1899,6 +1899,9 @@ async def respuesta_recomendacion_llm(
                 n_recomendaciones=3,
                 excluir_nombres=_excluidos_48h,
                 contexto=mensaje,
+                condiciones=list(ctx.condiciones_medicas),
+                prohibidos=list(ctx.restricciones_alimentarias),
+                momento=momento_reco,
             )
 
             from app.services.recomendador_platos import _tokens_prohibidos

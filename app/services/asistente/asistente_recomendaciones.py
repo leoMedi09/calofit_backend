@@ -105,6 +105,7 @@ class RecomendacionesHandler:
         db: Session,
         n: int = 3,
         condiciones_dieta: Optional[List[str]] = None,
+        momento: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Ejecuta el KNN Similitud Coseno con el déficit real del día.
@@ -153,6 +154,9 @@ class RecomendacionesHandler:
             grasa_faltante=deficit["grasas"],
             n_recomendaciones=n_fetch,
             excluir_nombres=excluir,
+            condiciones=list(getattr(perfil, "medical_conditions", None) or []),
+            prohibidos=list(getattr(perfil, "forbidden_foods", None) or []),
+            momento=momento,
         )
 
         if _hay_dieta:

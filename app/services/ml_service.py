@@ -14,6 +14,7 @@ import numpy as np
 from typing import List, Optional
 
 from app.core.alimentos_ux_filters import es_alimento_bloqueado_ia, nombre_coincide_exclusion
+from app.core.knn_filtros import excluir as excluir_candidato, familia as familia_alimento, nombre_legible
 from app.core.logging_config import get_logger
 from app.core.utils import get_peru_now
 
@@ -233,6 +234,9 @@ class RecomendadorAlimentosKNN:
         n_recomendaciones: int = 3,
         excluir_nombres: Optional[List[str]] = None,
         contexto: Optional[str] = None,
+        condiciones: Optional[List[str]] = None,
+        prohibidos: Optional[List[str]] = None,
+        momento: Optional[str] = None,
     ) -> list:
         """
         Recibe el déficit del día (kcal + macros) y retorna una lista de
@@ -256,7 +260,7 @@ class RecomendadorAlimentosKNN:
             if self._df is None or len(self._df) == 0:
                 return []
             vector_scaled = self._scaler.transform([vector])
-            n_pool = min(max(n_recomendaciones * 20, 60), len(self._df))
+            n_pool = min(max(n_recomendaciones * 20, 60) * (4 if (condiciones or prohibidos or momento) else 1), len(self._df))
             n_pool = max(1, n_pool)
             distancias, idx = self._knn.kneighbors(vector_scaled, n_neighbors=n_pool)
             vecs_scaled = self._scaler.transform(self._df.iloc[idx[0]][self._FEATURES_COLS].values)
@@ -269,10 +273,13 @@ class RecomendadorAlimentosKNN:
                     continue
                 if nombre_coincide_exclusion(nombre, excluir_nombres):
                     continue
+                if excluir_candidato(nombre, condiciones, prohibidos, momento):
+                    continue
                 similitud = round((1 - distancias[0][i]) * 100, 1)
                 candidatos.append(
                     {
                         "alimento": nombre,
+                        "alimento_legible": nombre_legible(nombre),
                         "calorias_100g": row["calorias_100g"],
                         "proteina_100g": row["proteina_100g"],
                         "carbohindratos_100g": row["carbohindratos_100g"],
@@ -284,6 +291,13 @@ class RecomendadorAlimentosKNN:
 
             if not candidatos:
                 return []
+            # tras filtrar se conservan los más cercanos al déficit (mismo tamaño de grupo que sin filtros)
+            candidatos.sort(key=lambda c: c["similitud"], reverse=True)
+            del candidatos[max(n_recomendaciones * 20, 60):]
+            # descarta los muy poco parecidos al déficit si hay suficientes mejores
+            _buenos = [c for c in candidatos if c["similitud"] >= 40]
+            if len(_buenos) >= n_recomendaciones:
+                candidatos = _buenos
 
             _ctx = (contexto or "").lower()
             _omega_activo = any(kw in _ctx for kw in ("omega", "marino", "pescado", "mariscos")) or grasa_faltante > 3.0
@@ -304,6 +318,7 @@ class RecomendadorAlimentosKNN:
             _rng = np.random.default_rng(_seed)
 
             vistos = set()
+            familias_usadas: set = set()
             resultados: list = []
             restantes = candidatos.copy()
             while restantes and len(resultados) < n_recomendaciones:
@@ -312,6 +327,11 @@ class RecomendadorAlimentosKNN:
                     key = c["alimento"].lower().strip()
                     if key in vistos:
                         continue
+                    if familia_alimento(c["alimento"]) in familias_usadas and any(
+                        familia_alimento(o["alimento"]) not in familias_usadas and o["similitud"] >= c["similitud"] - 12
+                        for o in restantes
+                    ):
+                        continue  # evita 3 alimentos casi iguales si hay otra familia igual de cercana al déficit
                     rel = c["similitud"] / 100.0
                     if not resultados:
                         div_penalty = 0.0
@@ -336,6 +356,7 @@ class RecomendadorAlimentosKNN:
                     probs /= probs.sum()
                     elegido = cands[_rng.choice(len(cands), p=probs)]
                 resultados.append(elegido)
+                familias_usadas.add(familia_alimento(elegido["alimento"]))
                 vistos.add(elegido["alimento"].lower().strip())
                 restantes.remove(elegido)
 
