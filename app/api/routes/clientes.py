@@ -225,6 +225,7 @@ def obtener_perfil_cliente(
         assigned_nutri_id=current_user.assigned_nutri_id,
         profile_picture_url=current_user.profile_picture_url,
         is_profile_complete=current_user.is_profile_complete,
+        notificaciones_activas=current_user.notificaciones_activas is not False,  # NULL -> activo; False se respeta
     )
     return perfil_response
 
@@ -629,6 +630,7 @@ def obtener_perfil_por_uid(flutter_uid: str, db: Session = Depends(get_db), curr
         assigned_nutri_id=cliente.assigned_nutri_id,
         profile_picture_url=cliente.profile_picture_url,
         is_profile_complete=cliente.is_profile_complete,
+        notificaciones_activas=cliente.notificaciones_activas is not False,
     )
 
     return perfil_response
