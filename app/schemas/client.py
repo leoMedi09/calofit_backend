@@ -49,6 +49,7 @@ class ClientResponse(BaseModel):
     profile_picture_url: Optional[str] = None
     is_profile_complete: bool = False
     terms_accepted_at: Optional[datetime] = None
+    notificaciones_activas: Optional[bool] = True
 
     class Config:
         from_attributes = True
