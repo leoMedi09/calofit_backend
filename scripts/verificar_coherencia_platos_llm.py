@@ -21,12 +21,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+import os
+
 try:
     from app.core.config import settings
 
     DATABASE_URL = settings.DATABASE_URL
 except Exception:
-    DATABASE_URL = "postgresql://postgres:leomeflo09@localhost:5432/BD_Calofit"
+    DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 _IGNORADOS: frozenset[str] = frozenset(
     {

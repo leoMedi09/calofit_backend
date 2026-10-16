@@ -12,10 +12,12 @@ _WEAK_DEFAULTS = {"TU_CLAVE_PARA_LEY_29733", "changeme", "secret", ""}
 
 class Settings:
     PROJECT_NAME: str = "CaloFit - Gimnasio World Light"
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:leomeflo09@localhost/BD_Calofit")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "TU_CLAVE_PARA_LEY_29733")
 
     def __init__(self) -> None:
+        if not self.DATABASE_URL:
+            warnings.warn("DATABASE_URL no está definida: configúrala en el .env o en las variables de entorno.", stacklevel=2)
         if self.SECRET_KEY in _WEAK_DEFAULTS:
             warnings.warn(
                 "SECRET_KEY usa un valor por defecto inseguro. "

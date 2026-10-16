@@ -24,9 +24,9 @@ def _get_test_db_url() -> str:
     db_url = os.getenv("DATABASE_URL", "")
 
     if "db:5432" in db_url:
-        return "postgresql://postgres:leomeflo09@db:5432/test_calofit"
+        return f"postgresql://postgres:{os.getenv('POSTGRES_PASSWORD', '')}@db:5432/test_calofit"
 
-    return "postgresql://postgres:leomeflo09@localhost:5433/test_calofit"
+    return f"postgresql://postgres:{os.getenv('POSTGRES_PASSWORD', '')}@localhost:5433/test_calofit"
 
 
 @pytest.fixture(scope="session")
