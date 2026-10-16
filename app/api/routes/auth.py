@@ -126,7 +126,7 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
     if user_type == "client" and not is_profile_complete:
         pass
 
-    expires_delta = timedelta(days=30) if credentials.remember_me else timedelta(hours=24)
+    expires_delta = timedelta(days=7) if credentials.remember_me else timedelta(hours=24)
     access_token = security.create_access_token(
         data={
             "sub": user.email,

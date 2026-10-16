@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from app.core.local_storage import local_storage
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -256,6 +257,38 @@ async def subir_foto_perfil_cliente(
 
 
 
+
+
+class EliminarCuenta(BaseModel):
+    password: str
+
+
+@router.post("/perfil/eliminar", dependencies=[Depends(limitar("eliminar_cuenta", 5, 3600))])
+def eliminar_mi_cuenta(datos: EliminarCuenta, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    """El cliente elimina su propia cuenta y todos sus datos. Exige su contraseña (un token robado no basta).
+    Primero la base (si falla, no se toca Firebase) y despues Firebase, como en el borrado por el personal."""
+    if not isinstance(current_user, Client):
+        raise HTTPException(status_code=403, detail="Solo los clientes pueden eliminar su cuenta")
+
+    from app.core.firebase_rest import password_valida_en_firebase
+    from app.services.eliminacion_cliente import eliminar_datos_cliente
+
+    if not security.verify_password(datos.password, current_user.hashed_password) and not password_valida_en_firebase(
+        current_user.email, datos.password, current_user.flutter_uid
+    ):
+        raise HTTPException(status_code=401, detail="Contraseña incorrecta")
+
+    cid, email, uid = current_user.id, current_user.email, current_user.flutter_uid
+    eliminar_datos_cliente(db, cid, email)
+    db.flush()
+    if uid:
+        try:
+            firebase_admin_auth.delete_user(uid)
+        except Exception as e:
+            logger.warning("Firebase: no se pudo eliminar el usuario (%s). La base ya fue limpiada.", type(e).__name__)
+    db.commit()
+    logger.info("cuenta eliminada id=%s", cid)
+    return {"status": "success"}
 
 
 @router.put("/perfil")

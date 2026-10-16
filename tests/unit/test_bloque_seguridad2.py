@@ -166,3 +166,30 @@ def test_limite_sin_cloudflare_usa_el_penultimo_valor():
     dep(_req("4.4.4.4"))
     with pytest.raises(HTTPException):
         dep(SimpleNamespace(headers={"x-forwarded-for": "7.7.7.7, 4.4.4.4, 10.9.9.9"}, client=None))
+
+
+# ------------------------------------------------------------------ borrado de cuenta por el propio usuario
+def test_eliminar_mi_cuenta_exige_cliente_y_contrasena_correcta(monkeypatch):
+    from app.api.routes import clientes as cl
+    from app.models.client import Client
+
+    with pytest.raises(HTTPException) as e:  # personal del gimnasio: no es Client
+        cl.eliminar_mi_cuenta(cl.EliminarCuenta(password="x"), SimpleNamespace(id=1), MagicMock())
+    assert e.value.status_code == 403
+
+    cliente = MagicMock(spec=Client)
+    cliente.id, cliente.email, cliente.flutter_uid, cliente.hashed_password = 5, "c@x.com", "uid", "h"
+    monkeypatch.setattr(cl.security, "verify_password", lambda p, h: False)
+    monkeypatch.setattr("app.core.firebase_rest.password_valida_en_firebase", lambda *a: False)
+    llamado = []
+    monkeypatch.setattr("app.services.eliminacion_cliente.eliminar_datos_cliente", lambda *a: llamado.append(a))
+    db = MagicMock()
+    with pytest.raises(HTTPException) as e:
+        cl.eliminar_mi_cuenta(cl.EliminarCuenta(password="mala"), cliente, db)
+    assert e.value.status_code == 401 and not llamado and not db.commit.called
+
+    monkeypatch.setattr(cl.security, "verify_password", lambda p, h: True)
+    borrados = []
+    monkeypatch.setattr(cl.firebase_admin_auth, "delete_user", lambda uid: borrados.append(uid))
+    assert cl.eliminar_mi_cuenta(cl.EliminarCuenta(password="ok"), cliente, db)["status"] == "success"
+    assert llamado and borrados == ["uid"] and db.commit.called
