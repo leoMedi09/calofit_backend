@@ -192,6 +192,14 @@ def iniciar_scheduler() -> BackgroundScheduler:
         id="recordatorio_diario_comidas",
         replace_existing=True,
     )
+    from app.core.limpieza_datos import limpiar_datos_vencidos
+
+    scheduler.add_job(
+        limpiar_datos_vencidos,
+        trigger=CronTrigger(hour=3, minute=0),
+        id="limpieza_datos",
+        replace_existing=True,
+    )
     scheduler.start()
     logger.info(
         "Scheduler de notificaciones iniciado (motivación 8:00, recordatorio de registro / racha 20:30, hora Perú)."

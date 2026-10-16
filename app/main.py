@@ -5,6 +5,7 @@ import logging
 import os
 import time
 from app.core.database import engine, Base
+from app.core import log_masking
 from app.core import firebase
 
 from app.models import user, client, role, historial
@@ -47,6 +48,8 @@ with engine.connect() as connection:
     except Exception as e:
         print(f"Error en migración manual: {e}")
 
+log_masking.instalar()
+
 app = FastAPI(title="CaloFit - Gimnasio World Light API")
 
 
@@ -60,12 +63,15 @@ async def _log_lentas(request, call_next):
     return response
 
 
+# La app es solo móvil (CORS no aplica a apps nativas). Solo se permiten orígenes locales para pruebas web y los de CORS_ORIGINS.
+_origenes = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origenes,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(api_router)
@@ -84,6 +90,8 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 @app.on_event("startup")
 def iniciar_notificaciones():
     from app.core.notification_scheduler import iniciar_scheduler
+
+    log_masking.instalar()  # tras crearse los handlers de uvicorn
 
     iniciar_scheduler()
 

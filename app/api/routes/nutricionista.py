@@ -14,7 +14,10 @@ from datetime import datetime, timedelta
 from app.core.utils import calcular_metabolismo_basal, obtener_macros_desglosados, get_peru_now
 from app.schemas.client import StrategicGuideUpdate, ClientExpressCreate
 from app.core.security import security
-from app.core.roles import es_staff, es_admin, es_nutricionista, es_entrenador
+import logging
+from app.core.roles import es_staff, es_admin, es_nutricionista, es_entrenador, verificar_acceso_cliente
+
+logger = logging.getLogger("api.nutricionista")
 
 router = APIRouter()
 
@@ -228,6 +231,7 @@ def get_patient_progress(id: int, db: Session = Depends(get_db), current_user: U
     client = db.query(Client).filter(Client.id == id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, client)
 
     if (
         es_nutricionista(current_user.role_name)
@@ -336,6 +340,7 @@ def get_patient_daily_log(
     client = db.query(Client).filter(Client.id == id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, client)
 
     if (
         es_nutricionista(current_user.role_name)
@@ -414,6 +419,7 @@ async def suggest_strategic_guide(
     client = db.query(Client).filter(Client.id == id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, client)
 
     date_limit = datetime.utcnow() - timedelta(days=15)
     alertas_recent = [a for a in client.alertas_salud if a.fecha_deteccion >= date_limit]
@@ -462,6 +468,7 @@ def update_strategic_guide(
     client = db.query(Client).filter(Client.id == id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, client)
 
     if (
         es_nutricionista(current_user.role_name)
@@ -507,6 +514,7 @@ def validate_plan(id: int, db: Session = Depends(get_db), current_user: User = D
     client = db.query(Client).filter(Client.id == id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, client)
 
     plan = (
         db.query(PlanNutricional)
@@ -556,6 +564,7 @@ def get_client_plan(id: int, db: Session = Depends(get_db), current_user: User =
     client = db.query(Client).filter(Client.id == id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, client)
 
     if (
         es_nutricionista(current_user.role_name)
@@ -604,6 +613,7 @@ def update_client_plan(
     client = db.query(Client).filter(Client.id == id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, client)
 
     if (
         es_nutricionista(current_user.role_name)
@@ -806,22 +816,20 @@ def delete_client(id: int, db: Session = Depends(get_db), current_user: User = D
             status_code=403, detail="Solo el nutricionista asignado o un administrador pueden eliminar este paciente."
         )
 
+    from app.services.eliminacion_cliente import eliminar_datos_cliente
+
     flutter_uid = client.flutter_uid
+    eliminar_datos_cliente(db, id, client.email)  # primero la base: si falla, no se toca Firebase
+    db.flush()
+
     if flutter_uid:
         try:
             from firebase_admin import auth as firebase_auth
 
             firebase_auth.delete_user(flutter_uid)
         except Exception as e:
-            print(f"⚠️ Firebase: No se pudo eliminar el usuario ({e}). Continuando con la BD...")
+            logger.warning("Firebase: no se pudo eliminar el usuario (%s). La base ya fue limpiada.", type(e).__name__)
 
-    planes = db.query(PlanNutricional).filter(PlanNutricional.client_id == id).all()
-    for plan in planes:
-        db.query(PlanDiario).filter(PlanDiario.plan_id == plan.id).delete(synchronize_session=False)
-    db.query(PlanNutricional).filter(PlanNutricional.client_id == id).delete(synchronize_session=False)
-    db.flush()
-
-    db.delete(client)
     db.commit()
 
     return {"status": "success", "message": f"Cliente ID {id} eliminado de la plataforma y Firebase."}
@@ -839,6 +847,7 @@ def save_coach_note(
     client = db.query(Client).filter(Client.id == id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado.")
+    verificar_acceso_cliente(current_user, client)
     client.coach_notes = payload.get("nota", "").strip() or None
     db.commit()
     return {"status": "ok"}

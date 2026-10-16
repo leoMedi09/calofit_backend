@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
+from app.core.rate_limit import limitar
 from app.models.client import Client
 from app.models.user import User
 from app.schemas.client import ClientCreate, ClientUpdate, ClientResponse, ChangePassword, AdminCreateClient
@@ -68,7 +69,7 @@ def admin_crear_cliente(
     return {"id": nuevo.id, "email": nuevo.email, "is_profile_complete": False}
 
 
-@router.post("/registrar")
+@router.post("/registrar", dependencies=[Depends(limitar("registrar", 20, 3600))])
 def registrar_cliente(cliente_data: ClientCreate, db: Session = Depends(get_db)):
     """Registra un nuevo cliente en el sistema"""
 

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from app.core.database import get_db
+from app.core.rate_limit import limitar
 from app.models.user import User
 from app.core.security import security
 from datetime import timedelta, datetime
@@ -54,7 +55,7 @@ def _hash_reset_code(code: str) -> str:
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 
-@router.post("/login")
+@router.post("/login", dependencies=[Depends(limitar("login", 30, 60))])
 def login(credentials: UserLogin, db: Session = Depends(get_db)):
 
     requested_type = (credentials.user_type or "").strip().lower()
@@ -250,7 +251,7 @@ def change_password(data: ChangePassword, current_user=Depends(get_current_user)
 
 
 
-@router.post("/forgot-password")
+@router.post("/forgot-password", dependencies=[Depends(limitar("forgot", 10, 600))])
 def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """Paso 1: Solicitar código de recuperación — solo para clientes."""
     from app.models.password_reset import PasswordReset
@@ -279,7 +280,7 @@ def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db
     return {"success": True, "message": "Si el correo está registrado, recibirás un código."}
 
 
-@router.post("/verify-reset-code")
+@router.post("/verify-reset-code", dependencies=[Depends(limitar("verify", 20, 600))])
 def verify_reset_code(request: ValidateResetCodeRequest, db: Session = Depends(get_db)):
     """Paso 2: Validar que el código es correcto (sin consumir el código todavía)"""
     from app.models.password_reset import PasswordReset
@@ -289,7 +290,7 @@ def verify_reset_code(request: ValidateResetCodeRequest, db: Session = Depends(g
     return {"success": True, "message": "Código válido"}
 
 
-@router.post("/reset-password")
+@router.post("/reset-password", dependencies=[Depends(limitar("reset", 20, 600))])
 def reset_password(request: ValidateResetCodeRequest, db: Session = Depends(get_db)):
     """Paso 3: Cambiar la contraseña y consumir el código"""
     from app.models.password_reset import PasswordReset
