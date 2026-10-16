@@ -28,7 +28,6 @@ async def consultar_copiloto(
     user_role = str(current_user.role_name).lower().strip() if hasattr(current_user, "role_name") else "client"
 
     print(f"🩺 >>> CONSULTA COPILOTO STAFF <<<")
-    print(f"🩺 Usuario: {current_user.email} | Rol: {user_role}")
 
     try:
         if user_role == "admin":

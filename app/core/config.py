@@ -25,7 +25,6 @@ class Settings:
             )
 
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GROQ_BACKUP_API_KEY: str = os.getenv("GROQ_BACKUP_API_KEY", "")
     GROQ_TIMEOUT_SEC: float = float(os.getenv("GROQ_TIMEOUT_SEC", "180"))
@@ -39,8 +38,6 @@ class Settings:
     DISABLE_FATSECRET: bool = os.getenv("DISABLE_FATSECRET", "").lower() in ("1", "true", "yes")
     DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
 
-    RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
-    SENDER_EMAIL: str = os.getenv("SENDER_EMAIL", "onboarding@resend.dev")
 
     FIREBASE_API_KEY: str = os.getenv("FIREBASE_API_KEY", "")
     FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "calofit-c8c24")

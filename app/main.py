@@ -26,6 +26,7 @@ with engine.connect() as connection:
             text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS notificaciones_activas BOOLEAN DEFAULT TRUE;")
         )
         connection.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP;"))
+        connection.execute(text("ALTER TABLE IF EXISTS password_resets ADD COLUMN IF NOT EXISTS intentos INTEGER DEFAULT 0;"))
         connection.execute(text("DROP TABLE IF EXISTS platos_recomendados CASCADE;"))
         connection.execute(
             text("""

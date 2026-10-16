@@ -5,7 +5,8 @@ from app.core.database import get_db
 from app.models.user import User
 from app.core.security import security
 from datetime import timedelta, datetime
-from app.schemas.user import UserLogin, SyncPasswordRequest, ForgotPasswordRequest, ValidateResetCodeRequest
+from app.schemas.user import UserLogin, ForgotPasswordRequest, ValidateResetCodeRequest
+from app.core.firebase_rest import password_valida_en_firebase
 from app.core.config import settings
 from jose import JWTError, jwt
 from app.models.client import Client
@@ -16,6 +17,29 @@ from app.core.logging_config import get_logger
 logger = get_logger("api.auth")
 
 router = APIRouter()
+
+
+MAX_INTENTOS_CODIGO = 5
+
+
+def _validar_codigo_reset(db, email: str, code: str):
+    """Devuelve el codigo vigente del correo si coincide. Solo vale el ultimo codigo pedido y cada fallo
+    cuenta: al 5.o intento fallido el codigo queda inutilizable (hay que pedir otro)."""
+    from app.models.password_reset import PasswordReset
+
+    record = (
+        db.query(PasswordReset)
+        .filter(PasswordReset.email == email, PasswordReset.is_used == False)
+        .order_by(PasswordReset.created_at.desc())
+        .first()
+    )
+    if not record or record.is_expired() or (record.intentos or 0) >= MAX_INTENTOS_CODIGO:
+        raise HTTPException(status_code=400, detail="Código inválido o expirado")
+    if not hmac.compare_digest(record.reset_code, _hash_reset_code(code)):
+        record.intentos = (record.intentos or 0) + 1
+        db.commit()
+        raise HTTPException(status_code=400, detail="Código inválido o expirado")
+    return record
 
 
 def _hash_reset_code(code: str) -> str:
@@ -32,7 +56,6 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 @router.post("/login")
 def login(credentials: UserLogin, db: Session = Depends(get_db)):
-    print(f"🔐 Intento de login: {credentials.email}")
 
     requested_type = (credentials.user_type or "").strip().lower()
     has_firebase = bool(credentials.firebase_uid and credentials.firebase_uid.strip())
@@ -77,26 +100,20 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
                 print(f"✅ Staff encontrado por alias: {alias}")
 
     if not user:
-        print(f"❌ Usuario no encontrado: {credentials.email} (Tipo buscado: {user_type})")
         raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
 
     password_correct_locally = security.verify_password(credentials.password, user.hashed_password)
 
     if not password_correct_locally:
-        print(f"⚠️ Contraseña local incorrecta para {user.email}")
-
-        if credentials.firebase_uid:
-            print("✅ Validando mediante Firebase UID enviado desde el móvil...")
+        # Contrasena cambiada en Firebase y desincronizada: se acepta SOLO si Firebase la confirma para ese uid.
+        uid_ok = isinstance(user, Client) and (not user.flutter_uid or user.flutter_uid == credentials.firebase_uid)
+        if uid_ok and credentials.firebase_uid and password_valida_en_firebase(user.email, credentials.password, credentials.firebase_uid):
             user.hashed_password = security.hash_password(credentials.password)
-
-            if hasattr(user, "flutter_uid") and not user.flutter_uid:
+            if not user.flutter_uid:
                 user.flutter_uid = credentials.firebase_uid
-
             db.commit()
             db.refresh(user)
-            print("🔄 Hash sincronizado localmente con éxito.")
         else:
-            print(f"❌ Login fallido: Clave incorrecta y sin UID de respaldo.")
             raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
 
     if credentials.firebase_uid and hasattr(user, "flutter_uid"):
@@ -106,7 +123,7 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
 
     is_profile_complete = getattr(user, "is_profile_complete", True)
     if user_type == "client" and not is_profile_complete:
-        print(f"⚠️ AVISO (EXPRESS): El perfil de {user.email} está incompleto. Se permite login para onboarding.")
+        pass
 
     expires_delta = timedelta(days=30) if credentials.remember_me else timedelta(hours=24)
     access_token = security.create_access_token(
@@ -134,12 +151,11 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
             "is_profile_complete": is_profile_complete,
         },
     }
-    print(f"📦 Respuesta de login: {response_data}")
+    logger.info("login ok id=%s tipo=%s", user.id, user_type)
     return response_data
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    print(f"🔍 Verificando token...")
 
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -149,20 +165,16 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        print(f"🔍 Payload del token: {payload}")
 
         email: str = payload.get("sub")
         user_id: int = payload.get("user_id")
         user_type: str = payload.get("type")
 
-        print(f"🔍 Email: {email}, User ID: {user_id}, Tipo: {user_type}")
 
         if email is None or user_type is None or user_id is None:
-            print(f"❌ Token incompleto")
             raise credentials_exception
 
     except JWTError as e:
-        print(f"❌ Error decodificando token: {e}")
         raise credentials_exception
 
     if user_type == "staff":
@@ -174,7 +186,6 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         print(f"❌ Usuario no encontrado en BD")
         raise credentials_exception
 
-    print(f"✅ Usuario autenticado: {user.email} (ID: {user.id})")
     return user
 
 
@@ -206,113 +217,8 @@ def get_current_staff(token: str = Depends(oauth2_scheme), db: Session = Depends
     return user
 
 
-@router.post("/sync-firebase-password")
-def sync_firebase_password(request: SyncPasswordRequest, db: Session = Depends(get_db)):
-    """
-    Sincroniza el cambio de contraseña desde Firebase a la BD local.
-
-    FLUJO:
-    1. Usuario hace click en link de reset de Firebase
-    2. Firebase cambia su contraseña en la nube
-    3. Flutter llama a este endpoint con el nuevo password
-    4. Backend actualiza la BD local
-    5. Próximo login funciona correctamente
-
-    Body JSON esperado:
-    {
-        "email": "usuario@example.com",
-        "new_password": "nueva_contraseña_123"
-    }
-    """
-    print(f"🔄 Sincronizando contraseña desde Firebase para: {request.email}")
-
-    try:
-        user = db.query(Client).filter(Client.email == request.email).first()
-        user_type = "client"
-
-        if not user:
-            user = db.query(User).filter(User.email == request.email).first()
-            user_type = "staff"
-
-        if not user:
-            print(f"❌ Usuario no encontrado: {request.email}")
-            raise HTTPException(status_code=404, detail=f"Usuario no encontrado: {request.email}")
-
-        print(f"🔐 Hash anterior: {user.hashed_password[:30]}...")
-
-        user.hashed_password = security.hash_password(request.new_password)
-        db.commit()
-
-        print(f"🔐 Hash nuevo: {user.hashed_password[:30]}...")
-        print(f"✅ Contraseña sincronizada desde Firebase para: {request.email}")
-
-        return {
-            "success": True,
-            "message": "Contraseña sincronizada exitosamente",
-            "user_email": request.email,
-            "user_type": user_type,
-            "synced_at": datetime.utcnow().isoformat(),
-            "can_login": True,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        logger.error("Error sincronizando contraseña: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Error sincronizando la contraseña")
 
 
-@router.post("/sync-password")
-def sync_password_from_firebase(email: str, new_password: str, db: Session = Depends(get_db)):
-    """
-    Endpoint interno para sincronizar cambios de contraseña desde Firebase.
-
-    Esto se usa cuando:
-    1. Usuario cambia contraseña en Firebase (web)
-    2. El webhook de Firebase notifica al backend
-    3. Este endpoint actualiza la BD local
-
-    Parámetros:
-    - email: Email del usuario
-    - new_password: Nueva contraseña (ya verificada en Firebase)
-
-    ⚠️ En producción, este endpoint debe:
-    - Requerir token/clave de Firebase
-    - Validar la solicitud viene de Firebase Cloud Functions
-    - Estar protegido con IP whitelist
-    """
-    print(f"🔄 Sincronizando contraseña desde Firebase para: {email}")
-
-    user = db.query(Client).filter(Client.email == email).first()
-    user_type = "client"
-
-    if not user:
-        user = db.query(User).filter(User.email == email).first()
-        user_type = "staff"
-
-    if not user:
-        print(f"❌ Usuario no encontrado: {email}")
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-
-    try:
-        old_hash = user.hashed_password[:10] + "***"
-        user.hashed_password = security.hash_password(new_password)
-        db.commit()
-
-        print(f"✅ Contraseña sincronizada desde Firebase para: {email}")
-        print(f"   Hash anterior: {old_hash}")
-
-        return {
-            "message": "Contraseña sincronizada exitosamente desde Firebase",
-            "user_email": email,
-            "user_type": user_type,
-            "synced_at": datetime.utcnow().isoformat(),
-        }
-    except Exception as e:
-        db.rollback()
-        logger.error("Error sincronizando contraseña: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Error sincronizando la contraseña")
 
 
 from app.schemas.client import ChangePassword
@@ -323,7 +229,6 @@ def change_password(data: ChangePassword, current_user=Depends(get_current_user)
     """
     Actualiza la contraseña del usuario actual en BD local y Firebase.
     """
-    print(f"🔐 Cambiando contraseña para: {current_user.email}")
 
     if data.new_password != data.confirm_password:
         raise HTTPException(status_code=400, detail="Las contraseñas no coinciden")
@@ -334,7 +239,6 @@ def change_password(data: ChangePassword, current_user=Depends(get_current_user)
             from app.core.firebase import auth as firebase_admin_auth
 
             firebase_admin_auth.update_user(flutter_uid, password=data.new_password)
-            print(f"✅ Firebase Password Sync OK")
         except Exception as e:
             print(f"⚠️ Error sincronizando con Firebase: {e}")
 
@@ -344,81 +248,6 @@ def change_password(data: ChangePassword, current_user=Depends(get_current_user)
     return {"message": "Contraseña actualizada correctamente"}
 
 
-@router.post("/verify-and-sync-password")
-def verify_and_sync_password(credentials: UserLogin, db: Session = Depends(get_db)):
-    """
-    ⭐ NUEVO ENDPOINT: Sincroniza automáticamente después del reset de Firebase.
-
-    Este endpoint verifica la contraseña contra Firebase y sincroniza a BD.
-
-    FLUJO:
-    1. Usuario reseta contraseña en Firebase
-    2. Flutter llama a este endpoint con las credenciales
-    3. Endpoint sincroniza la contraseña a BD
-    4. Retorna JWT para que pueda loguearse inmediatamente
-
-    Body esperado:
-    {
-        "email": "usuario@example.com",
-        "password": "nueva_contraseña_123",
-        "remember_me": false
-    }
-    """
-    print(f"🔄 Verificando y sincronizando contraseña para: {credentials.email}")
-
-    try:
-        user = db.query(Client).filter(Client.email == credentials.email).first()
-        user_type = "client"
-
-        if not user:
-            user = db.query(User).filter(User.email == credentials.email).first()
-            user_type = "staff"
-
-        if not user:
-            print(f"❌ Usuario no encontrado: {credentials.email}")
-            raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
-
-        print(f"📝 Actualizando contraseña en BD para: {credentials.email}")
-        user.hashed_password = security.hash_password(credentials.password)
-        db.commit()
-
-        access_token_expires = timedelta(hours=24)
-        access_token = security.create_access_token(data={"sub": credentials.email}, expires_delta=access_token_expires)
-
-        response_data = {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "synced": True,
-            "sync_message": "Contraseña sincronizada desde Firebase",
-        }
-
-        if user_type == "client" and hasattr(user, "flutter_uid"):
-            response_data["firebase_uid"] = user.flutter_uid
-            response_data["user_info"] = {
-                "id": user.id,
-                "email": user.email,
-                "name": user.first_name,
-                "type": user_type,
-                "profile_picture_url": user.profile_picture_url,
-            }
-        else:
-            response_data["user_info"] = {
-                "id": user.id,
-                "email": user.email,
-                "name": user.first_name,
-                "type": user_type,
-                "profile_picture_url": user.profile_picture_url,
-            }
-
-        print(f"✅ Contraseña sincronizada y JWT generado para: {credentials.email}")
-        return response_data
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        logger.error("Error verificando y sincronizando: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Error procesando la solicitud")
 
 
 @router.post("/forgot-password")
@@ -455,19 +284,7 @@ def verify_reset_code(request: ValidateResetCodeRequest, db: Session = Depends(g
     """Paso 2: Validar que el código es correcto (sin consumir el código todavía)"""
     from app.models.password_reset import PasswordReset
 
-    record = (
-        db.query(PasswordReset)
-        .filter(
-            PasswordReset.email == request.email,
-            PasswordReset.reset_code == _hash_reset_code(request.reset_code),
-            PasswordReset.is_used == False,
-        )
-        .order_by(PasswordReset.created_at.desc())
-        .first()
-    )
-
-    if not record or record.is_expired():
-        raise HTTPException(status_code=400, detail="Código inválido o expirado")
+    record = _validar_codigo_reset(db, request.email, request.reset_code)
 
     return {"success": True, "message": "Código válido"}
 
@@ -477,19 +294,7 @@ def reset_password(request: ValidateResetCodeRequest, db: Session = Depends(get_
     """Paso 3: Cambiar la contraseña y consumir el código"""
     from app.models.password_reset import PasswordReset
 
-    record = (
-        db.query(PasswordReset)
-        .filter(
-            PasswordReset.email == request.email,
-            PasswordReset.reset_code == _hash_reset_code(request.reset_code),
-            PasswordReset.is_used == False,
-        )
-        .order_by(PasswordReset.created_at.desc())
-        .first()
-    )
-
-    if not record or record.is_expired():
-        raise HTTPException(status_code=400, detail="Código inválido o expirado")
+    record = _validar_codigo_reset(db, request.email, request.reset_code)
 
     user = db.query(User).filter(User.email == request.email).first()
     if user:
@@ -503,7 +308,6 @@ def reset_password(request: ValidateResetCodeRequest, db: Session = Depends(get_
                     from app.core.firebase import auth as firebase_admin_auth
 
                     firebase_admin_auth.update_user(client.flutter_uid, password=request.new_password)
-                    print(f"✅ Firebase password actualizado para {client.email}")
                 except Exception as firebase_err:
                     print(f"⚠️ No se pudo actualizar Firebase (BD local sí actualizada): {firebase_err}")
         else:

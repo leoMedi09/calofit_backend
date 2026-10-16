@@ -109,7 +109,6 @@ def registrar_cliente(cliente_data: ClientCreate, db: Session = Depends(get_db))
         db.commit()
         db.refresh(nuevo_cliente)
 
-        print(f"🤖 Generando plan automático para {nuevo_cliente.email}...")
         from app.services.ia_service import ia_engine
         from app.models.nutricion import PlanNutricional, PlanDiario
 
@@ -195,7 +194,6 @@ def obtener_perfil_cliente(
     print(f"🔍 GET /clientes/perfil llamado")
     print(f"🔍 Tipo de usuario: {type(current_user).__name__}")
     print(f"🔍 ID: {current_user.id}")
-    print(f"🔍 Email: {current_user.email}")
 
     if not isinstance(current_user, Client):
         print(f"❌ Usuario no es Cliente, es {type(current_user).__name__}")
@@ -255,58 +253,8 @@ async def subir_foto_perfil_cliente(
     return {"message": "Foto de perfil actualizada exitosamente", "url": public_url}
 
 
-@router.post("/forgot-password/request")
-def solicitar_codigo(email: str, db: Session = Depends(get_db)):
-    cliente = db.query(Client).filter(Client.email == email).first()
-    if not cliente:
-        raise HTTPException(status_code=404, detail="Email no encontrado")
-
-    otp_code = f"{random.randint(100000, 999999)}"
-
-    cliente.verification_code = otp_code
-    cliente.code_expires_at = datetime.utcnow() + timedelta(minutes=15)
-    db.commit()
-
-    EmailService.send_otp_email(email, otp_code)
-
-    return {"message": "Código enviado exitosamente"}
 
 
-@router.post("/forgot-password/verify")
-def verificar_y_cambiar(email: str, code: str, new_password: str, db: Session = Depends(get_db)):
-    print(f"🔐 Iniciando verificación y sincronización para: {email}")
-
-    cliente = (
-        db.query(Client)
-        .filter(Client.email == email, Client.verification_code == code, Client.code_expires_at > datetime.utcnow())
-        .first()
-    )
-
-    if not cliente:
-        print(f"❌ Código inválido o expirado para {email}")
-        raise HTTPException(status_code=400, detail="Código inválido o expirado")
-
-    try:
-        try:
-            fb_user = firebase_admin_auth.get_user_by_email(email)
-            firebase_admin_auth.update_user(fb_user.uid, password=new_password)
-            print(f"✅ Contraseña sincronizada en Firebase para UID: {fb_user.uid}")
-        except Exception as fb_error:
-            print(f"⚠️ Nota: No se pudo actualizar en Firebase (posiblemente no existe): {fb_error}")
-
-        cliente.hashed_password = security.hash_password(new_password)
-        cliente.verification_code = None
-        cliente.code_expires_at = None
-
-        db.commit()
-        print(f"✅ Contraseña actualizada en PostgreSQL para: {email}")
-
-        return {"success": True, "message": "Tu contraseña ha sido actualizada en todo el sistema"}
-
-    except Exception as e:
-        db.rollback()
-        print(f"❌ Error crítico en el proceso: {e}")
-        raise HTTPException(status_code=500, detail="Error interno al actualizar la contraseña")
 
 
 @router.put("/perfil")
@@ -316,8 +264,6 @@ def actualizar_perfil_cliente(
     """Actualiza el perfil del cliente autenticado"""
 
     print(f"📝 PUT /clientes/perfil llamado")
-    print(f"📝 Usuario: {current_user.email}")
-    print(f"📝 Datos recibidos: {cliente_data.model_dump(exclude_unset=True)}")
 
     if not isinstance(current_user, Client):
         print(f"❌ Usuario no es Cliente")
@@ -451,7 +397,6 @@ def vincular_uid_flutter(flutter_uid: str, current_user=Depends(get_current_user
     ```
     """
 
-    print(f"🔗 Vinculando UID de Flutter: {flutter_uid} al cliente ID: {current_user.id}")
 
     if not isinstance(current_user, Client):
         raise HTTPException(status_code=403, detail="Solo clientes pueden vincular UID de Flutter")
@@ -494,13 +439,9 @@ def obtener_perfil_por_uid_con_dieta(
     🔒 REQUIERE AUTENTICACIÓN: Solo el dueño del perfil puede acceder.
     """
 
-    print(f"🔍 Buscando perfil + dieta por UID de Flutter: {flutter_uid}")
 
     if isinstance(current_user, Client):
         if current_user.flutter_uid != flutter_uid:
-            print(
-                f"❌ Intento de acceso no autorizado: Usuario {current_user.email} intentó acceder a UID {flutter_uid}"
-            )
             raise HTTPException(status_code=403, detail="No tienes permiso para acceder a este perfil")
     elif not (hasattr(current_user, "role_name") and es_staff(current_user.role_name)):
         raise HTTPException(status_code=403, detail="No autorizado para acceder a perfiles de clientes")
@@ -508,7 +449,6 @@ def obtener_perfil_por_uid_con_dieta(
     cliente = db.query(Client).filter(Client.flutter_uid == flutter_uid).first()
 
     if not cliente:
-        print(f"❌ No se encontró cliente con UID: {flutter_uid}")
         raise HTTPException(status_code=404, detail="Perfil de salud no encontrado para este UID de Flutter")
 
     print(f"✅ Perfil encontrado para {cliente.first_name}")
@@ -591,13 +531,9 @@ def obtener_perfil_por_uid(flutter_uid: str, db: Session = Depends(get_db), curr
     ```
     """
 
-    print(f"🔍 Buscando perfil simple por UID de Flutter: {flutter_uid}")
 
     if isinstance(current_user, Client):
         if current_user.flutter_uid != flutter_uid:
-            print(
-                f"❌ Intento de acceso no autorizado: Usuario {current_user.email} intentó acceder a UID {flutter_uid}"
-            )
             raise HTTPException(status_code=403, detail="No tienes permiso para acceder a este perfil")
     elif not (hasattr(current_user, "role_name") and es_staff(current_user.role_name)):
         raise HTTPException(status_code=403, detail="No autorizado para acceder a perfiles de clientes")
@@ -605,7 +541,6 @@ def obtener_perfil_por_uid(flutter_uid: str, db: Session = Depends(get_db), curr
     cliente = db.query(Client).filter(Client.flutter_uid == flutter_uid).first()
 
     if not cliente:
-        print(f"❌ No se encontró cliente con UID: {flutter_uid}")
         raise HTTPException(status_code=404, detail="Perfil de salud no encontrado para este UID de Flutter")
 
     print(f"✅ Perfil encontrado para {cliente.first_name}")
@@ -887,7 +822,6 @@ def admin_cambiar_contrasena_cliente(
     }
     ```
     """
-    print(f"🔐 Admin {current_staff.email} intentando cambiar contraseña de cliente {cliente_id}")
 
     if nueva_contrasena.new_password != nueva_contrasena.confirm_password:
         raise HTTPException(status_code=400, detail="Las contraseñas no coinciden")
@@ -900,7 +834,6 @@ def admin_cambiar_contrasena_cliente(
         cliente.hashed_password = security.hash_password(nueva_contrasena.new_password)
         db.commit()
 
-        print(f"✅ Contraseña de cliente {cliente.email} actualizada por admin {current_staff.email}")
 
         return {
             "message": "Contraseña del cliente actualizada exitosamente",
@@ -939,7 +872,6 @@ def admin_cambiar_contrasena_usuario(
     }
     ```
     """
-    print(f"🔐 Admin {current_staff.email} intentando cambiar contraseña de usuario {usuario_id}")
 
     if nueva_contrasena.new_password != nueva_contrasena.confirm_password:
         raise HTTPException(status_code=400, detail="Las contraseñas no coinciden")
@@ -952,7 +884,6 @@ def admin_cambiar_contrasena_usuario(
         usuario.hashed_password = security.hash_password(nueva_contrasena.new_password)
         db.commit()
 
-        print(f"✅ Contraseña de usuario {usuario.email} actualizada por admin {current_staff.email}")
 
         return {
             "message": "Contraseña del usuario actualizada exitosamente",

@@ -12,6 +12,7 @@ class PasswordReset(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     is_used = Column(Boolean, default=False)
     used_at = Column(DateTime, nullable=True)
+    intentos = Column(Integer, default=0)
 
     def is_expired(self) -> bool:
         return datetime.utcnow() > self.created_at + timedelta(minutes=15)

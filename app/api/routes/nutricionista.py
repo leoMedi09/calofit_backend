@@ -87,7 +87,6 @@ def create_express_patient(
             email=client_data.email, password=client_data.dni, display_name="Paciente CaloFit"
         )
         flutter_uid = fb_user.uid
-        print(f"✅ Usuario Firebase creado exitosamente para express: {flutter_uid}")
 
     except Exception as e:
         error_msg = str(e)
@@ -800,9 +799,12 @@ def delete_client(id: int, db: Session = Depends(get_db), current_user: User = D
     if not client:
         raise HTTPException(status_code=404, detail="Cliente no encontrado.")
 
-    if es_nutricionista(current_user.role_name):
-        if client.assigned_nutri_id != current_user.id:
-            raise HTTPException(status_code=403, detail="No tienes permiso para eliminar este paciente.")
+    if not es_admin(current_user.role_name) and not (
+        es_nutricionista(current_user.role_name) and client.assigned_nutri_id == current_user.id
+    ):
+        raise HTTPException(
+            status_code=403, detail="Solo el nutricionista asignado o un administrador pueden eliminar este paciente."
+        )
 
     flutter_uid = client.flutter_uid
     if flutter_uid:
@@ -810,7 +812,6 @@ def delete_client(id: int, db: Session = Depends(get_db), current_user: User = D
             from firebase_admin import auth as firebase_auth
 
             firebase_auth.delete_user(flutter_uid)
-            print(f"🔥 Firebase: Usuario {flutter_uid} eliminado correctamente.")
         except Exception as e:
             print(f"⚠️ Firebase: No se pudo eliminar el usuario ({e}). Continuando con la BD...")
 

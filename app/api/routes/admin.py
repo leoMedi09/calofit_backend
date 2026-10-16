@@ -232,7 +232,7 @@ def cambiar_password_staff(
             admin_name=f"{current_user.first_name} {current_user.last_name_paternal}".strip(),
         )
     except Exception as e:
-        print(f"⚠️ No se pudo notificar el cambio de contraseña al staff: {e}")
+        pass
 
     return {"message": f"Contraseña de {usuario.first_name} actualizada correctamente"}
 

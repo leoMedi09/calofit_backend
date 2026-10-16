@@ -21,7 +21,6 @@ def test_ia(request: TestIARequest, current_user=Depends(get_current_staff)):
     Endpoint de prueba para verificar el modelo de IA.
     🔒 REQUIERE AUTH STAFF: Solo personal autorizado puede probar.
     """
-    print(f"🛠️ Testing IA por: {current_user.email}")
     if not ia_engine:
         raise HTTPException(status_code=500, detail="Servicio de IA no disponible")
 
@@ -150,7 +149,6 @@ def test_nlp_fuzzy(request: dict, current_user=Depends(get_current_staff)):
     - adherencia_pct: int (0-100) - Porcentaje de adherencia
     - progreso_pct: int (0-100) - Porcentaje de progreso
     """
-    print(f"🛠️ Testing NLP/Fuzzy por: {current_user.email}")
     try:
         comando_texto = request.get("comando_texto")
         perfil_usuario = request.get("perfil_usuario", {})
