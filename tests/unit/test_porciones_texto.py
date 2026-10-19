@@ -39,3 +39,14 @@ def test_bebidas_en_ml():
         ]
     )
     assert r == ["1 vaso de Limonada (~250 ml)", "Chicha morada — 250 ml", "Arroz con leche — 200 g", "1 taza de Avena (~250 g)"]
+
+
+def test_quita_etiqueta_de_restriccion_salvo_productos():
+    from app.services.llm_registro import _quitar_etiqueta_restriccion as q
+
+    assert q("Caldo de gallina sin lácteos") == "Caldo de gallina"
+    assert q("Para tu cena te propongo Caldo de gallina sin lácteos (~280 kcal) y Seco sin gluten (~600 kcal).") == (
+        "Para tu cena te propongo Caldo de gallina (~280 kcal) y Seco (~600 kcal)."
+    )
+    assert q("Pan sin gluten con palta") == "Pan sin gluten con palta"
+    assert q("Queso sin lactosa") == "Queso sin lactosa"

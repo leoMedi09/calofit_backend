@@ -740,6 +740,27 @@ def _unidad(nombre: str, medida: str) -> str:
     return "ml" if _RX_RECIPIENTE_LIQUIDO.search(medida) or primera in _BEBIDAS else "g"
 
 
+_RX_ETIQUETA_RESTRICCION = re.compile(
+    r"\s+(?:sin|libre\s+de)\s+(?:l[aá]cteos?|lactosa|gluten|az[uú]car(?:es)?)\b", re.I
+)
+# productos donde la etiqueta SI informa (pan sin gluten, queso sin lactosa...); en un caldo o un seco sobra
+_PRODUCTOS_CON_ETIQUETA = frozenset(
+    "pan pasta fideo fideos galleta galletas torta keke tostada tostadas leche yogur yogurt queso helado "
+    "mantequilla postre flan batido licuado".split()
+)
+
+
+def _quitar_etiqueta_restriccion(s: str) -> str:
+    """El modelo a veces escribe la restriccion en el nombre del plato ("Caldo de gallina sin lácteos"). Se quita
+    salvo que el plato sea un producto donde la etiqueta aporta ("Pan sin gluten")."""
+
+    def _sub(m: re.Match) -> str:
+        previas = re.findall(r"\w+", s[: m.start()].lower())[-4:]
+        return m.group(0) if any(p in _PRODUCTOS_CON_ETIQUETA for p in previas) else ""
+
+    return _RX_ETIQUETA_RESTRICCION.sub(_sub, s)
+
+
 def _porciones_texto(alimentos: list, factor: float = 1.0) -> list[str]:
     """Una linea corta por alimento con los gramos que se usaron para calcular ("Avena — 250 g").
     Es solo transparencia para el usuario: no cambia ningun macro. Los gramos llevan los mismos topes de kcal
@@ -2429,6 +2450,9 @@ async def respuesta_recomendacion_llm(
         + (f"{_knn_candidatos_txt.strip()}\n" if _knn_candidatos_txt else "")
         + (f"{_balance_meta_txt.strip()}\n" if _balance_meta_txt else "")
         + f'\n{perfil.first_name} dice: "{mensaje[:300]}"\n\n'
+        f"NOMBRES: escribe cada plato con su nombre normal y conocido. PROHIBIDO agregar al nombre etiquetas "
+        f"como 'sin lácteos', 'sin lactosa', 'sin gluten' o 'light' — cumple la restricción con los ingredientes, "
+        f"no con el nombre (un caldo de gallina ya no lleva lácteos: no lo etiquetes).\n"
         f"PRIMERO escribe esta línea exacta con los datos:\n"
         f"PLATOS: Nombre1 (~XXX kcal,P:Xg,C:Yg,G:Zg)|Nombre2 (~XXX kcal,P:Xg,C:Yg,G:Zg)|Nombre3 (~XXX kcal,P:Xg,C:Yg,G:Zg)\n"
         f"LUEGO en la siguiente línea escribe UNA oración natural y corta con los 3 nombres y sus kcal (ej: 'Para tu cena te propongo X (~300 kcal), Y (~400 kcal) y Z (~350 kcal).'). SIN introducciones largas."
@@ -2484,7 +2508,8 @@ async def respuesta_recomendacion_llm(
                 texto = texto.rstrip() + " " + sufijo + "."
             else:
                 texto = texto.rstrip(".").rstrip() + ": " + sufijo + "."
-        return texto, platos
+        platos = [(_quitar_etiqueta_restriccion(p[0]).strip(), *p[1:]) for p in platos]
+        return _quitar_etiqueta_restriccion(texto), platos
 
     from app.services.recomendador_platos import _tokens_prohibidos, _detectar_dieta_en_mensaje
 
