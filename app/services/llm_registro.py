@@ -742,8 +742,9 @@ def _unidad(nombre: str, medida: str) -> str:
 
 def _calculo_ejercicio_texto(duracion: float, peso_kg: float, met: float, duracion_supuesta: bool) -> str:
     """Datos con los que se calcularon las kcal quemadas: kcal = MET × 3.5 × peso / 200 × minutos."""
-    t = f"{duracion:g} min · {peso_kg:g} kg · MET {met:g}"
-    return t + " (duración supuesta)" if duracion_supuesta else t
+    nivel = "ligera" if met < 3 else ("moderada" if met < 6 else "intensa")  # cortes del Compendium/ACSM
+    t = f"{duracion:g} min · tu peso {peso_kg:.0f} kg · intensidad {nivel} (MET {met:g})"
+    return t + " · duración supuesta" if duracion_supuesta else t
 
 
 _RX_ETIQUETA_RESTRICCION = re.compile(
