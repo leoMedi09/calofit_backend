@@ -55,6 +55,6 @@ def test_quita_etiqueta_de_restriccion_salvo_productos():
 def test_calculo_ejercicio_texto():
     from app.services.llm_registro import _calculo_ejercicio_texto as c
 
-    assert c(15.0, 86.9057, 5.0, False) == "15 min · tu peso 87 kg · intensidad moderada (MET 5)"
-    assert c(15.0, 70.0, 8.0, True) == "15 min · tu peso 70 kg · intensidad intensa (MET 8) · duración supuesta"
-    assert "ligera" in c(10.0, 70.0, 2.5, False)
+    assert c(15.0, 86.9057, 5.0, False) == "15 min · 87 kg · MET 5 (esfuerzo moderado)"
+    assert c(15.0, 70.0, 8.0, True) == "15 min · 70 kg · MET 8 (esfuerzo alto) · duración supuesta"
+    assert "ligero" in c(10.0, 70.0, 2.5, False)
