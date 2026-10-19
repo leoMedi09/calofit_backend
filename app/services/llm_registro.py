@@ -722,6 +722,26 @@ PREGUNTAS SIMPLES: máximo 2-3 oraciones directas.
 )
 
 
+def _porciones_texto(alimentos: list, factor: float = 1.0) -> list[str]:
+    """Una linea corta por alimento con los gramos que se usaron para calcular ("Avena — 250 g").
+    Es solo transparencia para el usuario: no cambia ningun macro. Los gramos llevan los mismos topes de kcal
+    que los macros; si el modelo no dio porcion, ese alimento se omite."""
+    lineas = []
+    for a in alimentos or []:
+        nombre = (a.get("nombre") or "").strip()
+        try:
+            gramos = float(a.get("porcion_g") or 0)
+            q = int(float(a.get("cantidad", 1) or 1))
+        except (TypeError, ValueError):
+            continue
+        if not nombre or gramos <= 0:
+            continue
+        q = max(1, min(q, 10))
+        total = round(gramos * q * factor)
+        lineas.append(f"{q} × {nombre} — {total} g" if q > 1 else f"{nombre} — {total} g")
+    return lineas
+
+
 async def registrar_comida_llm(
     mensaje: str,
     perfil,
@@ -754,6 +774,7 @@ async def registrar_comida_llm(
                     {
                         "nombre": nombre_cached,
                         "es_real": True,
+                        "porcion_g": cached.get("porcion_g"),
                         "kcal": kcal,
                         "prot_g": prot,
                         "carb_g": carb,
@@ -1203,6 +1224,7 @@ async def registrar_comida_llm(
         return f"{n} ×{q}" if q > 1 else n
 
     nombres = [_nombre_con_cantidad(a) for a in alimentos_raw if a.get("nombre")]
+    porciones = _porciones_texto(alimentos_raw, _factor_cap * _factor_momento * _factor_sopa)
 
     from app.core.utils import get_peru_date
 
@@ -1367,6 +1389,7 @@ async def registrar_comida_llm(
             "grasas_g": grasa,
             "alerta_dieta": alerta_dieta,
             "advertencia_cantidad": advertencia_cantidad,
+            "porciones": porciones,
         },
         "balance_actualizado": {
             "consumido": round(consumido, 1),
