@@ -13,3 +13,17 @@ def test_porciones_texto():
     )
     assert r == ["Avena — 125 g", "2 × Huevo — 55 g"]
     assert _porciones_texto(None) == []
+
+
+def test_medida_del_modelo_o_del_usuario():
+    r = _porciones_texto(
+        [
+            {"nombre": "Ají de gallina", "porcion_g": 150, "cantidad": 1, "medida": "1 plato"},
+            {"nombre": "Pollo", "porcion_g": 200, "cantidad": 1, "medida": "200 g"},
+            {"nombre": "Huevo", "porcion_g": 55, "cantidad": 2, "medida": "2 unidades"},
+            {"nombre": "Palta", "porcion_g": 60, "cantidad": 1, "medida": "1 porción", "_factor_acumulado": 0.5},
+        ]
+    )
+    assert r == ["1 plato de Ají de gallina (~150 g)", "Pollo — 200 g", "2 unidades de Huevo (~110 g)", "Palta — 60 g"]
+    # con topes de kcal aplicados, la medida del modelo ya no es fiable
+    assert _porciones_texto([{"nombre": "Arroz", "porcion_g": 300, "medida": "1 plato"}], factor=0.5) == ["Arroz — 150 g"]

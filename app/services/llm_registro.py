@@ -332,6 +332,7 @@ Responde SOLO con JSON válido (sin explicaciones, sin texto extra):
       "es_real": true,
       "cantidad": número,
       "porcion_g": número,
+      "medida": "texto corto",
       "kcal": número,
       "prot_g": número,
       "carb_g": número,
@@ -342,6 +343,10 @@ Responde SOLO con JSON válido (sin explicaciones, sin texto extra):
   "carb_total": número,
   "grasa_total": número
 }}
+"medida" = la cantidad considerada, dicha como una persona (solo el número y la unidad, SIN el nombre
+del alimento): "1 plato", "1 taza", "1 vaso", "2 unidades", "1 porción", "1 rebanada". Si el usuario
+indicó la cantidad, cópiala tal cual la dijo ("200 g", "2 panes", "medio plato"). Si no la indicó, pon
+la medida que supusiste al calcular. "porcion_g" sigue siendo el peso equivalente de UNA unidad.
 
 ━━ DISAMBIGUACIÓN CRÍTICA (NUNCA CONFUNDIR) ━━
 - "palta" = aguacate/avocado (NUNCA confundir con "pata" = extremidad/pierna).
@@ -738,7 +743,15 @@ def _porciones_texto(alimentos: list, factor: float = 1.0) -> list[str]:
             continue
         q = max(1, min(q, 10))
         total = round(gramos * q * factor)
-        lineas.append(f"{q} × {nombre} — {total} g" if q > 1 else f"{nombre} — {total} g")
+        medida = str(a.get("medida") or "").strip()[:30]
+        # la medida del modelo solo vale si no se reescalo el gramaje despues (topes, fraccion, gramos del usuario)
+        if medida and factor == 1 and a.get("_factor_acumulado", 1.0) == 1.0:
+            if re.search(r"\d\s*(g|gr|grs|gramos?|ml|kg|l)\b", medida, re.I):
+                lineas.append(f"{nombre} — {medida}")  # el usuario ya dio el peso: no se repite
+            else:
+                lineas.append(f"{medida} de {nombre} (~{total} g)")
+        else:
+            lineas.append(f"{q} × {nombre} — {total} g" if q > 1 else f"{nombre} — {total} g")
     return lineas
 
 
