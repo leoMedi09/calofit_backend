@@ -740,6 +740,12 @@ def _unidad(nombre: str, medida: str) -> str:
     return "ml" if _RX_RECIPIENTE_LIQUIDO.search(medida) or primera in _BEBIDAS else "g"
 
 
+def _calculo_ejercicio_texto(duracion: float, peso_kg: float, met: float, duracion_supuesta: bool) -> str:
+    """Datos con los que se calcularon las kcal quemadas: kcal = MET × 3.5 × peso / 200 × minutos."""
+    t = f"{duracion:g} min · {peso_kg:g} kg · MET {met:g}"
+    return t + " (duración supuesta)" if duracion_supuesta else t
+
+
 _RX_ETIQUETA_RESTRICCION = re.compile(
     r"\s+(?:sin|libre\s+de)\s+(?:l[aá]cteos?|lactosa|gluten|az[uú]car(?:es)?)\b", re.I
 )
@@ -1556,8 +1562,10 @@ async def registrar_ejercicio_llm(
             met = float(datos.get("met", 5.0) or 5.0)
             _met_determinista = False
         intensidad = "Alta" if met >= 8 else ("Media" if met >= 5 else "Baja")
+        _dur_supuesta = False
         if duracion <= 0 and series:
             duracion = round(int(series) * 5, 1)
+            _dur_supuesta = True
         kcal_formula = round(met * peso_kg * 3.5 / 200 * duracion, 1)
         kcal_llm = round(float(datos.get("kcal_quemadas", 0) or 0), 1)
         if _met_determinista:
@@ -1594,7 +1602,14 @@ async def registrar_ejercicio_llm(
             detalle = f"{series}×{reps}" if series and reps else f"{int(duracion)}min"
             if peso_ej and series and reps:
                 detalle += f" @{peso_ej}kg"
-            ejercicios_guardados.append({"nombre": nombre, "kcal": kcal, "detalle": detalle})
+            ejercicios_guardados.append(
+                {
+                    "nombre": nombre,
+                    "kcal": kcal,
+                    "detalle": detalle,
+                    "calculo": _calculo_ejercicio_texto(duracion, peso_kg, met, _dur_supuesta),
+                }
+            )
         except Exception as e:
             logger.error("[llm_registro] Error guardando ejercicio %s: %s", nombre, e)
 
@@ -1656,6 +1671,10 @@ async def registrar_ejercicio_llm(
             "duracion_min": sum(float(e.get("duracion_min", 0) or 0) for e in ejercicios_raw),
             "series": ejercicios_guardados[0]["detalle"] if len(ejercicios_guardados) == 1 else None,
             "ejercicios": ejercicios_guardados,
+            "calculos": [
+                f"{e['nombre']}: {e['calculo']}" if len(ejercicios_guardados) > 1 else e["calculo"]
+                for e in ejercicios_guardados
+            ],
         },
         "balance_actualizado": {"quemado": quemado_total},
         "mensaje": msg,

@@ -50,3 +50,10 @@ def test_quita_etiqueta_de_restriccion_salvo_productos():
     )
     assert q("Pan sin gluten con palta") == "Pan sin gluten con palta"
     assert q("Queso sin lactosa") == "Queso sin lactosa"
+
+
+def test_calculo_ejercicio_texto():
+    from app.services.llm_registro import _calculo_ejercicio_texto as c
+
+    assert c(15.0, 82.0, 5.0, False) == "15 min · 82 kg · MET 5"
+    assert c(15.0, 82.5, 3.5, True) == "15 min · 82.5 kg · MET 3.5 (duración supuesta)"
