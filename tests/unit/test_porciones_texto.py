@@ -27,3 +27,15 @@ def test_medida_del_modelo_o_del_usuario():
     assert r == ["1 plato de Ají de gallina (~150 g)", "Pollo — 200 g", "2 unidades de Huevo (~110 g)", "Palta — 60 g"]
     # con topes de kcal aplicados, la medida del modelo ya no es fiable
     assert _porciones_texto([{"nombre": "Arroz", "porcion_g": 300, "medida": "1 plato"}], factor=0.5) == ["Arroz — 150 g"]
+
+
+def test_bebidas_en_ml():
+    r = _porciones_texto(
+        [
+            {"nombre": "Limonada", "porcion_g": 250, "medida": "1 vaso"},
+            {"nombre": "Chicha morada", "porcion_g": 250},
+            {"nombre": "Arroz con leche", "porcion_g": 200},
+            {"nombre": "Avena", "porcion_g": 250, "medida": "1 taza"},
+        ]
+    )
+    assert r == ["1 vaso de Limonada (~250 ml)", "Chicha morada — 250 ml", "Arroz con leche — 200 g", "1 taza de Avena (~250 g)"]

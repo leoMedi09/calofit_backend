@@ -727,6 +727,19 @@ PREGUNTAS SIMPLES: máximo 2-3 oraciones directas.
 )
 
 
+_RX_RECIPIENTE_LIQUIDO = re.compile(r"\b(vaso|botella|jarra|copa|litro|litros)\b", re.I)
+_BEBIDAS = frozenset(
+    "jugo limonada chicha emoliente gaseosa refresco agua leche café cafe té te infusión infusion batido licuado "
+    "cerveza vino pisco smoothie horchata mate kombucha caldo sopa".split()
+)
+
+
+def _unidad(nombre: str, medida: str) -> str:
+    """ml para bebidas y caldos, g para el resto (decide por el recipiente o por la primera palabra del nombre)."""
+    primera = (nombre.split() or [""])[0].lower()
+    return "ml" if _RX_RECIPIENTE_LIQUIDO.search(medida) or primera in _BEBIDAS else "g"
+
+
 def _porciones_texto(alimentos: list, factor: float = 1.0) -> list[str]:
     """Una linea corta por alimento con los gramos que se usaron para calcular ("Avena — 250 g").
     Es solo transparencia para el usuario: no cambia ningun macro. Los gramos llevan los mismos topes de kcal
@@ -749,9 +762,10 @@ def _porciones_texto(alimentos: list, factor: float = 1.0) -> list[str]:
             if re.search(r"\d\s*(g|gr|grs|gramos?|ml|kg|l)\b", medida, re.I):
                 lineas.append(f"{nombre} — {medida}")  # el usuario ya dio el peso: no se repite
             else:
-                lineas.append(f"{medida} de {nombre} (~{total} g)")
+                lineas.append(f"{medida} de {nombre} (~{total} {_unidad(nombre, medida)})")
         else:
-            lineas.append(f"{q} × {nombre} — {total} g" if q > 1 else f"{nombre} — {total} g")
+            u = _unidad(nombre, medida)
+            lineas.append(f"{q} × {nombre} — {total} {u}" if q > 1 else f"{nombre} — {total} {u}")
     return lineas
 
 
