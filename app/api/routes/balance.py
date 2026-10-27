@@ -336,6 +336,9 @@ def obtener_seguimiento_semanal(
         )
 
     hoy = get_peru_date()
+    from app.services.asistente.asistente_plan import obtener_macros_plan_hoy
+
+    _vivo_hoy = obtener_macros_plan_hoy(cliente, db)
     lunes_actual = hoy - timedelta(days=hoy.isoweekday() - 1)
     lunes_semana = lunes_actual + timedelta(weeks=semana_offset)
     dias_labels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
@@ -353,6 +356,8 @@ def obtener_seguimiento_semanal(
         dia_label = dias_labels[dia_iso - 1]
 
         kcal_objetivo = plan_por_dia.get(dia_iso, objetivo_base)
+        if fecha_dia == hoy and _vivo_hoy:
+            kcal_objetivo = _vivo_hoy["calorias_dia"]  # hoy: la misma meta que el chat y el dashboard
 
         progreso = (
             db.query(ProgresoCalorias)
@@ -468,6 +473,9 @@ def obtener_historico(
 
     hoy = get_peru_date()
     desde = hoy - timedelta(days=dias - 1)
+    from app.services.asistente.asistente_plan import obtener_macros_plan_hoy
+
+    _vivo_hoy = obtener_macros_plan_hoy(cliente, db)
 
     plan_activo = (
         db.query(PlanNutricional)
@@ -500,6 +508,8 @@ def obtener_historico(
         fecha_d = desde + timedelta(days=i)
         dia_iso = fecha_d.isoweekday()
         kcal_obj = plan_por_dia.get(dia_iso, objetivo_base)
+        if fecha_d == hoy and _vivo_hoy:
+            kcal_obj = _vivo_hoy["calorias_dia"]  # hoy: la misma meta que el chat y el dashboard
         prog = progreso_idx.get(fecha_d)
         calorias_data.append(
             {
