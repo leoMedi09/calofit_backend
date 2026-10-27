@@ -88,6 +88,15 @@ def obtener_balance_hoy(
             )
         )
 
+    from app.services.asistente.asistente_plan import obtener_macros_plan_hoy
+
+    _vivo = obtener_macros_plan_hoy(cliente, db)  # misma meta que el chat y el dashboard
+    if _vivo:
+        objetivo_diario = _vivo["calorias_dia"]
+        proteinas_objetivo = _vivo["proteinas_g"]
+        carbohidratos_objetivo = _vivo["carbohidratos_g"]
+        grasas_objetivo = _vivo["grasas_g"]
+
     from app.core.utils import get_peru_date
 
     if fecha:
@@ -713,6 +722,11 @@ def eliminar_registro(
                 objetivo = plan_hoy.calorias_dia
             else:
                 objetivo = plan_activo.calorias_ia_base or 2000
+        from app.services.asistente.asistente_plan import obtener_macros_plan_hoy
+
+        _vivo = obtener_macros_plan_hoy(cliente, db)
+        if _vivo:
+            objetivo = _vivo["calorias_dia"]
         calorias_restantes = objetivo - (progreso_hoy.calorias_consumidas or 0) + (progreso_hoy.calorias_quemadas or 0)
 
         nuevo_balance = {

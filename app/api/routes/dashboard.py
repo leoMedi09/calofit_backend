@@ -43,6 +43,10 @@ def get_daily_summary(cliente_id: int, db: Session = Depends(get_db), current_us
         .first()
     )
 
+    from app.services.asistente.asistente_plan import obtener_macros_plan_hoy
+
+    vivo = obtener_macros_plan_hoy(cliente, db)  # misma meta que el chat (recalcula si el plan no esta validado)
+
     plan_objetivo = None
     if plan_maestro:
         dia_semana = get_peru_now().isoweekday()
@@ -54,10 +58,14 @@ def get_daily_summary(cliente_id: int, db: Session = Depends(get_db), current_us
         )
 
         if plan_hoy:
-            total_macros_kcal = (plan_hoy.proteinas_g * 4) + (plan_hoy.carbohidratos_g * 4) + (plan_hoy.grasas_g * 9)
-            pct_p = round((plan_hoy.proteinas_g * 4 / total_macros_kcal) * 100) if total_macros_kcal > 0 else 0
-            pct_c = round((plan_hoy.carbohidratos_g * 4 / total_macros_kcal) * 100) if total_macros_kcal > 0 else 0
-            pct_g = round((plan_hoy.grasas_g * 9 / total_macros_kcal) * 100) if total_macros_kcal > 0 else 0
+            _cal = vivo["calorias_dia"] if vivo else plan_hoy.calorias_dia
+            _p = vivo["proteinas_g"] if vivo else plan_hoy.proteinas_g
+            _c = vivo["carbohidratos_g"] if vivo else plan_hoy.carbohidratos_g
+            _g = vivo["grasas_g"] if vivo else plan_hoy.grasas_g
+            total_macros_kcal = (_p * 4) + (_c * 4) + (_g * 9)
+            pct_p = round((_p * 4 / total_macros_kcal) * 100) if total_macros_kcal > 0 else 0
+            pct_c = round((_c * 4 / total_macros_kcal) * 100) if total_macros_kcal > 0 else 0
+            pct_g = round((_g * 9 / total_macros_kcal) * 100) if total_macros_kcal > 0 else 0
 
             estado_api = plan_maestro.status
             estado_frontend = "validado" if estado_api == "validado" else "provisional_ia"
@@ -85,10 +93,10 @@ def get_daily_summary(cliente_id: int, db: Session = Depends(get_db), current_us
                 mensaje_cliente = "🤖 Plan generado por IA. Tu nutricionista lo revisará pronto."
 
             plan_objetivo = {
-                "calorias_objetivo": plan_hoy.calorias_dia,
-                "proteinas_objetivo_g": plan_hoy.proteinas_g,
-                "carbohidratos_objetivo_g": plan_hoy.carbohidratos_g,
-                "grasas_objetivo_g": plan_hoy.grasas_g,
+                "calorias_objetivo": _cal,
+                "proteinas_objetivo_g": _p,
+                "carbohidratos_objetivo_g": _c,
+                "grasas_objetivo_g": _g,
                 "distribucion": {"proteina_pct": pct_p, "carbohidratos_pct": pct_c, "grasas_pct": pct_g},
                 "validado": plan_maestro.status == "validado",
                 "plan_id": plan_maestro.id,
@@ -110,6 +118,20 @@ def get_daily_summary(cliente_id: int, db: Session = Depends(get_db), current_us
 
         peso = float(cliente.weight or 70.0)
         macros = obtener_macros_desglosados(calorias_fallback, cliente.goal, peso)
+        if vivo:
+            _tot = vivo["proteinas_g"] * 4 + vivo["carbohidratos_g"] * 4 + vivo["grasas_g"] * 9
+            macros = {
+                **macros,
+                "calorias": vivo["calorias_dia"],
+                "proteinas_g": vivo["proteinas_g"],
+                "carbohidratos_g": vivo["carbohidratos_g"],
+                "grasas_g": vivo["grasas_g"],
+                "pct": {
+                    "p": round(vivo["proteinas_g"] * 4 / _tot * 100) if _tot else 0,
+                    "c": round(vivo["carbohidratos_g"] * 4 / _tot * 100) if _tot else 0,
+                    "g": round(vivo["grasas_g"] * 9 / _tot * 100) if _tot else 0,
+                },
+            }
 
         es_condicion_critica = False
         condiciones_list = [c.lower() for c in (cliente.medical_conditions or [])]

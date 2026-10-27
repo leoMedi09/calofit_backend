@@ -129,6 +129,20 @@ def obtener_plan_hoy(perfil, edad: int, db: Session):
     return (plan_maestro, plan_base, False)
 
 
+def obtener_macros_plan_hoy(perfil, db: Session) -> dict | None:
+    """Meta del dia (calorias_dia, proteinas_g, carbohidratos_g, grasas_g) calculada con la MISMA regla que usa
+    el asistente, para que dashboard, balance y chat muestren siempre la misma meta. None si no se pudo
+    calcular (el llamador conserva entonces su valor guardado)."""
+    try:
+        edad = (datetime.now().year - perfil.birth_date.year) if perfil.birth_date else 25
+        _, plan_hoy_data, _ = obtener_plan_hoy(perfil, edad, db)
+        return {
+            k: float(plan_hoy_data[k]) for k in ("calorias_dia", "proteinas_g", "carbohidratos_g", "grasas_g")
+        }
+    except Exception:
+        return None
+
+
 def obtener_meta_calorica_hoy(perfil, db: Session) -> float:
     """Atajo para los call sites de registro que solo necesitan la meta
     calórica del día (ej. para decidir si avisar que se excedió la meta) —
