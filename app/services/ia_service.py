@@ -103,6 +103,9 @@ PORCIONES_ESTANDAR = {
 }
 
 
+_MODELO_RESPALDO = "openai/gpt-oss-120b"  # modelo de chat disponible en la cuenta de Groq de respaldo
+
+
 class IAService:
     """Motor de IA de CaloFit — Simplificado para Tesis (Random Forest + KNN + Llama-3)."""
 
@@ -481,9 +484,12 @@ class IAService:
                 if not self.groq_backup_client or not self._falla_de_cuenta(e_principal):
                     raise
                 print(f"⚠️ Motor principal sin credito o clave rechazada ({str(e_principal)[:80]}) — usando respaldo Groq")
-                # groq/compound-mini existe solo como alias en OpenRouter: en Groq se usa Llama 3.3 70B
-                if str(m).startswith("groq/compound"):
-                    kwargs["model"] = "llama-3.3-70b-versatile"
+                # La cuenta de Groq solo tiene los modelos gpt-oss (sin Llama): se usa gpt-oss-120b con poco
+                # razonamiento y margen de tokens para que el razonamiento no se coma la respuesta.
+                if not str(m).startswith("openai/gpt-oss"):
+                    kwargs["model"] = _MODELO_RESPALDO
+                kwargs["max_tokens"] = max(mt, 500)
+                kwargs["extra_body"] = {"reasoning_effort": "low"}
                 r = await self.groq_backup_client.chat.completions.create(**kwargs)
             return r.choices[0].message.content.strip()
 
