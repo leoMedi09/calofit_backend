@@ -41,6 +41,30 @@ _CONFIANZA_MAP: dict[str, float] = {
 }
 
 
+def recalcular_quemadas_diario(client_id: int, fecha: date, db: Session) -> ProgresoCalorias:
+    """Deja calorias_quemadas del dia igual a la suma real de workout_logs de ese dia (hora de Lima).
+    Asi borrar o corregir un ejercicio nunca deja un residuo en el contador. Sin commit."""
+    from sqlalchemy import text
+
+    total = db.execute(
+        text(
+            "SELECT COALESCE(SUM(calorias_quemadas), 0) FROM workout_logs "
+            "WHERE client_id = :cid AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Lima')::date = :f"
+        ),
+        {"cid": client_id, "f": fecha},
+    ).scalar()
+    progreso = (
+        db.query(ProgresoCalorias)
+        .filter(ProgresoCalorias.client_id == client_id, ProgresoCalorias.fecha == fecha)
+        .first()
+    )
+    if not progreso:
+        progreso = ProgresoCalorias(client_id=client_id, fecha=fecha)
+        db.add(progreso)
+    progreso.calorias_quemadas = int(float(total or 0) + 0.5)  # mitad hacia arriba, como se muestra en la app
+    return progreso
+
+
 def recalcular_progreso_diario(
     client_id: int,
     fecha: date,

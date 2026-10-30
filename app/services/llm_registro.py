@@ -1656,16 +1656,9 @@ async def registrar_ejercicio_llm(
         db.rollback()
         return {"success": False, "tipo_detectado": "error", "mensaje": "Error al guardar el ejercicio."}
 
-    prog = (
-        db.query(ProgresoCalorias)
-        .filter(
-            ProgresoCalorias.client_id == perfil.id,
-            ProgresoCalorias.fecha == hoy,
-        )
-        .first()
-    )
-    if prog:
-        prog.calorias_quemadas = round((prog.calorias_quemadas or 0) + kcal_total, 1)
+    from app.services.trazabilidad import recalcular_quemadas_diario
+
+    prog = recalcular_quemadas_diario(perfil.id, hoy, db)  # suma real del dia: sin acumular redondeos
     db.commit()
 
     quemado_total = round(float(prog.calorias_quemadas if prog else kcal_total), 1)

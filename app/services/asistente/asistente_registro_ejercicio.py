@@ -281,20 +281,11 @@ class RegistroEjercicioHandler:
         ]
 
     def _sumar_calorias_progreso(self, client_id: int, cal: float, db: Session) -> None:
-        """Suma calorías quemadas al registro de progreso del día."""
-        hoy = get_peru_date()
-        progreso = (
-            db.query(ProgresoCalorias)
-            .filter(
-                ProgresoCalorias.client_id == client_id,
-                ProgresoCalorias.fecha == hoy,
-            )
-            .first()
-        )
-        if not progreso:
-            progreso = ProgresoCalorias(client_id=client_id, fecha=hoy)
-            db.add(progreso)
-        progreso.calorias_quemadas = (progreso.calorias_quemadas or 0.0) + cal
+        """Actualiza las calorías quemadas del día. Se recalcula desde workout_logs (el ejercicio ya está
+        insertado), así el contador no acumula redondeos ni queda con residuo al borrar registros."""
+        from app.services.trazabilidad import recalcular_quemadas_diario
+
+        recalcular_quemadas_diario(client_id, get_peru_date(), db)
         db.commit()
 
 

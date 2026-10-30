@@ -680,23 +680,21 @@ def eliminar_registro(
         db.commit()
     elif tipo == "ejercicio":
         row = db.execute(
-            _text2("SELECT id, ejercicio, calorias_quemadas FROM workout_logs WHERE id = :rid AND client_id = :cid"),
+            _text2(
+                "SELECT id, ejercicio, calorias_quemadas, "
+                "(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Lima')::date AS fecha_lima "
+                "FROM workout_logs WHERE id = :rid AND client_id = :cid"
+            ),
             {"rid": registro_id, "cid": cliente.id},
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Registro no encontrado")
         nombre_registro = row.ejercicio
-        cal_a_restar = float(row.calorias_quemadas or 0)
         db.execute(_text2("DELETE FROM workout_logs WHERE id = :rid"), {"rid": registro_id})
-        from app.core.utils import get_peru_date as _gpd
+        # el contador del dia se recalcula desde los registros que quedan (del dia del registro borrado)
+        from app.services.trazabilidad import recalcular_quemadas_diario
 
-        db.execute(
-            _text2(
-                "UPDATE progreso_calorias SET calorias_quemadas = GREATEST(0, calorias_quemadas - :cal) "
-                "WHERE client_id = :cid AND fecha = :hoy"
-            ),
-            {"cal": cal_a_restar, "cid": cliente.id, "hoy": _gpd()},
-        )
+        recalcular_quemadas_diario(cliente.id, row.fecha_lima, db)
         db.commit()
     else:
         raise HTTPException(status_code=400, detail="Tipo debe ser 'alimento' o 'ejercicio'")
