@@ -75,6 +75,18 @@ def intent_prioritario_para_parser(intent_ia: Optional[str], modo_funcion: Optio
     return (intent_ia or "CHAT").upper()
 
 
+# «hice / hago / entrené / corrí / caminé… N minutos (u horas) de <ejercicio>»: registro de ejercicio, pasado o presente.
+_RX_ACTIVIDAD_CON_DURACION = re.compile(
+    r"\b(?:hice|hago|hac[ií]a|entren[eé]|entreno|corr[ií]|corro|camin[eé]|camino|trot[eé]|trote|nad[eé]|nado"
+    r"|pedale[eé]|pedaleo|rem[eé])\b[^.?!]{0,40}?"
+    r"\b(?:\d+(?:[.,]\d+)?|una|un|media|dos|tres)\s*(?:min(?:utos?)?|h(?:oras?|rs?)?)\b"
+)
+_RX_NO_REGISTRO = re.compile(
+    r"\b(?:qu[eé]|cu[aá]nt\w*|recomiend\w*|sugier\w*|conviene|deber[ií]a|puedo"
+    r"|com[ií]|desayun\w*|almorc\w*|almorz\w*|cen[eé]|beb[ií]|tom[eé])\b"
+)
+
+
 def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
     """
     Elige una de las 4 funciones o OTRO. Prioriza registro sobre recomendación si hay señales claras.
@@ -87,6 +99,9 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
 
     if any(m.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO):
         return REGISTRAR_NUTRICION
+
+    if _RX_ACTIVIDAD_CON_DURACION.search(m) and "?" not in m and not _RX_NO_REGISTRO.search(m):
+        return REGISTRAR_EJERCICIO
 
     comida_ctx = (
         "comí",
