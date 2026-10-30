@@ -1305,6 +1305,7 @@ async def registrar_comida_llm(
     nombres = [_nombre_con_cantidad(a) for a in alimentos_raw if a.get("nombre")]
     porciones = _porciones_texto(alimentos_raw, _factor_cap * _factor_momento * _factor_sopa)
 
+    from app.core.fuente_alimentos import contrastar as contrastar_con_tablas, texto_fuente as texto_fuente_alimentos
     from app.core.utils import get_peru_date
 
     hoy = get_peru_date()
@@ -1335,6 +1336,7 @@ async def registrar_comida_llm(
     from app.models.comida_registro import ComidaRegistro
 
     n_items = max(1, len(alimentos_raw))
+    _contrastes: list[tuple[str, str | None]] = []
     for item in alimentos_raw:
         nombre_item = item.get("nombre", nombres[0] if nombres else "Alimento")
         try:
@@ -1378,6 +1380,15 @@ async def registrar_comida_llm(
             g_item = round(g_item * _factor_densidad, 1)
             k_item = round(4 * p_item + 4 * c_item + 9 * g_item, 1)
 
+        # contraste con las tablas oficiales: densidad que estimo el modelo (antes de los topes) vs kcal/100 g de la tabla
+        _contrastes.append(
+            (
+                nombre_item,
+                contrastar_con_tablas(nombre_item, (k_item / _factor_total) / _porcion_item_val * 100)
+                if _factor_total > 0 and _porcion_item_val > 0
+                else None,
+            )
+        )
         if not item.get("_porcion_explicita_usuario"):
             cache_macros(
                 nombre_item,
@@ -1469,6 +1480,7 @@ async def registrar_comida_llm(
             "alerta_dieta": alerta_dieta,
             "advertencia_cantidad": advertencia_cantidad,
             "porciones": porciones,
+            "fuente": texto_fuente_alimentos(_contrastes),
         },
         "balance_actualizado": {
             "consumido": round(consumido, 1),
