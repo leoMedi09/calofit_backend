@@ -52,10 +52,34 @@ def test_engine(test_db_url):
     import app.models
 
     Base.metadata.create_all(bind=engine)
+    # workout_logs no tiene modelo ORM (el código la usa con SQL crudo): se crea igual que en scripts/schema_calofit.sql.
+    with engine.connect() as _conn_wl:
+        _conn_wl.execute(
+            text(
+                """CREATE TABLE IF NOT EXISTS workout_logs (
+                    id SERIAL PRIMARY KEY,
+                    client_id INTEGER NOT NULL REFERENCES clients (id),
+                    ejercicio VARCHAR NOT NULL,
+                    series INTEGER NOT NULL,
+                    reps INTEGER NOT NULL,
+                    peso_kg DOUBLE PRECISION,
+                    created_at TIMESTAMP NOT NULL,
+                    calorias_quemadas DOUBLE PRECISION,
+                    session_duration_min DOUBLE PRECISION,
+                    intensity VARCHAR(50)
+                )"""
+            )
+        )
+        _conn_wl.commit()
     logger.info("[TEST] Tablas creadas correctamente.")
 
     yield engine
 
+    # Tablas fuera del ORM (workout_logs, chat_historial de main.py) cuelgan de clients: se borran antes del drop_all.
+    engine.dispose()  # cierra conexiones abiertas que mantendrían bloqueos
+    with engine.connect() as _conn_drop:
+        _conn_drop.execute(text("DROP TABLE IF EXISTS workout_logs, chat_historial, password_resets CASCADE"))
+        _conn_drop.commit()
     Base.metadata.drop_all(bind=engine)
     engine.dispose()
     logger.info("[TEST] BD de test limpiada.")

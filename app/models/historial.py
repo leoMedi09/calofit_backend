@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, Date, Text, TIMESTAMP, ForeignKey, Boolean, JSON
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, false
 from app.core.database import Base
 
 
@@ -56,7 +56,7 @@ class ProgresoCalorias(Base):
     grasas_consumidas = Column(Float, nullable=True, default=0.0)
 
     deficit_superavit = Column(Integer, nullable=True)
-    alerta_exceso_enviada = Column(Boolean, nullable=False, default=False)
+    alerta_exceso_enviada = Column(Boolean, nullable=False, default=False, server_default=false())
     created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
 
     cliente = relationship("Client", back_populates="progreso_calorias")
