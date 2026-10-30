@@ -740,12 +740,28 @@ def _unidad(nombre: str, medida: str) -> str:
     return "ml" if _RX_RECIPIENTE_LIQUIDO.search(medida) or primera in _BEBIDAS else "g"
 
 
+_RX_EJERCICIO_SERIES = re.compile(r"([^,.;:()\n]+?)\s+(\d+)\s*[x×]\s*(\d+)\b")
+
+
+def _anotar_met(texto: str) -> str:
+    """En una recomendacion de rutina ("Sentadilla Libre 3x10") agrega el MET de cada ejercicio cuando sale del
+    Compendium 2024: "Sentadilla Libre 3x10 (MET 5)". Los ejercicios sin equivalente en la tabla quedan igual."""
+    from app.core.mets_gym import COMPENDIUM_CODIGO
+    from app.services.asistente.asistente_ejercicio import resolver_met_mets_gym
+
+    def _sub(m: re.Match) -> str:
+        clave, met = resolver_met_mets_gym(m.group(1).lower())
+        return f"{m.group(0)} (MET {met:g})" if clave in COMPENDIUM_CODIGO and met else m.group(0)
+
+    return _RX_EJERCICIO_SERIES.sub(_sub, texto or "")
+
+
 def _fuente_ejercicio(ejercicios: list) -> str:
     """Fuente que se muestra bajo el registro. El Compendium solo se cita si el MET de TODOS los ejercicios
     sale de el; si alguno es un MET estimado no se afirma una fuente que no aplica."""
     if ejercicios and all(e.get("compendium") for e in ejercicios):
-        return "Compendium of Physical Activities 2024 · fórmula del ACSM"
-    return "MET de referencia estimado · fórmula del ACSM"
+        return "Compendium of Physical Activities 2024"
+    return "MET de referencia estimado"
 
 
 def _calculo_ejercicio_texto(duracion: float, peso_kg: float, met: float, duracion_supuesta: bool) -> str:
@@ -1878,7 +1894,7 @@ async def respuesta_recomendacion_llm(
             logger.exception("[General Error in recomendacion ejercicio]: %s", e)
             respuesta_ej = "Por tu seguridad, te recomiendo realizar una rutina de movilidad suave en casa y caminata de 15 minutos a ritmo cómodo."
 
-        return respuesta_ej
+        return _anotar_met(respuesta_ej)
 
     import re as _re_reco
     from app.core.utils import get_peru_now as _get_peru_now_reco

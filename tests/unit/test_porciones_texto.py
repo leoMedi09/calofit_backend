@@ -64,9 +64,21 @@ def test_fuente_ejercicio_solo_cita_el_compendium_si_todos_lo_tienen():
     from app.core.mets_gym import COMPENDIUM_CODIGO, METS_GYM
     from app.services.llm_registro import _fuente_ejercicio as f
 
-    assert f([{"compendium": "02054"}]).startswith("Compendium of Physical Activities 2024")
-    assert f([{"compendium": "02054"}, {"compendium": None}]).startswith("MET de referencia estimado")
+    assert f([{"compendium": "02054"}]) == "Compendium of Physical Activities 2024"
+    assert f([{"compendium": "02054"}, {"compendium": None}]) == "MET de referencia estimado"
     assert f([]).startswith("MET de referencia estimado")
     # el press de banca queda en el valor del Compendium (3.5) y con su codigo
     assert METS_GYM["press banca"] == 3.5 and COMPENDIUM_CODIGO["press banca"] == "02054"
     assert METS_GYM["sentadilla libre"] == 5.0 and METS_GYM["correr moderado"] == 9.3
+
+
+def test_anotar_met_en_recomendacion_de_rutina():
+    from app.services.llm_registro import _anotar_met as a
+
+    t = "Para tus piernas te sugiero Sentadilla Libre 3x10, Prensa de Piernas 3x12 y Peso Muerto Rumano 3x10. ¡Dale!"
+    assert a(t) == (
+        "Para tus piernas te sugiero Sentadilla Libre 3x10 (MET 5), Prensa de Piernas 3x12 (MET 3.5) "
+        "y Peso Muerto Rumano 3x10 (MET 5). ¡Dale!"
+    )
+    assert a("Haz algo raro 3x10") == "Haz algo raro 3x10"  # sin equivalente en el Compendium: no se anota
+    assert a("Camina 30 minutos") == "Camina 30 minutos"
