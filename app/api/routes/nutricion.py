@@ -57,10 +57,9 @@ def crear_plan_nutricional(
         )
     except Exception as e:
         print(f"Error en calcular_requerimiento: {str(e)}")
-        if plan_data.genero == 1:
-            tmb = 88.362 + (13.397 * plan_data.peso) + (4.799 * plan_data.talla) - (5.677 * plan_data.edad)
-        else:
-            tmb = 447.593 + (9.247 * plan_data.peso) + (3.098 * plan_data.talla) - (4.330 * plan_data.edad)
+        from app.core.macros_diarios import tmb_mifflin_st_jeor
+
+        tmb = tmb_mifflin_st_jeor(plan_data.peso, plan_data.talla, plan_data.edad, plan_data.genero == 1)
 
         calorias_mantenimiento = tmb * plan_data.nivel_actividad
 

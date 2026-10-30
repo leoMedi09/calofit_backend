@@ -13,6 +13,11 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 
+def tmb_mifflin_st_jeor(peso_kg: float, talla_cm: float, edad: int, hombre: bool) -> float:
+    """TMB (kcal/día) por Mifflin-St Jeor: fuente única del metabolismo basal en todo el backend."""
+    return 10 * peso_kg + 6.25 * talla_cm - 5 * edad + (5 if hombre else -161)
+
+
 def macros_desde_calorias_peso_objetivo(
     calorias: float,
     objetivo: str,

@@ -72,7 +72,7 @@ class CalculadorDietaAutomatica:
     @staticmethod
     def calcular_gasto_metabolico_basal(peso: float, altura: float, edad: int, genero: str) -> float:
         """
-        Calcula GMB usando la fórmula de Harris-Benedict revisada
+        Calcula GMB usando Mifflin-St Jeor (misma fórmula que IAService.calcular_requerimiento)
 
         Args:
             peso: en kg
@@ -83,10 +83,9 @@ class CalculadorDietaAutomatica:
         Returns:
             GMB en calorías
         """
-        if genero.upper() == "M":
-            gmb = 88.362 + (13.397 * peso) + (4.799 * altura) - (5.677 * edad)
-        else:
-            gmb = 447.593 + (9.247 * peso) + (3.098 * altura) - (4.330 * edad)
+        from app.core.macros_diarios import tmb_mifflin_st_jeor
+
+        gmb = tmb_mifflin_st_jeor(peso, altura, edad, genero.upper() == "M")
 
         return round(gmb, 0)
 

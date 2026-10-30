@@ -242,7 +242,7 @@ def coherenciar_macros_tarjeta(
 
 def calcular_metabolismo_basal(cliente) -> float:
     """
-    Calcula la Tasa Metabólica Basal usando la fórmula de Harris-Benedict revisada (Mifflin-St Jeor es otra opción, pero Harris-Benedict es la estándar en el proyecto).
+    Gasto energético diario (TMB Mifflin-St Jeor × factor de actividad), sin ajuste por objetivo.
     """
     from datetime import date
 
@@ -260,10 +260,9 @@ def calcular_metabolismo_basal(cliente) -> float:
     peso = cliente.weight or 75
     estatura = cliente.height or 170
 
-    if genero == "M":
-        tmb = 88.362 + (13.397 * peso) + (4.799 * estatura) - (5.677 * edad)
-    else:
-        tmb = 447.593 + (9.247 * peso) + (3.098 * estatura) - (4.330 * edad)
+    from app.core.macros_diarios import tmb_mifflin_st_jeor
+
+    tmb = tmb_mifflin_st_jeor(peso, estatura, edad, genero == "M")
 
     nivel_map = {"Sedentario": 1.20, "Ligero": 1.375, "Moderado": 1.55, "Activo": 1.725, "Muy activo": 1.90}
     factor = nivel_map.get(getattr(cliente, "activity_level", "Sedentario"), 1.20)

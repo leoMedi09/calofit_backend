@@ -158,8 +158,9 @@ class IAService:
         Calcula el Gasto Energético Total (GET) basado en Mifflin-St Jeor.
         genero: 1=Hombre, 2=Mujer.
         """
-        s = 5 if genero == 1 else -161
-        tmb = (10 * peso) + (6.25 * talla) - (5 * edad) + s
+        from app.core.macros_diarios import tmb_mifflin_st_jeor
+
+        tmb = tmb_mifflin_st_jeor(peso, talla, edad, genero == 1)
 
         mantenimiento = tmb * nivel_actividad
 
