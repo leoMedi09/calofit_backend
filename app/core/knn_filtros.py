@@ -155,7 +155,7 @@ _NO_ALIMENTO = {  # bebidas, alcohol, azúcares, embutidos, condimentos/aromáti
     "romero", "hierbabuena", "ruda", "paico", "mostaza", "condensada", "aceituna", "aceitunas", "alcaparras", "pique", "nuez moscada", "sal", "caldo", "leche materna",
     "chicharron", "barquillos", "tostada", "galleta", "galletas", "barra", "chivo", "conejo", "relleno", "erizo", "machas", "loche", "chanque", "hemico",
 }
-_FREJOL_OK = {"canario", "castilla", "caballero", "bayo", "panamito", "palo", "negro", "chiclayo", "soya"}
+_FREJOL_OK = {"canario", "castilla", "bayo", "panamito", "palo", "negro", "chiclayo", "soya"}
 _PAN_OK = {"frances", "integral", "molde", "mollete", "marraqueta", "huevo", "campesino", "granos"}
 _PESCADO_OK = {"anchoveta", "atun", "bonito", "caballa", "cabinza", "cachema", "ayanque", "corvina", "jurel", "lenguado", "lisa", "lorna", "merluza", "mero", "pejerrey",
                "perico", "robalo", "sardina", "tilapia", "toyo", "trucha", "cojinova", "pampanito", "bacalao", "congrio", "chita", "pintadilla", "machete", "cabrilla"}

@@ -5,7 +5,7 @@ from app.core.knn_filtros import excluir, familia
 def test_lactosa_bloquea_formula_infantil_y_cereal_con_leche():
     for n in ("Nan maternizada", "Cerelac trigo", "Milo - nestle", "Queso mantecoso"):
         assert excluir(n, ["Intolerancia a la Lactosa"]), n
-    assert not excluir("Frejol caballero", ["Intolerancia a la Lactosa"])
+    assert not excluir("Frejol canario", ["Intolerancia a la Lactosa"])
 
 
 def test_hipertension_bloquea_sodio_alto():
@@ -57,3 +57,8 @@ def test_alimentos_poco_conocidos_y_ultraprocesados():
         assert excluir(n), n
     assert excluir("Pan de molde", [], ["Alimentos procesados"])
     assert not excluir("Pan de molde")
+
+
+def test_frejol_caballero_no_se_recomienda():
+    assert excluir("Frejol caballero", [])  # poco conocido: no entra al KNN
+    assert not excluir("Frejol canario", [])
