@@ -108,6 +108,7 @@ class IAService:
 
     def __init__(self):
         self.groq_client = None
+        self.groq_backup_client = None
         groq_api_key = getattr(settings, "GROQ_API_KEY", None)
         if groq_api_key:
             if groq_api_key.startswith("sk-or-"):
@@ -129,6 +130,14 @@ class IAService:
                 print("⚠️  Groq SDK no disponible.")
         else:
             print("⚠️  Groq/OpenRouter no configurado.")
+
+        # Respaldo: si el motor principal (OpenRouter) se queda sin credito o rechaza la clave, se usa Groq.
+        backup_key = getattr(settings, "GROQ_BACKUP_API_KEY", "")
+        if backup_key and AsyncGroq and not backup_key.startswith("sk-or-"):
+            self.groq_backup_client = AsyncGroq(
+                api_key=backup_key, timeout=httpx.Timeout(180.0, connect=30.0), max_retries=1
+            )
+            print("✅ Groq (GROQ_BACKUP_API_KEY): respaldo de IA inicializado.")
 
         self.gemini_model = None
         self.gemini_model_fast = None
@@ -439,6 +448,12 @@ class IAService:
             print(f"[Gemini] Error inesperado: {e}")
             return FALLBACK_MSG_IA_TIMEOUT
 
+    @staticmethod
+    def _falla_de_cuenta(e: Exception) -> bool:
+        """Errores de la cuenta del proveedor (sin creditos, clave invalida o sin permiso), no de la peticion."""
+        err = str(e).lower()
+        return any(x in err for x in ("402", "credits", "insufficient", "401", "403", "unauthorized", "invalid api key"))
+
     async def _llamar_groq(
         self, prompt: str, max_tokens: int = 800, temp: float = 0.7, model: str | None = None
     ) -> str:
@@ -459,12 +474,17 @@ class IAService:
             max_tokens = min(max_tokens_seguro, max(max_tokens, 1800))
 
         async def _ejecutar_llamada(m, mt):
-            r = await self.groq_client.chat.completions.create(
-                model=m,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=mt,
-                temperature=temp,
-            )
+            kwargs = dict(model=m, messages=[{"role": "user", "content": prompt}], max_tokens=mt, temperature=temp)
+            try:
+                r = await self.groq_client.chat.completions.create(**kwargs)
+            except Exception as e_principal:
+                if not self.groq_backup_client or not self._falla_de_cuenta(e_principal):
+                    raise
+                print(f"⚠️ Motor principal sin credito o clave rechazada ({str(e_principal)[:80]}) — usando respaldo Groq")
+                # groq/compound-mini existe solo como alias en OpenRouter: en Groq se usa Llama 3.3 70B
+                if str(m).startswith("groq/compound"):
+                    kwargs["model"] = "llama-3.3-70b-versatile"
+                r = await self.groq_backup_client.chat.completions.create(**kwargs)
             return r.choices[0].message.content.strip()
 
         try:

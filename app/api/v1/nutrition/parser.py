@@ -51,11 +51,17 @@ async def parse_ingredients(
     if not request.texto or not request.texto.strip():
         raise HTTPException(status_code=400, detail="El texto está vacío")
 
-    from app.services.llm_registro import _PROMPT_COMIDA, _parse_json
+    from app.services.llm_registro import _PROMPT_COMIDA, _parse_json, _llamar_groq_con_excepciones
 
     try:
         prompt = _PROMPT_COMIDA.format(mensaje=request.texto)
-        raw = await ia_engine._llamar_groq(prompt, max_tokens=500, temp=0.0)
+        try:
+            raw = await _llamar_groq_con_excepciones(ia_engine, prompt, max_tokens=500, temp=0.0)
+        except Exception as e_llm:
+            logger.error("LLM no disponible en parse_ingredients: %s", e_llm)
+            raise HTTPException(
+                status_code=503, detail="El asistente no está disponible por ahora. Intenta de nuevo en unos minutos."
+            )
         datos = _parse_json(raw)
 
         if not datos or not datos.get("alimentos"):
@@ -114,6 +120,8 @@ async def parse_ingredients(
             grasas_total=round(grasa_total, 1),
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Error en nutrition parser: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno al procesar los ingredientes")
