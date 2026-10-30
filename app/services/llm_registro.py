@@ -740,6 +740,14 @@ def _unidad(nombre: str, medida: str) -> str:
     return "ml" if _RX_RECIPIENTE_LIQUIDO.search(medida) or primera in _BEBIDAS else "g"
 
 
+def _fuente_ejercicio(ejercicios: list) -> str:
+    """Fuente que se muestra bajo el registro. El Compendium solo se cita si el MET de TODOS los ejercicios
+    sale de el; si alguno es un MET estimado no se afirma una fuente que no aplica."""
+    if ejercicios and all(e.get("compendium") for e in ejercicios):
+        return "Compendium of Physical Activities 2024 · fórmula del ACSM"
+    return "MET de referencia estimado · fórmula del ACSM"
+
+
 def _calculo_ejercicio_texto(duracion: float, peso_kg: float, met: float, duracion_supuesta: bool) -> str:
     """Datos con los que se calcularon las kcal quemadas: kcal = MET × 3.5 × peso / 200 × minutos."""
     nivel = "ligero" if met < 3 else ("moderado" if met < 6 else "alto")  # cortes del Compendium/ACSM
@@ -1548,6 +1556,7 @@ async def registrar_ejercicio_llm(
     ejercicios_guardados = []
 
     from app.services.asistente.asistente_ejercicio import resolver_met_mets_gym
+    from app.core.mets_gym import COMPENDIUM_CODIGO
 
     for datos in ejercicios_raw:
         nombre = datos["ejercicio"]
@@ -1609,6 +1618,7 @@ async def registrar_ejercicio_llm(
                     "kcal": kcal,
                     "detalle": detalle,
                     "calculo": _calculo_ejercicio_texto(duracion, peso_kg, met, _dur_supuesta),
+                    "compendium": COMPENDIUM_CODIGO.get(_cat_key) if _met_determinista else None,
                 }
             )
         except Exception as e:
@@ -1672,6 +1682,7 @@ async def registrar_ejercicio_llm(
             "duracion_min": sum(float(e.get("duracion_min", 0) or 0) for e in ejercicios_raw),
             "series": ejercicios_guardados[0]["detalle"] if len(ejercicios_guardados) == 1 else None,
             "ejercicios": ejercicios_guardados,
+            "fuente": _fuente_ejercicio(ejercicios_guardados),
             "calculos": [
                 f"{e['nombre']}: {e['calculo']}" if len(ejercicios_guardados) > 1 else e["calculo"]
                 for e in ejercicios_guardados

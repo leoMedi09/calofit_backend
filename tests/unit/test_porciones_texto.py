@@ -58,3 +58,15 @@ def test_calculo_ejercicio_texto():
     assert c(15.0, 86.9057, 5.0, False) == "15 min · 87 kg · MET 5 (esfuerzo moderado)"
     assert c(15.0, 70.0, 8.0, True) == "15 min · 70 kg · MET 8 (esfuerzo alto) · duración supuesta"
     assert "ligero" in c(10.0, 70.0, 2.5, False)
+
+
+def test_fuente_ejercicio_solo_cita_el_compendium_si_todos_lo_tienen():
+    from app.core.mets_gym import COMPENDIUM_CODIGO, METS_GYM
+    from app.services.llm_registro import _fuente_ejercicio as f
+
+    assert f([{"compendium": "02054"}]).startswith("Compendium of Physical Activities 2024")
+    assert f([{"compendium": "02054"}, {"compendium": None}]).startswith("MET de referencia estimado")
+    assert f([]).startswith("MET de referencia estimado")
+    # el press de banca queda en el valor del Compendium (3.5) y con su codigo
+    assert METS_GYM["press banca"] == 3.5 and COMPENDIUM_CODIGO["press banca"] == "02054"
+    assert METS_GYM["sentadilla libre"] == 5.0 and METS_GYM["correr moderado"] == 9.3
