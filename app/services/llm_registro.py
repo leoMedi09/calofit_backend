@@ -78,47 +78,25 @@ def _mensaje_contiene_no_alimento(mensaje: str):
     return match.group(0)
 
 
-_FALLBACKS_OPCIONES = {
-    "DESAYUNO": [
-        "- Fruta picada con chía (~90 kcal, P:2g C:20g G:1g)",
-        "- Avena tibia con agua (~150 kcal, P:5g C:27g G:3g)",
-        "- Tostada integral con palta (~130 kcal, P:3g C:16g G:7g)",
-        "- Plátano con frutos secos (~180 kcal, P:4g C:28g G:7g)",
-        "- Batido de frutas sin azúcar (~110 kcal, P:2g C:25g G:1g)",
-    ],
-    "ALMUERZO": [
-        "- Lentejas guisadas con verduras (~350 kcal, P:18g C:55g G:5g)",
-        "- Sopa de verduras con quinua (~300 kcal, P:10g C:50g G:5g)",
-        "- Ensalada de garbanzos y palta (~280 kcal, P:8g C:35g G:12g)",
-        "- Tofu a la plancha con brócoli y arroz (~380 kcal, P:22g C:45g G:10g)",
-        "- Crema de zapallo y arvejas (~290 kcal, P:9g C:42g G:8g)",
-    ],
-    "CENA": [
-        "- Sopa de verduras ligera (~150 kcal, P:5g C:22g G:4g)",
-        "- Ensalada de espinacas y palta (~200 kcal, P:4g C:18g G:13g)",
-        "- Menestra de frejol ligera (~240 kcal, P:12g C:38g G:4g)",
-        "- Tostadas con hummus y pepino (~180 kcal, P:6g C:26g G:6g)",
-        "- Tortilla vegetal de champiñones (~220 kcal, P:10g C:12g G:15g)",
-    ],
-    "MERIENDA": [
-        "- Fruta de estación (~80 kcal, P:1g C:20g G:0g)",
-        "- Puñado de almendras y nueces (~160 kcal, P:5g C:8g G:13g)",
-        "- Tostada integral con palta (~120 kcal, P:3g C:15g G:6g)",
-        "- Rodajas de manzana con canela (~70 kcal, P:1g C:17g G:0g)",
-        "- Taza de quinua cocida ligera (~130 kcal, P:4g C:24g G:2g)",
-    ],
-}
+from app.core.fallback_recomendaciones import MENSAJE_SIN_OPCION_SEGURA, OPCIONES as _OPCIONES_FALLBACK, texto_fallback
+
+# {momento: [texto de cada opción]}; las opciones con etiquetas de alérgenos viven en app/core/fallback_recomendaciones.py
+_FALLBACKS_OPCIONES = {m: [o.texto for o in ops] for m, ops in _OPCIONES_FALLBACK.items()}
 
 
-def obtener_fallback_aleatorio(momento: str) -> str:
-    import random
+def obtener_fallback_aleatorio(momento: str, aleatorio: bool = True, condiciones=None, prohibidos=None) -> str:
+    """3 opciones del momento sin repetir, compatibles con las restricciones del cliente (``condiciones`` = medical_conditions,
+    ``prohibidos`` = forbidden_foods y exclusiones del mensaje). ``aleatorio=False`` devuelve siempre las primeras. Si ninguna es
+    segura devuelve un mensaje que deriva al nutricionista."""
+    return texto_fallback(momento, condiciones, prohibidos, aleatorio)
 
-    m = (momento or "ALMUERZO").upper().strip()
-    if m not in _FALLBACKS_OPCIONES:
-        m = "ALMUERZO"
-    opciones = _FALLBACKS_OPCIONES[m]
-    seleccion = opciones[: min(3, len(opciones))]
-    return "\n".join(seleccion)
+
+def _fallback_recomendacion(intro: str, momento: str, condiciones, prohibidos, aleatorio: bool = False) -> str:
+    cuerpo = obtener_fallback_aleatorio(momento, aleatorio, condiciones, prohibidos)
+    if cuerpo == MENSAJE_SIN_OPCION_SEGURA or not intro:
+        return cuerpo
+    return intro + chr(10) + cuerpo
+
 
 
 async def _llamar_groq_con_excepciones(
@@ -2587,6 +2565,10 @@ async def respuesta_recomendacion_llm(
             return False
         return any(t in ll for t in _tokens_dieta_check)
 
+    # Restricciones para los fallbacks: perfil (medical_conditions, forbidden_foods) + lo que pidió el usuario en el mensaje.
+    _fb_condiciones = list(_condiciones_dieta_check)
+    _fb_prohibidos = list(getattr(perfil, "forbidden_foods", None) or []) + sorted(_tokens_exclusion_msg)
+
     _texto_usuario, _platos_data = "", []
     try:
         respuesta_llm_reco = await _llamar_groq_con_excepciones(
@@ -2619,15 +2601,35 @@ async def respuesta_recomendacion_llm(
             respuesta_llm_reco = await _llamar_groq_con_excepciones(ia_engine, _prompt_retry, max_tokens=250, temp=0.3)
             _texto_usuario, _platos_data = _extraer_texto_y_platos(respuesta_llm_reco)
 
+        # Sin línea PLATOS: ni viñetas (p. ej. JSON roto): no se muestra el texto del modelo, se usa el fallback.
+        if not _platos_data and not re.search(r"(?m)^\s*(?:[-•*]|\d+[.)])\s+\S", _texto_usuario):
+            _texto_usuario = _fallback_recomendacion("", momento_reco, _fb_condiciones, _fb_prohibidos, aleatorio=True)
+
     except asyncio.TimeoutError as e:
         logger.error("[LLM Timeout in recomendacion comida]: %s", e)
-        _texto_usuario = "Tuve un problema técnico. Intenta de nuevo o consulta con tu nutricionista."
+        # Sin respuesta del modelo se degrada con las 3 primeras opciones compatibles del momento (siempre las mismas).
+        _texto_usuario = _fallback_recomendacion(
+            "Tuve un problema técnico, pero te dejo opciones ligeras para este momento:",
+            momento_reco,
+            _fb_condiciones,
+            _fb_prohibidos,
+        )
     except ConnectionError as e:
         logger.error("[LLM ConnectionError in recomendacion comida]: %s", e)
-        _texto_usuario = "Tuve un problema de conexión. Intenta de nuevo en un momento."
+        _texto_usuario = _fallback_recomendacion(
+            "Tuve un problema de conexión, pero te dejo opciones ligeras para este momento:",
+            momento_reco,
+            _fb_condiciones,
+            _fb_prohibidos,
+        )
     except Exception as e:
         logger.exception("[General Error in recomendacion comida LLM flow]: %s", e)
-        _texto_usuario = "Hubo un error al generar sugerencias. Intenta de nuevo."
+        _texto_usuario = _fallback_recomendacion(
+            "No pude generar sugerencias a medida, pero te dejo opciones ligeras para este momento:",
+            momento_reco,
+            _fb_condiciones,
+            _fb_prohibidos,
+        )
 
     if _platos_data:
         for _np, _kp, _pp, _cp, _gp in _platos_data:
