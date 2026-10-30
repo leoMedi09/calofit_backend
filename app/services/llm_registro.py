@@ -761,7 +761,7 @@ def _fuente_ejercicio(ejercicios: list) -> str:
     sale de el; si alguno es un MET estimado no se afirma una fuente que no aplica."""
     if ejercicios and all(e.get("compendium") for e in ejercicios):
         return "Compendium of Physical Activities 2024"
-    return "MET de referencia estimado"
+    return "Referencia: Compendium of Physical Activities 2024 (MET aproximado)"
 
 
 def _calculo_ejercicio_texto(duracion: float, peso_kg: float, met: float, duracion_supuesta: bool) -> str:

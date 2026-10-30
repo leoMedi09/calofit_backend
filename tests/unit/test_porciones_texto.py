@@ -65,8 +65,8 @@ def test_fuente_ejercicio_solo_cita_el_compendium_si_todos_lo_tienen():
     from app.services.llm_registro import _fuente_ejercicio as f
 
     assert f([{"compendium": "02054"}]) == "Compendium of Physical Activities 2024"
-    assert f([{"compendium": "02054"}, {"compendium": None}]) == "MET de referencia estimado"
-    assert f([]).startswith("MET de referencia estimado")
+    assert f([{"compendium": "02054"}, {"compendium": None}]) == "Referencia: Compendium of Physical Activities 2024 (MET aproximado)"
+    assert f([]).startswith("Referencia: Compendium")
     # el press de banca queda en el valor del Compendium (3.5) y con su codigo
     assert METS_GYM["press banca"] == 3.5 and COMPENDIUM_CODIGO["press banca"] == "02054"
     assert METS_GYM["sentadilla libre"] == 5.0 and METS_GYM["correr moderado"] == 9.3
