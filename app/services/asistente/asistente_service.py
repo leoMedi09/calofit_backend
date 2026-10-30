@@ -5,7 +5,7 @@ Todos los bloques de lógica de dominio viven en módulos especializados:
   asistente_plan.py              → obtener_plan_hoy
   asistente_registro_comida.py   → flujo 5 capas NLP + manual + registrar_desde_cache
   asistente_registro_ejercicio.py→ MET + workout_logs
-  asistente_recomendaciones.py   → KNN + 14 features RF
+  asistente_recomendaciones.py   → KNN + 11 variables RF
   asistente_prompt.py            → prompt builder, rescue_nlp_log, helpers respuesta
 """
 

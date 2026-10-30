@@ -31,7 +31,7 @@ Backend del sistema CaloFit. El frontend Flutter vive en [`../calofit_frontend`]
 | Migraciones | `Base.metadata.create_all()` + `ALTER TABLE IF NOT EXISTS` manual en `app/main.py` |
 | Base de datos | PostgreSQL 15 (Docker `calofit_db`, puerto externo 5433) |
 | IA / LLM | Llama-3 vía Groq API (`ia_service.py`) |
-| ML Perfil | Random Forest (`perfil_adherencia.pkl`) — 14 features → PERFIL A/B/C |
+| ML Perfil | Random Forest (`perfil_adherencia.pkl`) — 11 variables de entrada → PERFIL A/B/C |
 | ML Recomendador | KNN Coseno (`recomendador_knn.pkl`) — vector `[kcal, prot, carb, grasa]` |
 | Auth | Firebase Admin SDK + JWT |
 | Contenedores | Docker Compose (`calofit_db`, `calofit_backend`, `calofit_frontend`) |
@@ -149,7 +149,7 @@ calofit_backend/
 | `asistente_plan.py` | `obtener_plan_hoy()` — Mifflin-St Jeor fallback |
 | `asistente_registro_comida.py` | 5 capas NLP + registro manual |
 | `asistente_registro_ejercicio.py` | MET formula + `workout_logs` (SQL raw) |
-| `asistente_recomendaciones.py` | 14 features RF + KNN coseno |
+| `asistente_recomendaciones.py` | 11 variables de entrada RF + KNN coseno |
 | `asistente_prompt.py` | Builder de prompt + fallbacks deterministas |
 | `asistente_modos.py` | Clasificación de intención |
 

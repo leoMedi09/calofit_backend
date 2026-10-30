@@ -2,7 +2,7 @@
 Motor de recomendaciones de CaloFit.
 
 Integra:
-  - ML #1 Random Forest (Perfil de Adherencia) — prepara las 14 features desde BD.
+  - ML #1 Random Forest (Perfil de Adherencia) — prepara los datos de entrada desde BD.
   - ML #2 KNN Similitud Coseno — recomienda alimentos para cubrir déficit del día.
   - historial_recomendaciones — evita repetir platos sugeridos recientemente.
 """
@@ -25,14 +25,14 @@ class RecomendacionesHandler:
 
     def preparar_features_rf(self, perfil, db: Session) -> Dict[str, Any]:
         """
-        Construye el dict de 14 features requeridas por el Random Forest.
+        Construye los datos de entrada del Random Forest (12 valores: age, gender, weight, height,
+        workout_freq, session_hours, calories, fat_pct, water, avg_bpm, resting_bpm, workout_type).
 
-        Features:
-          Age, Gender_Enc, Weight(kg), Height_cm, BMI,
-          Workout_Frequency(days/week), Session_Duration(hours),
-          Calories_Burned, Cal_por_hora, Fat_Percentage,
-          Water_Intake(liters), Avg_BPM, Resting_BPM,
-          Workout_CARDIO/HIIT/STRENGTH/YOGA (one-hot)
+        El modelo (``ml_perfil.predecir_perfil``) usa 11 variables de entrada:
+          Age, Gender_Enc, Weight (kg), Height_cm, BMI (calculado),
+          Workout_Frequency (days/week), Session_Duration (hours) y
+          4 one-hot del tipo de entrenamiento: Workout_Cardio, Workout_HIIT, Workout_Strength, Workout_Yoga.
+        calories, fat_pct, water y los BPM se calculan o se fijan aquí, pero el modelo no los usa.
         """
         hoy = get_peru_date()
         semana = hoy - timedelta(days=7)
