@@ -47,14 +47,14 @@ OPCIONES: Dict[str, List[OpcionFallback]] = {
     "CENA": [
         _o("- Sopa de verduras ligera (~150 kcal, P:5g C:22g G:4g)"),
         _o("- Ensalada de espinacas y palta (~200 kcal, P:4g C:18g G:13g)"),
-        _o("- Menestra de frejol ligera (~240 kcal, P:12g C:38g G:4g)"),
-        _o("- Tostadas con hummus y pepino (~180 kcal, P:6g C:26g G:6g)", "gluten", "sesamo"),
+        _o("- Menestra de frejol, proteína vegetal ligera (~240 kcal, P:12g C:38g G:4g)"),
+        _o("- Tostadas con hummus de garbanzo y pepino (~180 kcal, P:6g C:26g G:6g)", "gluten", "sesamo"),
         _o("- Tortilla vegetal de champiñones (~220 kcal, P:10g C:12g G:15g)", "huevo"),
     ],
     "MERIENDA": [
         _o("- Fruta de estación (~80 kcal, P:1g C:20g G:0g)"),
-        _o("- Puñado de almendras y nueces (~160 kcal, P:5g C:8g G:13g)", "frutos_secos"),
-        _o("- Tostada integral con palta (~120 kcal, P:3g C:15g G:6g)", "gluten"),
+        _o("- Puñado de frutos secos, almendras y nueces (~160 kcal, P:5g C:8g G:13g)", "frutos_secos"),
+        _o("- Tostada integral con palta y chía (~120 kcal, P:3g C:15g G:6g)", "gluten"),
         _o("- Rodajas de manzana con canela (~70 kcal, P:1g C:17g G:0g)"),
         _o("- Taza de quinua cocida ligera (~130 kcal, P:4g C:24g G:2g)"),
     ],
