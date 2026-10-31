@@ -24,6 +24,10 @@ def enmascarar(texto):
 class FiltroEnmascarado(logging.Filter):
     def filter(self, record):
         try:
+            if record.name == "uvicorn.access" and isinstance(record.args, tuple):
+                # uvicorn desempaqueta record.args (5 valores) para armar la línea: no se pueden vaciar, se enmascara cada uno
+                record.args = tuple(enmascarar(a) if isinstance(a, str) else a for a in record.args)
+                return True
             record.msg = enmascarar(record.getMessage())
             record.args = ()
         except Exception:
