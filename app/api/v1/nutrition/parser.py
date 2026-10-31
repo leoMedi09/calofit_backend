@@ -44,7 +44,7 @@ async def parse_ingredients(
     current_user=Depends(get_current_user),
 ):
     """
-    Estima macros de un texto de alimento usando LLM (USDA/INS-CENAN).
+    Estima macros de un texto de alimento con el LLM (es una estimación: no consulta USDA ni INS/CENAN).
     Funciona con CUALQUIER alimento — sin lookup de BD.
     No guarda nada; solo devuelve los macros estimados para preview.
     """

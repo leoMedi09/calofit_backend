@@ -17,7 +17,10 @@ class NutricionService:
         return cls._instance
 
     def cargar_datos(self):
-        """Carga los datos del archivo JSON oficial y comercial al diccionario en memoria."""
+        """Carga los datos del archivo JSON oficial y comercial al diccionario en memoria.
+
+        Ojo: ``obtener_info_alimento`` no tiene llamadores hoy; los 74 productos de OpenFoodFacts solo se usan
+        para entrenar el KNN (scripts/entrenar_recomendador.py), no para responder al usuario."""
         try:
             actual_dir = os.path.dirname(os.path.abspath(__file__))
 

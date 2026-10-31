@@ -3695,7 +3695,7 @@ def _macros_sospechosamente_nulos(item: dict) -> bool:
 
 def _existe_en_bd_alimentos(db, nombre: str) -> bool:
     """Confirma (no descarta) que el nombre corresponde a un alimento real
-    consultando la tabla `alimentos` (~700+ registros INS/CENAN/OpenFoodFacts)
+    consultando la tabla `alimentos` (~840 registros: INS/CENAN, USDA, FatSecret y estimaciones del LLM; sin OpenFoodFacts)
     y sus alias — la misma fuente que ya usa FoodSourceResolver._buscar_bd_local()
     para el flujo de platos dinámicos, reutilizada aquí en vez de un catálogo
     manual nuevo. Solo se usa como señal de APOYO (ver _alimento_es_alucinacion):

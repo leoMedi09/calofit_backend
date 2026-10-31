@@ -416,6 +416,20 @@ def mi_ruta(current_user=Depends(get_current_user)):
 
 ---
 
+## Fuentes de datos nutricionales
+
+Medido en producción (Neon) y en el código. El chat estima los macros con el LLM; las tablas sirven de contraste y de catálogo.
+
+| Fuente | Dónde se usa | Peso real |
+|---|---|---|
+| **INS/CENAN 2017** | `app/data/alimentos_peru_ins.json` (1 028 entradas): contraste de la estimación (`core/fuente_alimentos.py`), entrenamiento del KNN y catálogo base de la tabla `alimentos` | 667 de 841 alimentos en BD |
+| **USDA FoodData Central** | API consultada por `_buscar_o_crear_alimento_async` (platos dinámicos y registros que no están en la BD); cada hallazgo se guarda en `alimentos` | 104 alimentos en BD con fuente USDA |
+| **FatSecret** | Segundo intento si USDA falla (misma función) | 10 alimentos en BD |
+| **OpenFoodFacts** | `app/data/alimentos_peru_off.json` (74 productos): solo entrena el KNN. `NutricionService` lo carga en memoria pero `obtener_info_alimento` no tiene llamadores | 0 filas en la BD |
+| **Estimación del LLM** | Registro de comida del chat (`llm_registro.py`) | 912 de 1 990 registros (46 %) tienen `tipo_resolucion = llm_estimado` |
+
+El texto de «fuente» que ve el usuario sale de `fuente_alimentos.contrastar`: solo cita INS/CENAN, USDA o IMARPE si el alimento existe en la tabla con kcal/100 g dentro de ±35 %; si no, dice «valor referencial».
+
 ## Base de datos
 
 ### Conexión directa
