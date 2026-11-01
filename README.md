@@ -416,6 +416,15 @@ def mi_ruta(current_user=Depends(get_current_user)):
 
 ---
 
+## Modelos de machine learning: qué hace cada uno
+
+| Modelo | Función | Dónde actúa |
+|---|---|---|
+| **Random Forest** (`perfil_adherencia.pkl`) | Clasifica al cliente en PERFIL_A (disciplinado), B (en desarrollo) o C (necesita guía) con 11 variables de entrada y la actividad de los últimos 7 días | **1)** `app/services/perfil_rf_prompt.py` suma el perfil como bloque ADICIONAL a los prompts de recomendación de comida y de ejercicio: define el tono y la exigencia (y series/reps/descanso en ejercicio), sin quitar los datos del cliente. **2)** `rutina_service.generar_rutina_inteligente` (`POST /ejercicios/rutina`) fija series, repeticiones y descanso por perfil |
+| **KNN con similitud coseno** (`recomendador_knn.pkl`) | Dado el déficit del día `[kcal, proteína, carbohidratos, grasa]`, propone los alimentos peruanos con proporción de macros más parecida | Candidatos para la recomendación de comida del chat (`llm_registro.py`); un evaluador del LLM decide si encajan y, si encajan, se usa como inspiración para uno de los 3 platos |
+
+Los datos del perfil del cliente (objetivo, condiciones médicas, lesiones, alimentos prohibidos, meta del plan, consumo del día) entran siempre al prompt y tienen prioridad: el perfil del Random Forest solo ajusta el tono. Si el modelo no puede predecir (sin BD o error), el bloque se omite y el prompt queda como antes.
+
 ## Fuentes de datos nutricionales
 
 Medido en producción (Neon) y en el código. El chat estima los macros con el LLM; las tablas sirven de contraste y de catálogo.

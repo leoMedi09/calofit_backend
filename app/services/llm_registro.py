@@ -79,6 +79,7 @@ def _mensaje_contiene_no_alimento(mensaje: str):
 
 
 from app.core.fallback_recomendaciones import MENSAJE_SIN_OPCION_SEGURA, OPCIONES as _OPCIONES_FALLBACK, texto_fallback
+from app.services.perfil_rf_prompt import bloque_perfil_rf, obtener_perfil_rf
 
 # {momento: [texto de cada opción]}; las opciones con etiquetas de alérgenos viven en app/core/fallback_recomendaciones.py
 _FALLBACKS_OPCIONES = {m: [o.texto for o in ops] for m, ops in _OPCIONES_FALLBACK.items()}
@@ -536,7 +537,7 @@ TAREA: El usuario pide sugerencias de EJERCICIO. Responde SOLO como entrenador p
 Perfil:
 - Nombre: {nombre}  |  Objetivo: {objetivo}  |  Condiciones médicas: {condiciones}
 {contexto_lesion}
-Mensaje del usuario: "{mensaje}"
+{bloque_perfil_rf}Mensaje del usuario: "{mensaje}"
 
 TABLA DE EJERCICIOS POR GRUPO MUSCULAR:
 - pecho/pectoral: Press Banca, Press Inclinado, Aperturas con Mancuernas, Fondos en Paralelas
@@ -1823,11 +1824,14 @@ async def respuesta_recomendacion_llm(
                 f"Prioriza alternativas como: {', '.join(dict.fromkeys(_alternativas_seguras))}.\n"
             )
 
+        # Perfil del Random Forest: bloque ADICIONAL (tono y exigencia); los datos del cliente de arriba no cambian.
+        _bloque_rf_ej = bloque_perfil_rf(obtener_perfil_rf(perfil, db), "ejercicio")
         prompt = _PROMPT_RECOMENDACION_EJERCICIO.format(
             nombre=ctx.nombre,
             objetivo=ctx.objetivo_normalizado,
             condiciones=condiciones,
             contexto_lesion=_contexto_lesion,
+            bloque_perfil_rf=(_bloque_rf_ej + "\n") if _bloque_rf_ej else "",
             mensaje=mensaje,
         )
 
@@ -2479,6 +2483,8 @@ async def respuesta_recomendacion_llm(
         )
         + (f"{_knn_candidatos_txt.strip()}\n" if _knn_candidatos_txt else "")
         + (f"{_balance_meta_txt.strip()}\n" if _balance_meta_txt else "")
+        # Perfil del Random Forest: bloque ADICIONAL (tono y exigencia); las restricciones y datos de arriba no cambian.
+        + (f"\n{_bloque_rf_comida}\n" if (_bloque_rf_comida := bloque_perfil_rf(obtener_perfil_rf(perfil, db), "comida")) else "")
         + f'\n{perfil.first_name} dice: "{mensaje[:300]}"\n\n'
         f"NOMBRES: escribe cada plato con su nombre normal y conocido. PROHIBIDO agregar al nombre etiquetas "
         f"como 'sin lácteos', 'sin lactosa', 'sin gluten' o 'light' — cumple la restricción con los ingredientes, "
