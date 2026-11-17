@@ -19,7 +19,7 @@ import random
 from datetime import datetime, timedelta
 from app.core.firebase import auth as firebase_admin_auth
 from app.core.logging_config import get_logger
-from app.core.roles import es_staff, verificar_acceso_cliente
+from app.core.roles import es_staff, verificar_acceso_cliente, verificar_admin
 
 logger = get_logger("api.clientes")
 
@@ -828,7 +828,7 @@ def recalcular_dieta(
     return perfil_response
 
 
-@router.put("/{cliente_id}/cambiar-contrasena")
+@router.put("/{cliente_id}/cambiar-contrasena", dependencies=[Depends(limitar("cambiar_clave_cliente", 20, 3600))])
 def admin_cambiar_contrasena_cliente(
     cliente_id: int,
     nueva_contrasena: ChangePassword,
@@ -836,10 +836,10 @@ def admin_cambiar_contrasena_cliente(
     current_staff=Depends(get_current_staff),
 ):
     """
-    SOLO ADMIN/STAFF: Cambia la contraseña de un cliente.
+    STAFF: Cambia la contraseña de un cliente.
 
-    El personal del gimnasio (Admin, Coach, Nutricionista) puede cambiar
-    la contraseña de cualquier cliente registrado.
+    El administrador puede cambiar la de cualquier cliente; el nutricionista y el
+    entrenador, solo la de sus clientes asignados (403 en otro caso).
 
     Parámetros:
     - cliente_id: ID del cliente cuya contraseña se cambiará
@@ -863,6 +863,7 @@ def admin_cambiar_contrasena_cliente(
     cliente = db.query(Client).filter(Client.id == cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_staff, cliente)
 
     try:
         cliente.hashed_password = security.hash_password(nueva_contrasena.new_password)
@@ -881,7 +882,7 @@ def admin_cambiar_contrasena_cliente(
         raise HTTPException(status_code=500, detail="Error al cambiar la contraseña")
 
 
-@router.put("/usuario/{usuario_id}/cambiar-contrasena")
+@router.put("/usuario/{usuario_id}/cambiar-contrasena", dependencies=[Depends(limitar("cambiar_clave_staff", 20, 3600))])
 def admin_cambiar_contrasena_usuario(
     usuario_id: int,
     nueva_contrasena: ChangePassword,
@@ -906,6 +907,8 @@ def admin_cambiar_contrasena_usuario(
     }
     ```
     """
+
+    verificar_admin(current_staff)
 
     if nueva_contrasena.new_password != nueva_contrasena.confirm_password:
         raise HTTPException(status_code=400, detail="Las contraseñas no coinciden")

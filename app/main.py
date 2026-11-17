@@ -8,7 +8,7 @@ from app.core.database import engine, Base
 from app.core import log_masking
 from app.core import firebase
 
-from app.models import user, client, role, historial
+from app.models import user, client, role, historial, password_reset
 from app.api import api_router
 
 
@@ -43,6 +43,23 @@ with engine.connect() as connection:
         connection.execute(
             text("CREATE INDEX IF NOT EXISTS idx_chat_historial_client ON chat_historial(client_id, created_at DESC)")
         )
+        # workout_logs no tiene modelo ORM (se usa con SQL crudo): en una base nueva no existiría. Igual a scripts/schema_calofit.sql.
+        connection.execute(
+            text("""
+            CREATE TABLE IF NOT EXISTS workout_logs (
+                id SERIAL PRIMARY KEY,
+                client_id INTEGER NOT NULL REFERENCES clients(id),
+                ejercicio VARCHAR NOT NULL,
+                series INTEGER NOT NULL,
+                reps INTEGER NOT NULL,
+                peso_kg DOUBLE PRECISION,
+                created_at TIMESTAMP NOT NULL,
+                calorias_quemadas DOUBLE PRECISION,
+                session_duration_min DOUBLE PRECISION,
+                intensity VARCHAR(50)
+            )
+        """)
+        )
         connection.commit()
         print("Migraciones manuales aplicadas correctamente.")
     except Exception as e:
@@ -57,6 +74,7 @@ app = FastAPI(title="CaloFit - Gimnasio World Light API")
 async def _log_lentas(request, call_next):
     t0 = time.perf_counter()
     response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
     dt = time.perf_counter() - t0
     if dt > 1.0 and request.url.path != "/health":
         logging.getLogger("calofit.timing").warning("%s %s %.2fs", request.method, request.url.path, dt)

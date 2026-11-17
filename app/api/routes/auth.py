@@ -225,7 +225,7 @@ def get_current_staff(token: str = Depends(oauth2_scheme), db: Session = Depends
 from app.schemas.client import ChangePassword
 
 
-@router.post("/change-password")
+@router.post("/change-password", dependencies=[Depends(limitar("cambiar_clave", 10, 600))])
 def change_password(data: ChangePassword, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Actualiza la contraseña del usuario actual en BD local y Firebase.

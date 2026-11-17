@@ -554,6 +554,17 @@ class IAService:
                 return FALLBACK_MSG_RATE_LIMIT
             return f"[Error: {e}]"
 
+    def generar_sugerencia_entrenamiento(self, objetivo, dia_numero):
+        """Sugerencia de entrenamiento por día del plan (respaldo cuando el Coach está ocupado)."""
+        if dia_numero > 5:
+            return "Día de Recuperación: Realiza estiramientos activos y 20 min de caminata suave."
+        rutinas = {
+            "ganar": "Fuerza e Hipertrofia: Prioriza ejercicios multiarticulares (Sentadillas/Press). 4 series de 8-10 reps.",
+            "perder": "Gasto Calórico: Enfoque en circuitos o superseries con descansos cortos (30s) para maximizar la quema.",
+            "mantener": "Tonificación: Entrenamiento balanceado de fuerza y cardio moderado (Zona 2).",
+        }
+        return rutinas.get(objetivo, "Sigue las indicaciones generales del Coach.")
+
     async def recomendar_alimentos_con_groq(
         self,
         perfil_usuario: Dict,

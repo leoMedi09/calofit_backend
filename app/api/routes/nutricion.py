@@ -8,7 +8,8 @@ from typing import List, Optional, Any, Dict
 from app.api.routes.auth import get_current_staff, get_current_user
 from app.services.ia_service import ia_engine
 from app.core.logging_config import get_logger
-from app.core.roles import es_admin, es_nutricionista
+from app.core.roles import es_admin, es_nutricionista, verificar_acceso_cliente
+from app.models.client import Client
 
 logger = get_logger("api.nutricion")
 
@@ -46,6 +47,12 @@ def crear_plan_nutricional(
     if not (es_admin(current_user.role_name) or es_nutricionista(current_user.role_name)):
         raise HTTPException(status_code=403, detail="No autorizado")
 
+    # Un nutricionista solo crea planes para sus pacientes asignados (el admin, para cualquiera).
+    cliente = db.query(Client).filter(Client.id == plan_data.client_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    verificar_acceso_cliente(current_user, cliente)
+
     try:
         calorias_base = ia_engine.calcular_requerimiento(
             genero=plan_data.genero,
@@ -72,19 +79,6 @@ def crear_plan_nutricional(
 
         calorias_base = round(calorias_base, 2)
         print(f"Usando cálculo alternativo: {calorias_base} kcal")
-
-    perfil_usuario = {
-        "edad": plan_data.edad,
-        "genero": plan_data.genero,
-        "peso": plan_data.peso,
-        "talla": plan_data.talla,
-        "objetivo": plan_data.objetivo,
-        "nivel_actividad": plan_data.nivel_actividad,
-    }
-    try:
-        recomendacion_groq = ia_engine.recomendar_alimentos_con_groq(perfil_usuario)
-    except Exception as e:
-        recomendacion_groq = "Error al generar recomendación avanzada. Usa plan básico."
 
     nuevo_plan = PlanNutricional(
         client_id=plan_data.client_id,
