@@ -87,7 +87,34 @@ _RX_NO_REGISTRO = re.compile(
 )
 
 
-def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
+# «dame otra opción», «no me gusta, cámbialo», «algo diferente»: pedir un reemplazo de lo que el asistente acaba de recomendar.
+_RX_CAMBIAR_OPCION = re.compile(
+    r"\b(?:otr[oa]s?\s+(?:opcion(?:es)?|alternativas?|platos?|sugerencias?|recetas?|ideas?)"
+    r"|dame\s+otr[oa]s?|cambia(?:lo|la|los|las|me)?|cambiar(?:lo|la)?"
+    r"|no\s+me\s+gust\w*|no\s+quiero\s+(?:eso|esa|ese|esto)|algo\s+(?:diferente|distinto))\b"
+)
+
+
+def modo_por_cambio_de_opcion(mensaje: str, historial: Optional[list]) -> Optional[str]:
+    """RECOMENDAR_NUTRICION / RECOMENDAR_EJERCICIO si el mensaje pide cambiar la última recomendación del asistente.
+
+    Solo aplica si el último turno del asistente fue una recomendación (con kcal o con series/reps); sin esa
+    condición «cámbialo» o «no me gusta» no dicen sobre qué.
+    """
+    import unicodedata
+
+    m = "".join(c for c in unicodedata.normalize("NFD", (mensaje or "").lower()) if unicodedata.category(c) != "Mn")
+    if not _RX_CAMBIAR_OPCION.search(m):
+        return None
+    ultimo = next((str(h.get("content", "")).lower() for h in reversed(historial or []) if h.get("role") == "assistant"), "")
+    if "kcal" in ultimo:
+        return RECOMENDAR_NUTRICION
+    if any(k in ultimo for k in ("series", "reps", "repeticiones")):
+        return RECOMENDAR_EJERCICIO
+    return None
+
+
+def detectar_modo_funcion(mensaje: str, es_saludo: bool, historial: Optional[list] = None) -> str:
     """
     Elige una de las 4 funciones o OTRO. Prioriza registro sobre recomendación si hay señales claras.
     """
@@ -99,6 +126,10 @@ def detectar_modo_funcion(mensaje: str, es_saludo: bool) -> str:
 
     if any(m.startswith(v) for v in _VERBOS_IMPERATIVOS_REGISTRO):
         return REGISTRAR_NUTRICION
+
+    cambio = modo_por_cambio_de_opcion(mensaje, historial)
+    if cambio:
+        return cambio
 
     if _RX_ACTIVIDAD_CON_DURACION.search(m) and "?" not in m and not _RX_NO_REGISTRO.search(m):
         return REGISTRAR_EJERCICIO
@@ -624,6 +655,9 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
     if _tiene_consumo and "?" not in _m:
         return REGISTRAR_NUTRICION
 
+    cambio = modo_por_cambio_de_opcion(mensaje, historial)
+    if cambio:
+        return cambio
 
     try:
         modo_ia = await ia.clasificar_modo_asistente(mensaje, historial=historial)
@@ -631,4 +665,4 @@ async def resolver_modo_funcion(ia: Any, mensaje: str, es_saludo: bool, historia
             return modo_ia
     except Exception:
         pass
-    return detectar_modo_funcion(mensaje, False)
+    return detectar_modo_funcion(mensaje, False, historial)

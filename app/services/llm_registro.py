@@ -808,8 +808,11 @@ async def registrar_comida_llm(
     ia_engine,
     historial: list = None,
     ctx: Optional[UserContext] = None,
+    fecha=None,
 ) -> dict:
-    """Registra comida con macros estimados por LLM. Sin lookup de BD."""
+    """Registra comida con macros estimados por LLM. Sin lookup de BD.
+
+    ``fecha``: día pasado (ayer/anteayer) al que se asigna el registro; None = hoy."""
     ctx = _asegurar_contexto(perfil, plan_hoy=plan_hoy, ctx=ctx)
     _mensaje_low_cache0 = (mensaje or "").lower()
     _tiene_varios_alimentos = (
@@ -857,7 +860,7 @@ async def registrar_comida_llm(
         from app.core.utils import get_peru_date as _get_hoy_correccion
         from app.models.comida_registro import ComidaRegistro as _CRCorreccion
 
-        _hoy_correccion = _get_hoy_correccion()
+        _hoy_correccion = fecha or _get_hoy_correccion()
         _ultimo_cr = (
             db.query(_CRCorreccion)
             .filter(_CRCorreccion.client_id == perfil.id, _CRCorreccion.fecha == _hoy_correccion)
@@ -1287,7 +1290,8 @@ async def registrar_comida_llm(
     from app.core.fuente_alimentos import contrastar as contrastar_con_tablas, texto_fuente as texto_fuente_alimentos
     from app.core.utils import get_peru_date
 
-    hoy = get_peru_date()
+    hoy = fecha or get_peru_date()
+    es_retroactivo = fecha is not None
     prog = _get_or_create_progreso(db, perfil.id, hoy, plan_hoy)
 
     if _filas_previas_correccion:
@@ -1435,9 +1439,10 @@ async def registrar_comida_llm(
 
     restante = max(0.0, meta - consumido + quemado)
 
-    from app.core.notification_scheduler import notificar_si_excede_meta
+    if not es_retroactivo:  # el aviso push de exceso es del día de hoy
+        from app.core.notification_scheduler import notificar_si_excede_meta
 
-    notificar_si_excede_meta(perfil, prog, meta, quemado=quemado)
+        notificar_si_excede_meta(perfil, prog, meta, quemado=quemado)
     db.commit()
 
     _es_vegano_ctx = any("vegano" in c.lower() for c in ctx.condiciones_medicas)
@@ -1467,9 +1472,19 @@ async def registrar_comida_llm(
             "restante": round(restante, 1),
             "quemado": round(quemado, 1),
         },
+        "es_retroactivo": es_retroactivo,
         "mensaje": (
-            f"✅ Registré: {nombres_str} — {round(kcal)} kcal. "
-            f"Llevas {round(consumido)} de {round(meta)} kcal hoy."
+            (
+                (
+                    f"✅ Registré para el {hoy.strftime('%d/%m')}: {nombres_str} — {round(kcal)} kcal. "
+                    f"Ese día llevas {round(consumido)} de {round(meta)} kcal."
+                )
+                if es_retroactivo
+                else (
+                    f"✅ Registré: {nombres_str} — {round(kcal)} kcal. "
+                    f"Llevas {round(consumido)} de {round(meta)} kcal hoy."
+                )
+            )
             + (f"\n\n{advertencia_cantidad}" if advertencia_cantidad else "")
             + (f"\n\n{advertencia_momento}" if advertencia_momento else "")
         ),
@@ -1483,8 +1498,11 @@ async def registrar_ejercicio_llm(
     db: Session,
     ia_engine,
     historial: list = None,
+    fecha=None,
 ) -> dict:
-    """Registra UNO O VARIOS ejercicios del mensaje con kcal por LLM."""
+    """Registra UNO O VARIOS ejercicios del mensaje con kcal por LLM.
+
+    ``fecha``: día pasado (ayer/anteayer) al que se asigna el registro; None = hoy."""
     peso_kg = float(getattr(perfil, "weight", 70) or 70)
     prompt = _PROMPT_EJERCICIO.format(mensaje=mensaje, peso_kg=peso_kg)
     _max = 600 if len(mensaje.split()) > 15 else 300
@@ -1535,7 +1553,13 @@ async def registrar_ejercicio_llm(
     from app.core.utils import get_peru_date
     from app.models.historial import ProgresoCalorias
 
-    hoy = get_peru_date()
+    from datetime import datetime, time as dtime
+
+    hoy = fecha or get_peru_date()
+    es_retroactivo = fecha is not None
+    # workout_logs.created_at se guarda en UTC: las 17:00 UTC son las 12:00 de Lima del día pedido.
+    _ts_retro = datetime.combine(fecha, dtime(17, 0)) if es_retroactivo else None
+    _created_sql = ":ts" if es_retroactivo else "NOW()"
 
     _m_dur_total = re.search(
         r"(\d+(?:[.,]\d+)?)\s*minutos?\s*(?:en\s+total)\b"
@@ -1595,25 +1619,28 @@ async def registrar_ejercicio_llm(
         datos["duracion_min"] = duracion
 
         try:
+            _params_wl = {
+                "cid": perfil.id,
+                "nombre": nombre,
+                "series": int(series) if series else 0,
+                "reps": int(reps) if reps else 0,
+                "peso": float(peso_ej) if peso_ej else None,
+                "kcal": round(kcal, 1),
+                "intensity": intensidad,
+                "sdm": round(duracion, 1),
+            }
+            if es_retroactivo:
+                _params_wl["ts"] = _ts_retro
             db.execute(
-                text("""
+                text(f"""
                 INSERT INTO workout_logs
                     (client_id, ejercicio, series, reps,
                      peso_kg, calorias_quemadas, intensity, session_duration_min, created_at)
                 VALUES
                     (:cid, :nombre, :series, :reps,
-                     :peso, :kcal, :intensity, :sdm, NOW())
+                     :peso, :kcal, :intensity, :sdm, {_created_sql})
             """),
-                {
-                    "cid": perfil.id,
-                    "nombre": nombre,
-                    "series": int(series) if series else 0,
-                    "reps": int(reps) if reps else 0,
-                    "peso": float(peso_ej) if peso_ej else None,
-                    "kcal": round(kcal, 1),
-                    "intensity": intensidad,
-                    "sdm": round(duracion, 1),
-                },
+                _params_wl,
             )
             kcal_total += kcal
             detalle = f"{series}×{reps}" if series and reps else f"{int(duracion)}min"
@@ -1642,14 +1669,15 @@ async def registrar_ejercicio_llm(
 
     quemado_total = round(float(prog.calorias_quemadas if prog else kcal_total), 1)
 
+    _para = f" para el {hoy.strftime('%d/%m')}" if es_retroactivo else ""
     if len(ejercicios_guardados) == 1:
         ex = ejercicios_guardados[0]
-        msg = f"✅ Registré: {ex['nombre']} | {ex['detalle']} — {round(ex['kcal'])} kcal quemadas."
+        msg = f"✅ Registré{_para}: {ex['nombre']} | {ex['detalle']} — {round(ex['kcal'])} kcal quemadas."
         nombre_pill = ex["nombre"]
         detalle_pill = ex["detalle"]
     else:
         nombres = " + ".join(e["nombre"] for e in ejercicios_guardados)
-        msg = f"✅ Registré {len(ejercicios_guardados)} ejercicios ({nombres}) — {round(kcal_total)} kcal totales."
+        msg = f"✅ Registré{_para} {len(ejercicios_guardados)} ejercicios ({nombres}) — {round(kcal_total)} kcal totales."
         nombre_pill = nombres
         detalle_pill = f"{len(ejercicios_guardados)} ejercicios"
 
@@ -1689,6 +1717,7 @@ async def registrar_ejercicio_llm(
             ],
         },
         "balance_actualizado": {"quemado": quemado_total},
+        "es_retroactivo": es_retroactivo,
         "mensaje": msg,
     }
 
@@ -1946,6 +1975,17 @@ async def respuesta_recomendacion_llm(
         momento_reco = "CENA" if 18 <= _hora_noche <= 21 else "MERIENDA"
     elif not momento_reco and "madrugada" in _msg_low_reco:
         momento_reco = "MERIENDA"
+
+    # «dame otra opción» sin decir el momento: se mantiene el de la recomendación anterior, no el de la hora.
+    if not momento_reco and historial:
+        from app.services.asistente.asistente_modos import _RX_CAMBIAR_OPCION
+
+        if _RX_CAMBIAR_OPCION.search(_msg_low_reco):
+            _ultimo_asist = next((str(h.get("content", "")).lower() for h in reversed(historial) if h.get("role") == "assistant"), "")
+            for _m_key, _kws in _MOMENTO_KEYWORDS_RECO.items():
+                if any(kw in _ultimo_asist for kw in _kws):
+                    momento_reco = _m_key
+                    break
 
     if not momento_reco:
         _hora = _get_peru_now_reco().hour
@@ -2248,6 +2288,13 @@ async def respuesta_recomendacion_llm(
         r"(?=\s+(?:hoy|ahora|por\s+favor)\b|[.,?]|$)",
         _msg_low_reco,
     )
+    if not _neg_match:
+        # «no me gusta el pollo» (sin pronombres como «eso»/«nada»): mismo efecto que «no quiero pollo».
+        _neg_match = _re_reco.search(
+            r"\bno\s+me\s+gust(?:a|an)\s+(?:(?:el|la|los|las)\s+)?(?!eso\b|esa\b|ese\b|esto\b|nada\b|ninguna?\b)"
+            r"([a-záéíóúüñ]+)",
+            _msg_low_reco,
+        )
     exclusion_reco = ""
     _tokens_exclusion_msg: set[str] = set()
     if _neg_match:
@@ -2606,6 +2653,24 @@ async def respuesta_recomendacion_llm(
             )
             respuesta_llm_reco = await _llamar_groq_con_excepciones(ia_engine, _prompt_retry, max_tokens=250, temp=0.3)
             _texto_usuario, _platos_data = _extraer_texto_y_platos(respuesta_llm_reco)
+
+        # El modelo a veces ignora «No repetir»: si devolvió platos ya sugeridos (48 h o esta conversación), un reintento
+        # con la lista explícita; se queda con la respuesta que repita menos.
+        _vistos_norm = {_normalizar_nombre(v) for v in _ya_vistos if v and v.strip()}
+        _repetidos = [p[0] for p in _platos_data if _normalizar_nombre(p[0]) in _vistos_norm]
+        if _repetidos:
+            logger.info("[Reco] Platos repetidos %s — reintentando", _repetidos)
+            _resp_sin_rep = await _llamar_groq_con_excepciones(
+                ia_engine,
+                _prompt_reco_comida + f"\n\n⛔ PROHIBIDO repetir estos platos (ya se sugirieron): {', '.join(_repetidos)}. "
+                "Propón 3 platos DISTINTOS, también distintos entre sí.",
+                max_tokens=250,
+                temp=0.7,
+            )
+            _texto_2, _platos_2 = _extraer_texto_y_platos(_resp_sin_rep)
+            _rep_2 = [p for p in _platos_2 if _normalizar_nombre(p[0]) in _vistos_norm]
+            if _platos_2 and len(_rep_2) < len(_repetidos) and not any(_linea_viola_dieta(l) for l in _texto_2.split("\n")):
+                _texto_usuario, _platos_data = _texto_2, _platos_2
 
         # Sin línea PLATOS: ni viñetas (p. ej. JSON roto): no se muestra el texto del modelo, se usa el fallback.
         if not _platos_data and not re.search(r"(?m)^\s*(?:[-•*]|\d+[.)])\s+\S", _texto_usuario):

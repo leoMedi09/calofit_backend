@@ -28,7 +28,7 @@ async def _prompts(perfil, db, modo, mensaje, rf):
 
 
 def _con_marca(prompts):
-    return [p for p in prompts if MARCA in p]
+    return [p for p in prompts if MARCA in p and "PROHIBIDO repetir" not in p]  # sin el reintento por platos repetidos
 
 
 @pytest.fixture
