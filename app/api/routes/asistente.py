@@ -21,6 +21,7 @@ from app.services.asistente.asistente_service import asistente_service
 from app.models.historial import SugerenciaGuardada
 from app.models.client import Client
 from app.core.logging_config import get_logger
+from app.core.rate_limit import limitar
 
 logger = get_logger("api.asistente")
 
@@ -33,6 +34,7 @@ class ChatRequest(BaseModel):
     contexto_manual: str = None
     override_ia: str = None
     consulta_id: str = None
+    fecha: str = None  # YYYY-MM-DD: día elegido en el calendario del Balance (None = hoy)
 
 
 class RegistroManualAlimentoRequest(BaseModel):
@@ -130,7 +132,7 @@ def _guardar_turno_bd(client_id: int, mensaje_user: str, texto_asistente: str, d
         db.rollback()
 
 
-@router.post("/consultar")
+@router.post("/consultar", dependencies=[Depends(limitar("asistente", 60, 60))])
 async def consultar_asistente(
     request: ChatRequest,
     db: Session = Depends(get_db),
@@ -151,6 +153,7 @@ async def consultar_asistente(
             contexto_manual=request.contexto_manual,
             override_ia=request.override_ia,
             consulta_id=request.consulta_id,
+            fecha=request.fecha,
         )
 
         if cliente and not resultado.get("_blocked"):

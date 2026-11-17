@@ -426,6 +426,16 @@ class AsistenteService:
     def __init__(self):
         self.ia = ia_engine
 
+    @staticmethod
+    def _fecha_del_registro(mensaje: str, fecha_calendario=None):
+        """(fecha_pasada|None, mensaje_limpio). El día elegido en el calendario del Balance manda; si no hay, se buscan las
+        palabras «ayer», «anteayer», «anoche» en el mensaje."""
+        from app.core.fecha_retroactiva import extraer_fecha_retroactiva
+
+        if fecha_calendario:
+            return fecha_calendario, mensaje
+        return extraer_fecha_retroactiva(mensaje)
+
     async def consultar(
         self,
         mensaje: str,
@@ -435,6 +445,7 @@ class AsistenteService:
         contexto_manual: str = None,
         override_ia: str = None,
         consulta_id: str = None,
+        fecha: str = None,
     ):
         perfil = db.query(Client).filter(Client.email.ilike(current_user.email)).first()
         if not perfil:
@@ -492,6 +503,15 @@ class AsistenteService:
         from app.core.user_context import UserContext
 
         ctx = UserContext.build(perfil, consumo_real, quemadas_real, plan_hoy_data)
+
+        # Día elegido en el calendario del Balance (None = hoy). Fecha futura o de más de 7 días: no se registra nada.
+        from app.core.fecha_retroactiva import validar_fecha
+
+        fecha_calendario, _err_fecha_cal = validar_fecha(fecha, hoy)
+        if _err_fecha_cal:
+            return _build_response(
+                perfil, "INFO", "OTRO", calorias_meta, consumo_real, quemadas_real, plan_hoy_data, _err_fecha_cal
+            )
 
         alerta_fuzzy = self.ia.generar_alerta_fuzzy(adherencia_pct, progreso_pct)
         mensaje_fuzzy = alerta_fuzzy.get("mensaje", "")
@@ -653,6 +673,20 @@ class AsistenteService:
 
         modo_funcion = await resolver_modo_funcion(self.ia, mensaje, es_saludo, historial=historial)
 
+        if fecha_calendario and modo_funcion not in (REGISTRAR_NUTRICION, REGISTRAR_EJERCICIO):
+            # recomendaciones y consultas usan el balance de HOY: en un día anterior el chat solo registra
+            return _build_response(
+                perfil,
+                "INFO",
+                "OTRO",
+                calorias_meta,
+                consumo_real,
+                quemadas_real,
+                plan_hoy_data,
+                f"Estás en el {fecha_calendario.strftime('%d/%m')}: en un día anterior solo puedo registrar comidas y "
+                f"ejercicio. Vuelve a hoy desde el calendario del Balance para recomendaciones o consultas.",
+            )
+
         if modo_funcion == REGISTRAR_NUTRICION:
             _solo_verbo = (
                 bool(
@@ -676,13 +710,27 @@ class AsistenteService:
                 )
             from app.services.llm_registro import registrar_comida_llm
 
-            _com = await registrar_comida_llm(mensaje, perfil, plan_hoy_data, db, self.ia, ctx=ctx)
+            # día del calendario del Balance, o «ayer/anteayer/anoche» escritos en el mensaje; si no, hoy
+            _fecha_retro, _msg_reg = self._fecha_del_registro(mensaje, fecha_calendario)
+            _com = await registrar_comida_llm(
+                _msg_reg, perfil, plan_hoy_data, db, self.ia, ctx=ctx, fecha=_fecha_retro
+            )
             if not _com.get("success") and RX_CORREGIR_REGISTRO.search(msg_limpio) and historial:
                 _turnos_usuario_prev = [h.get("content", "") for h in historial if h.get("role") == "user"]
                 if _turnos_usuario_prev:
-                    _mensaje_combinado = f"{_turnos_usuario_prev[-1]} {mensaje}"
-                    _com = await registrar_comida_llm(_mensaje_combinado, perfil, plan_hoy_data, db, self.ia, ctx=ctx)
+                    _mensaje_combinado = f"{_turnos_usuario_prev[-1]} {_msg_reg}"
+                    _com = await registrar_comida_llm(
+                        _mensaje_combinado, perfil, plan_hoy_data, db, self.ia, ctx=ctx, fecha=_fecha_retro
+                    )
             _bal = _com.get("balance_actualizado", {})
+            if _com.get("es_retroactivo"):
+                # el balance que ve la app es el de HOY: un registro de ayer no debe modificarlo
+                _bal = {
+                    "consumido": round(consumo_real, 1),
+                    "meta": round(calorias_meta, 1),
+                    "restante": round(max(0.0, calorias_meta - consumo_real + quemadas_real), 1),
+                    "quemado": round(quemadas_real, 1),
+                }
             return {
                 "asistente": "CaloFit IA",
                 "usuario": perfil.first_name,
@@ -716,7 +764,8 @@ class AsistenteService:
         if modo_funcion == REGISTRAR_EJERCICIO:
             from app.services.llm_registro import registrar_ejercicio_llm
 
-            _ej = await registrar_ejercicio_llm(mensaje, perfil, db, self.ia, historial=historial)
+            _fecha_retro_e, _msg_reg_e = self._fecha_del_registro(mensaje, fecha_calendario)
+            _ej = await registrar_ejercicio_llm(_msg_reg_e, perfil, db, self.ia, historial=historial, fecha=_fecha_retro_e)
             _bal_ej = _ej.get("balance_actualizado", {})
             _hoy_e = get_peru_date()
             _p_e = (
@@ -756,6 +805,9 @@ class AsistenteService:
                     ).scalar()
                     or 0
                 )
+
+            if _ej.get("es_retroactivo"):
+                _bal_ej = {"quemado": round(_q_e, 1)}  # la app muestra el balance de HOY, no el del día registrado
 
             return {
                 "asistente": "CaloFit IA",
