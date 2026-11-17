@@ -154,17 +154,16 @@ def obtener_balance_hoy(
     dialect = getattr(getattr(db, "bind", None), "dialect", None)
     dialect_name = getattr(dialect, "name", "") or ""
 
-    if dialect_name == "postgresql":
-        registros_hoy = (
-            db.query(ComidaRegistro)
-            .filter(
-                ComidaRegistro.client_id == cliente.id,
-                func.date(func.timezone("America/Lima", func.timezone("UTC", ComidaRegistro.created_at))) == hoy,
-            )
-            .order_by(ComidaRegistro.created_at.desc())
-            .all()
-        )
+    # La lista de comidas es del DÍA al que pertenece el registro (`fecha`), igual que los totales de progreso_calorias.
+    # Antes se filtraba por la hora real de creación: un registro de un día anterior no aparecía en su día (y sí en hoy).
+    registros_hoy = (
+        db.query(ComidaRegistro)
+        .filter(ComidaRegistro.client_id == cliente.id, ComidaRegistro.fecha == hoy)
+        .order_by(ComidaRegistro.created_at.desc())
+        .all()
+    )
 
+    if dialect_name == "postgresql":
         ejercicios_hoy_rows = db.execute(
             _text(
                 "SELECT id, ejercicio, series, reps, peso_kg, calorias_quemadas, session_duration_min, intensity, "
@@ -177,16 +176,6 @@ def obtener_balance_hoy(
             {"cid": cliente.id, "hoy": hoy},
         ).fetchall()
     else:
-        registros_hoy = (
-            db.query(ComidaRegistro)
-            .filter(
-                ComidaRegistro.client_id == cliente.id,
-                ComidaRegistro.fecha == hoy,
-            )
-            .order_by(ComidaRegistro.created_at.desc())
-            .all()
-        )
-
         ejercicios_hoy_rows = db.execute(
             _text(
                 "SELECT id, ejercicio, series, reps, peso_kg, calorias_quemadas, session_duration_min, intensity, created_at AS hora_lima "

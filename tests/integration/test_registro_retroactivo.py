@@ -187,3 +187,28 @@ async def test_chat_sin_fecha_valida_o_con_basura_registra_hoy(db, sample_client
 async def test_chat_con_fecha_de_hoy_del_calendario_es_registro_normal(db, sample_client, llm_comida):
     r = await _consultar(db, sample_client, "comí lomo saltado", get_peru_date().isoformat())
     assert "kcal hoy" in r["respuesta_ia"] and _filas(db, sample_client) == [get_peru_date()]
+
+
+# --- el Balance muestra la lista de comidas/ejercicios en el DÍA al que pertenecen -----------------------------------------
+from app.api.routes.balance import obtener_balance_hoy  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_balance_lista_la_comida_de_ayer_en_ayer_y_no_en_hoy(db, sample_client, llm_comida):
+    hoy = get_peru_date()
+    ayer = hoy - timedelta(days=1)
+    await registrar_comida_llm("comí lomo saltado", sample_client, PLAN, db, ia_engine, fecha=ayer)
+
+    b_ayer = obtener_balance_hoy(fecha=ayer.isoformat(), db=db, current_user=sample_client)
+    b_hoy = obtener_balance_hoy(fecha=None, db=db, current_user=sample_client)
+
+    assert [a["nombre"] for a in b_ayer["alimentos_registrados"]] == ["Lomo saltado"]
+    assert b_ayer["resumen"]["calorias_consumidas"] > 0  # la lista y el total son del mismo día
+    assert b_hoy["alimentos_registrados"] == [] and b_hoy["resumen"]["calorias_consumidas"] == 0
+
+
+@pytest.mark.asyncio
+async def test_balance_lista_la_comida_de_hoy_en_hoy(db, sample_client, llm_comida):
+    await registrar_comida_llm("comí lomo saltado", sample_client, PLAN, db, ia_engine)
+    b = obtener_balance_hoy(fecha=None, db=db, current_user=sample_client)
+    assert [a["nombre"] for a in b["alimentos_registrados"]] == ["Lomo saltado"]
